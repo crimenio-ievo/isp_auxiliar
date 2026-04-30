@@ -90,6 +90,19 @@ final class LocalRepository
         return $settings;
     }
 
+    public function providerSetting(string $key, string $default = ''): string
+    {
+        $key = trim($key);
+
+        if ($key === '') {
+            return $default;
+        }
+
+        $settings = $this->providerSettings();
+
+        return (string) ($settings[$key] ?? $default);
+    }
+
     public function saveProviderSettings(array $settings): void
     {
         $providerId = $this->currentProviderId();
@@ -285,6 +298,152 @@ final class LocalRepository
         return $this->database->lastInsertId();
     }
 
+    public function upsertClientRegistrationByRadiusToken(array $data): ?int
+    {
+        $providerId = $this->currentProviderId();
+        $radiusToken = trim((string) ($data['radius_token'] ?? ''));
+
+        if ($providerId === null || !$this->isAvailable() || $radiusToken === '') {
+            return null;
+        }
+
+        $existing = $this->findClientRegistrationByRadiusToken($radiusToken);
+
+        if (is_array($existing) && isset($existing['id'])) {
+            $this->database->execute(
+                'UPDATE client_registrations
+                 SET mkauth_uuid = :mkauth_uuid,
+                     mkauth_login = :mkauth_login,
+                     client_name = :client_name,
+                     cpf_cnpj = :cpf_cnpj,
+                     plan_name = :plan_name,
+                     status = :status,
+                     evidence_ref = :evidence_ref,
+                     evidence_url = :evidence_url,
+                     created_by_user_id = :created_by_user_id,
+                     created_by_login = :created_by_login,
+                     updated_at = NOW()
+                 WHERE provider_id = :provider_id AND radius_token = :radius_token',
+                [
+                    'provider_id' => $providerId,
+                    'radius_token' => $radiusToken,
+                    'mkauth_uuid' => (string) ($data['mkauth_uuid'] ?? ''),
+                    'mkauth_login' => (string) ($data['mkauth_login'] ?? ''),
+                    'client_name' => (string) ($data['client_name'] ?? ''),
+                    'cpf_cnpj' => (string) ($data['cpf_cnpj'] ?? ''),
+                    'plan_name' => (string) ($data['plan_name'] ?? ''),
+                    'status' => (string) ($data['status'] ?? 'awaiting_connection'),
+                    'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
+                    'evidence_url' => (string) ($data['evidence_url'] ?? ''),
+                    'created_by_user_id' => $data['created_by_user_id'] ?? null,
+                    'created_by_login' => (string) ($data['created_by_login'] ?? ''),
+                ]
+            );
+
+            return (int) $existing['id'];
+        }
+
+        $this->database->execute(
+            'INSERT INTO client_registrations
+                (provider_id, mkauth_uuid, mkauth_login, client_name, cpf_cnpj, plan_name, status, evidence_ref, evidence_url, radius_token, created_by_user_id, created_by_login, created_at, updated_at)
+             VALUES
+                (:provider_id, :mkauth_uuid, :mkauth_login, :client_name, :cpf_cnpj, :plan_name, :status, :evidence_ref, :evidence_url, :radius_token, :created_by_user_id, :created_by_login, NOW(), NOW())',
+            [
+                'provider_id' => $providerId,
+                'mkauth_uuid' => (string) ($data['mkauth_uuid'] ?? ''),
+                'mkauth_login' => (string) ($data['mkauth_login'] ?? ''),
+                'client_name' => (string) ($data['client_name'] ?? ''),
+                'cpf_cnpj' => (string) ($data['cpf_cnpj'] ?? ''),
+                'plan_name' => (string) ($data['plan_name'] ?? ''),
+                'status' => (string) ($data['status'] ?? 'awaiting_connection'),
+                'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
+                'evidence_url' => (string) ($data['evidence_url'] ?? ''),
+                'radius_token' => $radiusToken,
+                'created_by_user_id' => $data['created_by_user_id'] ?? null,
+                'created_by_login' => (string) ($data['created_by_login'] ?? ''),
+            ]
+        );
+
+        return $this->database->lastInsertId();
+    }
+
+    public function findClientRegistrationByRadiusToken(string $token): ?array
+    {
+        $providerId = $this->currentProviderId();
+        $token = trim($token);
+
+        if ($providerId === null || !$this->isAvailable() || $token === '') {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT *
+             FROM client_registrations
+             WHERE provider_id = :provider_id AND radius_token = :radius_token
+             LIMIT 1',
+            [
+                'provider_id' => $providerId,
+                'radius_token' => $token,
+            ]
+        );
+    }
+
+    public function deleteClientRegistrationByRadiusToken(string $token): void
+    {
+        $providerId = $this->currentProviderId();
+        $token = trim($token);
+
+        if ($providerId === null || !$this->isAvailable() || $token === '') {
+            return;
+        }
+
+        $this->database->execute(
+            'DELETE FROM client_registrations
+             WHERE provider_id = :provider_id AND radius_token = :radius_token',
+            [
+                'provider_id' => $providerId,
+                'radius_token' => $token,
+            ]
+        );
+    }
+
+    public function deleteEvidenceFilesByRegistrationId(?int $registrationId): void
+    {
+        $providerId = $this->currentProviderId();
+
+        if ($providerId === null || !$this->isAvailable() || $registrationId === null) {
+            return;
+        }
+
+        $this->database->execute(
+            'DELETE FROM evidence_files
+             WHERE provider_id = :provider_id AND registration_id = :registration_id',
+            [
+                'provider_id' => $providerId,
+                'registration_id' => $registrationId,
+            ]
+        );
+    }
+
+    public function deleteInstallationCheckpointByToken(string $token): void
+    {
+        $providerId = $this->currentProviderId();
+        $token = trim($token);
+
+        if ($providerId === null || !$this->isAvailable() || $token === '') {
+            return;
+        }
+
+        $this->database->execute(
+            'DELETE FROM installation_checkpoints
+             WHERE provider_id = :provider_id AND token = :token',
+            [
+                'provider_id' => $providerId,
+                'token' => $token,
+            ]
+        );
+    }
+
     public function registerEvidenceFiles(?int $registrationId, string $evidenceRef, string $folder): void
     {
         $providerId = $this->currentProviderId();
@@ -331,18 +490,83 @@ final class LocalRepository
                 (provider_id, registration_id, token, mkauth_login, status, payload_json, created_at, updated_at)
              VALUES
                 (:provider_id, :registration_id, :token, :mkauth_login, :status, :payload_json, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE status = VALUES(status), payload_json = VALUES(payload_json), updated_at = NOW()',
+             ON DUPLICATE KEY UPDATE registration_id = VALUES(registration_id), mkauth_login = VALUES(mkauth_login), status = VALUES(status), payload_json = VALUES(payload_json), updated_at = NOW()',
             [
                 'provider_id' => $providerId,
                 'registration_id' => $registrationId,
                 'token' => $token,
                 'mkauth_login' => (string) ($record['login'] ?? ''),
-                'status' => (string) ($record['status'] ?? 'awaiting_connection'),
-                'payload_json' => json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            ]
-        );
+            'status' => (string) ($record['status'] ?? 'awaiting_connection'),
+            'payload_json' => json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]
+    );
 
         return $this->database->lastInsertId();
+    }
+
+    public function findLatestInstallationCheckpointByLogin(string $login): ?array
+    {
+        $providerId = $this->currentProviderId();
+        $login = trim($login);
+
+        if ($providerId === null || !$this->isAvailable() || $login === '') {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT *
+             FROM installation_checkpoints
+             WHERE provider_id = :provider_id AND LOWER(mkauth_login) = LOWER(:login)
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1',
+            [
+                'provider_id' => $providerId,
+                'login' => $login,
+            ]
+        );
+    }
+
+    public function findInstallationCheckpointByToken(string $token): ?array
+    {
+        $providerId = $this->currentProviderId();
+        $token = trim($token);
+
+        if ($providerId === null || !$this->isAvailable() || $token === '') {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT *
+             FROM installation_checkpoints
+             WHERE provider_id = :provider_id AND token = :token
+             LIMIT 1',
+            [
+                'provider_id' => $providerId,
+                'token' => $token,
+            ]
+        );
+    }
+
+    public function findLatestClientRegistrationByLogin(string $login): ?array
+    {
+        $providerId = $this->currentProviderId();
+        $login = trim($login);
+
+        if ($providerId === null || !$this->isAvailable() || $login === '') {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT *
+             FROM client_registrations
+             WHERE provider_id = :provider_id AND LOWER(mkauth_login) = LOWER(:login)
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1',
+            [
+                'provider_id' => $providerId,
+                'login' => $login,
+            ]
+        );
     }
 
     public function updateInstallationCheckpoint(string $token, array $record): void

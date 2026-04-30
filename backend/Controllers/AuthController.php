@@ -72,13 +72,14 @@ final class AuthController
         }
 
         if ($localUser !== null) {
+            $localRole = (string) ($localUser['role'] ?? 'manager');
             $_SESSION['user'] = [
                 'id' => (int) $localUser['id'],
                 'provider_id' => $localUser['provider_id'] ?? null,
                 'name' => (string) ($localUser['name'] ?? ucfirst($username)),
                 'login' => (string) ($localUser['login'] ?? $username),
                 'email' => (string) ($localUser['email'] ?? ''),
-                'role' => (string) ($localUser['role'] ?? 'manager'),
+                'role' => $localRole,
                 'source' => 'local',
             ];
 
@@ -113,12 +114,17 @@ final class AuthController
                 return Response::redirect('/login?error=password');
             }
 
+            $managerLogin = strtolower(trim($this->localRepository->providerSetting('mkauth_manager_login', '')));
+            $remoteLogin = strtolower(trim((string) ($remoteUser['login'] ?? $username)));
+            $isManager = $managerLogin !== '' && $remoteLogin !== '' && $managerLogin === $remoteLogin;
+
             $_SESSION['user'] = [
                 'name' => (string) ($remoteUser['nome'] ?? ucfirst($username)),
                 'login' => (string) ($remoteUser['login'] ?? $username),
-                'role' => 'technician',
+                'role' => $isManager ? 'manager' : 'technician',
                 'mkauth_level' => (string) ($remoteUser['nivel'] ?? 'Operador'),
                 'source' => 'mkauth',
+                'can_manage' => $isManager,
                 'uuid' => (string) ($remoteUser['uuid_acesso'] ?? $remoteUser['uuid'] ?? ''),
             ];
 
@@ -199,10 +205,15 @@ final class AuthController
             ], 503);
         }
 
+        $managerLogin = strtolower(trim($this->localRepository->providerSetting('mkauth_manager_login', '')));
+        $remoteLogin = strtolower(trim((string) ($remoteUser['login'] ?? $login)));
+
         return Response::json([
             'status' => 'success',
             'exists' => $remoteUser !== null,
-            'message' => $remoteUser !== null ? 'Usuario encontrado no MkAuth.' : 'Usuario nao encontrado no MkAuth.',
+            'message' => $remoteUser !== null
+                ? ($managerLogin !== '' && $managerLogin === $remoteLogin ? 'Gestor encontrado no MkAuth.' : 'Usuario encontrado no MkAuth.')
+                : 'Usuario nao encontrado no MkAuth.',
         ]);
     }
 }

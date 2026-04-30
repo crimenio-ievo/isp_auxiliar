@@ -33,8 +33,32 @@ final class ClientController
     public function create(Request $request): Response
     {
         $cities = $this->loadCities();
+        $draftId = trim((string) $request->query('draft', ''));
+        $checkpointToken = trim((string) $request->query('token', ''));
         $formData = $this->loadFormDraft();
+        $draftMedia = [];
+
+        if ($draftId !== '') {
+            $draftRecord = $this->loadDraftRecord($draftId);
+
+            if (is_array($draftRecord)) {
+                $formData = is_array($draftRecord['data'] ?? null) ? $draftRecord['data'] : $formData;
+                $draftMedia = is_array($draftRecord['media'] ?? null) ? $draftRecord['media'] : [];
+                $checkpointToken = trim((string) ($draftRecord['checkpoint_token'] ?? $checkpointToken));
+            }
+        } elseif ($checkpointToken !== '' && $this->isValidCheckpointToken($checkpointToken)) {
+            $checkpoint = $this->loadInstallationCheckpoint($checkpointToken);
+            if (is_array($checkpoint)) {
+                $checkpointFormData = $this->extractFormDataFromCheckpoint($checkpoint);
+                if ($checkpointFormData !== []) {
+                    $formData = $checkpointFormData;
+                }
+                $draftId = $checkpointToken;
+            }
+        }
+
         $dueDays = $this->loadDueDays();
+        $draftKey = $draftId !== '' ? 'client-create-' . $draftId : 'client-create';
 
         $html = $this->view->render('clients/create', [
             'pageTitle' => 'Novo Cliente',
@@ -45,6 +69,10 @@ final class ClientController
             'flash' => Flash::get(),
             'cities' => $cities,
             'form' => $formData,
+            'draftId' => $draftId,
+            'checkpointToken' => $checkpointToken,
+            'draftMedia' => $draftMedia,
+            'draftKey' => $draftKey,
             'clearDraftKeys' => $this->consumeClearDraftKeys(),
             'plans' => $this->loadPlans(),
             'dueDays' => $dueDays,
@@ -59,28 +87,54 @@ final class ClientController
 
     public function store(Request $request): Response
     {
+        $draftId = trim((string) $request->input('draft_id', ''));
+        $checkpointToken = trim((string) $request->input('checkpoint_token', $request->query('token', '')));
+        $editingCheckpoint = $checkpointToken !== '' && $this->isValidCheckpointToken($checkpointToken);
+        $originalCheckpoint = $editingCheckpoint ? $this->loadInstallationCheckpoint($checkpointToken) : null;
+        $originalFormData = is_array($originalCheckpoint['form_data'] ?? null) ? $originalCheckpoint['form_data'] : [];
+        $existingDraftRecord = $draftId !== '' ? $this->loadDraftRecord($draftId) : null;
+        $existingDraftPhotos = 0;
+
+        if (is_array($existingDraftRecord) && is_array($existingDraftRecord['media']['photos'] ?? null)) {
+            $existingDraftPhotos = count($existingDraftRecord['media']['photos']);
+        }
+
+        $uploadedPhotoCount = $this->countUploadedPhotos($request);
+        $hasExistingPhotos = $existingDraftPhotos > 0 || ($editingCheckpoint && $this->hasStoredEvidencePhotos((string) ($originalCheckpoint['evidence_ref'] ?? '')));
         $data = $this->collectFormData($request);
-        $this->saveFormDraft($data);
-        $errors = $this->validateDraft($data, $request);
+        $this->saveFormDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
+        $errors = $this->validateDraft($data, $request, $originalFormData, $editingCheckpoint, $hasExistingPhotos);
 
         if ($errors !== []) {
             Flash::set('error', implode(' ', $errors));
-            return Response::redirect('/clientes/novo');
+            $redirect = '/clientes/novo';
+            if ($draftId !== '') {
+                $redirect .= '?draft=' . rawurlencode($draftId);
+            } elseif ($editingCheckpoint) {
+                $redirect .= '?token=' . rawurlencode($checkpointToken);
+            }
+
+            return Response::redirect($redirect);
         }
 
-        $draftId = $this->saveDraft($data);
-        $this->storeDraftPhotos($draftId, $request);
+        $draftId = $this->saveDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
+        $this->storeDraftPhotos($draftId, $request, $uploadedPhotoCount > 0 && ($existingDraftPhotos > 0 || $editingCheckpoint));
 
         Flash::set('success', 'Dados iniciais e fotos salvos. Agora confirme o aceite e registre a assinatura.');
 
-        return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+        $redirect = '/clientes/novo/aceite?draft=' . rawurlencode($draftId);
+        if ($editingCheckpoint) {
+            $redirect .= '&token=' . rawurlencode($checkpointToken);
+        }
+
+        return Response::redirect($redirect);
     }
 
     public function clearDraft(Request $request): Response
     {
         $key = trim((string) $request->input('key', ''));
 
-        if ($key === 'client-create') {
+        if (str_starts_with($key, 'client-create') || str_starts_with($key, 'client-acceptance') || str_starts_with($key, 'client-edit')) {
             $this->clearFormDraft();
         }
 
@@ -93,7 +147,13 @@ final class ClientController
     public function acceptance(Request $request): Response
     {
         $draftId = trim((string) $request->query('draft', ''));
+        $draftRecord = $this->loadDraftRecord($draftId);
         $draft = $this->loadDraft($draftId);
+        $checkpointToken = '';
+
+        if (is_array($draftRecord)) {
+            $checkpointToken = trim((string) ($draftRecord['checkpoint_token'] ?? ''));
+        }
 
         if ($draft === null) {
             Flash::set('error', 'Nao foi possivel localizar os dados iniciais do cliente.');
@@ -110,6 +170,7 @@ final class ClientController
             'draftId' => $draftId,
             'draft' => $draft,
             'draftJson' => json_encode($draft, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
+            'checkpointToken' => $checkpointToken,
             'acceptanceDateTime' => date('d/m/Y H:i'),
             'acceptanceDateIso' => date('Y-m-d H:i:s'),
         ]);
@@ -120,6 +181,10 @@ final class ClientController
     public function finalize(Request $request): Response
     {
         $draftId = trim((string) $request->input('draft_id', $request->query('draft', '')));
+        $checkpointToken = trim((string) $request->input('checkpoint_token', $request->query('token', '')));
+        $editingCheckpoint = $checkpointToken !== '' && $this->isValidCheckpointToken($checkpointToken);
+        $existingCheckpoint = $editingCheckpoint ? $this->loadInstallationCheckpoint($checkpointToken) : null;
+        $existingEvidenceRef = is_array($existingCheckpoint) ? trim((string) ($existingCheckpoint['evidence_ref'] ?? '')) : '';
         $draft = $this->loadDraft($draftId);
 
         if ($draft === null) {
@@ -133,11 +198,16 @@ final class ClientController
 
         if ($errors !== []) {
             Flash::set('error', implode(' ', $errors));
-            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+            $redirect = '/clientes/novo/aceite?draft=' . rawurlencode($draftId);
+            if ($editingCheckpoint) {
+                $redirect .= '&token=' . rawurlencode($checkpointToken);
+            }
+
+            return Response::redirect($redirect);
         }
 
         try {
-            $evidence = $this->storeAcceptanceEvidence($draftId, $data, $request);
+            $evidence = $this->storeAcceptanceEvidence($draftId, $data, $request, $existingEvidenceRef !== '' ? $existingEvidenceRef : null);
             $data['evidence_ref'] = basename((string) ($evidence['folder'] ?? ''));
             $data['evidence_url'] = $this->absoluteUrl($request, '/clientes/evidencias?ref=' . rawurlencode((string) $data['evidence_ref']));
             $data['cadastro'] = date('Y-m-d');
@@ -161,11 +231,11 @@ final class ClientController
         $this->deleteDraftMedia($draftId);
         $this->clearClientDraft($draftId);
         $this->clearFormDraft();
-        $_SESSION['clear_client_drafts'] = ['client-create', 'client-acceptance-' . $draftId];
+        $_SESSION['clear_client_drafts'] = ['client-create', 'client-create-' . $draftId, 'client-acceptance-' . $draftId];
 
         $message = $response['mensagem'] ?? 'Cliente provisionado com sucesso.';
         $successLabel = $action === 'update' ? 'Cliente atualizado com sucesso.' : 'Cliente cadastrado com sucesso.';
-        $connectionToken = bin2hex(random_bytes(16));
+        $connectionToken = $editingCheckpoint ? $checkpointToken : bin2hex(random_bytes(16));
         $registrationId = $this->recordClientRegistration($data, $payload, $connectionToken);
         $this->recordEvidenceFiles($registrationId, (string) ($data['evidence_ref'] ?? ''), (string) ($evidence['folder'] ?? ''));
         $connectionToken = $this->saveInstallationCheckpoint([
@@ -173,6 +243,7 @@ final class ClientController
             'login' => (string) ($payload['login'] ?? ''),
             'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
             'plan' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
+            'form_data' => $draft,
             'created_at' => date('Y-m-d H:i:s'),
             'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
             'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
@@ -253,6 +324,103 @@ final class ClientController
         Flash::set('success', 'Instalação finalizada. O login está conectado no Radius.');
 
         return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+    }
+
+    public function resume(Request $request): Response
+    {
+        $token = trim((string) $request->query('token', $request->input('token', '')));
+        $login = $this->sanitizeLogin((string) $request->query('login', $request->input('login', '')));
+
+        if ($token !== '') {
+            $record = $this->loadInstallationCheckpoint($token);
+
+            if ($record === null) {
+                $record = $this->localRepository->findInstallationCheckpointByToken($token);
+            }
+
+            if (is_array($record)) {
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+            }
+        }
+
+        if ($login === '') {
+            Flash::set('error', 'Informe o login do cliente para retomar a pendência.');
+            return Response::redirect('/instalacoes');
+        }
+
+        $draft = $this->findDraftRecordByLogin($login);
+        if (is_array($draft)) {
+            $draftId = (string) ($draft['draft_id'] ?? '');
+            if ($draftId !== '') {
+                return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+            }
+        }
+
+        $checkpoint = $this->findCheckpointRecordByLogin($login);
+        if (is_array($checkpoint)) {
+            $checkpointToken = trim((string) ($checkpoint['token'] ?? ''));
+            if ($checkpointToken !== '') {
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($checkpointToken));
+            }
+        }
+
+        $checkpoint = $this->localRepository->findLatestInstallationCheckpointByLogin($login);
+        if (is_array($checkpoint)) {
+            $checkpointToken = trim((string) ($checkpoint['token'] ?? ''));
+            if ($checkpointToken !== '') {
+                $decodedPayload = json_decode((string) ($checkpoint['payload_json'] ?? ''), true);
+                $payload = is_array($decodedPayload) ? $decodedPayload : [];
+
+                $this->saveInstallationCheckpoint(
+                    array_replace(
+                        [
+                            'status' => (string) ($checkpoint['status'] ?? 'awaiting_connection'),
+                            'login' => (string) ($checkpoint['mkauth_login'] ?? $login),
+                            'client_name' => (string) ($checkpoint['mkauth_login'] ?? $login),
+                            'plan' => '',
+                            'created_at' => (string) ($checkpoint['created_at'] ?? date('Y-m-d H:i:s')),
+                            'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
+                            'evidence_ref' => '',
+                            'mkauth_message' => 'Cadastro retomado a partir do banco local.',
+                        ],
+                        $payload
+                    ),
+                    isset($checkpoint['registration_id']) ? (int) $checkpoint['registration_id'] : null,
+                    $checkpointToken
+                );
+
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($checkpointToken));
+            }
+        }
+
+        $registration = $this->localRepository->findLatestClientRegistrationByLogin($login);
+        if (is_array($registration)) {
+            $restoredToken = trim((string) ($registration['radius_token'] ?? ''));
+            if ($restoredToken === '') {
+                $restoredToken = bin2hex(random_bytes(16));
+            }
+
+            $record = [
+                'status' => (string) ($registration['status'] ?? 'awaiting_connection'),
+                'login' => (string) ($registration['mkauth_login'] ?? $login),
+                'client_name' => (string) ($registration['client_name'] ?? ''),
+                'plan' => (string) ($registration['plan_name'] ?? ''),
+                'created_at' => (string) ($registration['created_at'] ?? date('Y-m-d H:i:s')),
+                'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
+                'evidence_ref' => (string) ($registration['evidence_ref'] ?? ''),
+                'mkauth_message' => 'Cadastro retomado após timeout.',
+            ];
+
+            $this->saveInstallationCheckpoint($record, isset($registration['id']) ? (int) $registration['id'] : null, $restoredToken);
+
+            Flash::set('success', 'Cadastro localizado e retomado. Agora valide a conexão do cliente.');
+
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($restoredToken));
+        }
+
+        Flash::set('error', 'Nao foi possivel localizar uma pendência para esse login.');
+
+        return Response::redirect('/instalacoes');
     }
 
     public function checkConnection(Request $request): Response
@@ -508,7 +676,7 @@ final class ClientController
         ];
     }
 
-    private function validateDraft(array $data, Request $request): array
+    private function validateDraft(array $data, Request $request, array $originalData = [], bool $editingCheckpoint = false, bool $hasExistingPhotos = false): array
     {
         $errors = [];
 
@@ -560,19 +728,29 @@ final class ClientController
             $errors[] = 'Telefone invalido. Use DDD + numero com 10 ou 11 digitos.';
         }
 
-        if ($this->clientFieldExists('login', (string) $data['login'])) {
-            $errors[] = 'Login já existe no MkAuth. Informe outro login.';
+        $originalLogin = $this->sanitizeLogin((string) ($originalData['login'] ?? ''));
+        $currentLogin = $this->sanitizeLogin((string) $data['login']);
+
+        if (!$editingCheckpoint || $originalLogin !== $currentLogin) {
+            if ($this->clientFieldExists('login', (string) $data['login'])) {
+                $errors[] = 'Login já existe no MkAuth. Informe outro login.';
+            }
         }
 
-        if ($this->clientFieldExists('cpf_cnpj', (string) $data['cpf_cnpj'])) {
-            $errors[] = 'CPF/CNPJ já existe no MkAuth.';
+        $originalDocument = preg_replace('/\D+/', '', (string) ($originalData['cpf_cnpj'] ?? '')) ?? '';
+        $currentDocument = preg_replace('/\D+/', '', (string) ($data['cpf_cnpj'] ?? '')) ?? '';
+
+        if (!$editingCheckpoint || $originalDocument !== $currentDocument) {
+            if ($this->clientFieldExists('cpf_cnpj', (string) $data['cpf_cnpj'])) {
+                $errors[] = 'CPF/CNPJ já existe no MkAuth.';
+            }
         }
 
         if (!$this->isValidCoordinates((string) ($data['coordenadas'] ?? ''))) {
             $errors[] = 'Capture as coordenadas pelo celular antes de prosseguir.';
         }
 
-        if ($this->countUploadedPhotos($request) < 1) {
+        if ($this->countUploadedPhotos($request) < 1 && !$hasExistingPhotos) {
             $errors[] = 'Envie ao menos uma foto da instalacao.';
         }
 
@@ -879,23 +1057,34 @@ final class ClientController
         return $lookup;
     }
 
-    private function saveDraft(array $data): string
+    private function saveDraft(array $data, ?string $draftId = null, ?string $checkpointToken = null): string
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
             session_start();
         }
 
-        $draftId = bin2hex(random_bytes(8));
-        $_SESSION['client_drafts'][$draftId] = [
+        $draftId = $this->normalizeDraftId($draftId);
+
+        if ($draftId === '') {
+            $draftId = bin2hex(random_bytes(8));
+        }
+
+        $existing = $this->loadDraftRecord($draftId);
+        $record = is_array($existing) ? $existing : [];
+        $record = array_replace($record, [
             'data' => $data,
-            'created_at' => date('Y-m-d H:i:s'),
+            'checkpoint_token' => trim((string) ($checkpointToken ?? ($record['checkpoint_token'] ?? ''))),
+            'created_at' => (string) ($record['created_at'] ?? date('Y-m-d H:i:s')),
+            'updated_at' => date('Y-m-d H:i:s'),
             'user' => $this->resolveUser(),
-        ];
+        ]);
+        $_SESSION['client_drafts'][$draftId] = $record;
+        $this->persistDraftRecord($draftId, $record);
 
         return $draftId;
     }
 
-    private function storeDraftPhotos(string $draftId, Request $request): array
+    private function storeDraftPhotos(string $draftId, Request $request, bool $replaceExisting = false): array
     {
         if ($draftId === '' || !isset($_FILES['fotos_instalacao']) || !is_array($_FILES['fotos_instalacao']['name'] ?? null)) {
             return [];
@@ -905,6 +1094,8 @@ final class ClientController
 
         if (!is_dir($baseDir)) {
             mkdir($baseDir, 0775, true);
+        } elseif ($replaceExisting) {
+            $this->clearDirectoryContents($baseDir);
         }
 
         $saved = [];
@@ -926,6 +1117,7 @@ final class ClientController
             $destination = $baseDir . '/' . $filename;
 
             if (move_uploaded_file($tmpName, $destination)) {
+                $this->optimizeStoredImage($destination);
                 $saved[] = $filename;
             }
         }
@@ -933,6 +1125,7 @@ final class ClientController
         if (isset($_SESSION['client_drafts'][$draftId]) && is_array($_SESSION['client_drafts'][$draftId])) {
             $_SESSION['client_drafts'][$draftId]['media']['photos'] = $saved;
             $_SESSION['client_drafts'][$draftId]['media']['folder'] = $baseDir;
+            $this->persistDraftRecord($draftId, $_SESSION['client_drafts'][$draftId]);
         }
 
         return $saved;
@@ -940,25 +1133,48 @@ final class ClientController
 
     private function loadDraft(string $draftId): ?array
     {
-        if ($draftId === '' || !isset($_SESSION['client_drafts'][$draftId])) {
+        if ($draftId === '') {
             return null;
         }
 
-        $draft = $_SESSION['client_drafts'][$draftId];
+        if (isset($_SESSION['client_drafts'][$draftId]) && is_array($_SESSION['client_drafts'][$draftId])) {
+            $draft = $_SESSION['client_drafts'][$draftId];
+            return is_array($draft['data'] ?? null) ? $draft['data'] : null;
+        }
 
-        return is_array($draft['data'] ?? null) ? $draft['data'] : null;
+        $draft = $this->loadDraftRecord($draftId);
+
+        if (is_array($draft)) {
+            $_SESSION['client_drafts'][$draftId] = $draft;
+            return is_array($draft['data'] ?? null) ? $draft['data'] : null;
+        }
+
+        return null;
     }
 
     private function loadDraftMedia(string $draftId): array
     {
-        if ($draftId === '' || !isset($_SESSION['client_drafts'][$draftId])) {
+        if ($draftId === '') {
             return [];
         }
 
-        $draft = $_SESSION['client_drafts'][$draftId];
-        $media = $draft['media'] ?? [];
+        if (isset($_SESSION['client_drafts'][$draftId]) && is_array($_SESSION['client_drafts'][$draftId])) {
+            $draft = $_SESSION['client_drafts'][$draftId];
+            $media = $draft['media'] ?? [];
 
-        return is_array($media) ? $media : [];
+            return is_array($media) ? $media : [];
+        }
+
+        $draft = $this->loadDraftRecord($draftId);
+
+        if (is_array($draft)) {
+            $_SESSION['client_drafts'][$draftId] = $draft;
+            $media = $draft['media'] ?? [];
+
+            return is_array($media) ? $media : [];
+        }
+
+        return [];
     }
 
     private function clearClientDraft(string $draftId): void
@@ -966,9 +1182,14 @@ final class ClientController
         if (isset($_SESSION['client_drafts'][$draftId])) {
             unset($_SESSION['client_drafts'][$draftId]);
         }
+
+        $path = $this->draftRecordPath($draftId, false);
+        if (is_file($path)) {
+            @unlink($path);
+        }
     }
 
-    private function saveFormDraft(array $data): void
+    private function saveFormDraft(array $data, ?string $draftId = null, ?string $checkpointToken = null): void
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
             session_start();
@@ -976,6 +1197,8 @@ final class ClientController
 
         $_SESSION['client_form_draft'] = [
             'data' => $data,
+            'draft_id' => $draftId,
+            'checkpoint_token' => $checkpointToken,
             'updated_at' => date('Y-m-d H:i:s'),
         ];
     }
@@ -1000,19 +1223,24 @@ final class ClientController
         return is_array($keys) ? $keys : [];
     }
 
-    private function storeAcceptanceEvidence(string $draftId, array $data, Request $request): array
+    private function storeAcceptanceEvidence(string $draftId, array $data, Request $request, ?string $evidenceRef = null): array
     {
         $summary = '';
         $savedItems = [];
         $signature = trim((string) ($data['assinatura_cliente'] ?? ''));
         $acceptance = strtolower(trim((string) ($data['aceite_cliente'] ?? 'nao')));
         $login = trim((string) ($data['login'] ?? 'cliente'));
-        $folderName = $this->safeFilename($login) . '_' . date('YmdHis');
+        $folderName = trim((string) ($evidenceRef ?? '')) !== ''
+            ? trim((string) $evidenceRef)
+            : $this->safeFilename($login) . '_' . date('YmdHis');
         $baseDir = $this->projectRootPath() . '/storage/uploads/clientes/' . $folderName;
         $draftMedia = $this->loadDraftMedia($draftId);
+        $draftPhotos = is_array($draftMedia['photos'] ?? null) ? $draftMedia['photos'] : [];
 
         if (!is_dir($baseDir)) {
             mkdir($baseDir, 0775, true);
+        } elseif ($folderName === '' || $draftPhotos !== []) {
+            $this->clearDirectoryContents($baseDir);
         }
 
         if ($acceptance === 'sim') {
@@ -1080,6 +1308,7 @@ final class ClientController
             $destination = $baseDir . '/' . $photoName;
 
             if (is_file($source) && @copy($source, $destination)) {
+                $this->optimizeStoredImage($destination);
                 $saved[] = $photoName;
             }
         }
@@ -1108,6 +1337,110 @@ final class ClientController
         @rmdir($folder);
     }
 
+    private function persistDraftRecord(string $draftId, array $record): void
+    {
+        $path = $this->draftRecordPath($draftId);
+
+        file_put_contents(
+            $path,
+            json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
+        );
+    }
+
+    private function extractFormDataFromCheckpoint(?array $checkpoint): array
+    {
+        if (!is_array($checkpoint)) {
+            return [];
+        }
+
+        $formData = $checkpoint['form_data'] ?? null;
+        if (is_array($formData)) {
+            return $formData;
+        }
+
+        $payload = $checkpoint['payload_json'] ?? '';
+        if (is_string($payload) && $payload !== '') {
+            $decoded = json_decode($payload, true);
+            if (is_array($decoded) && is_array($decoded['form_data'] ?? null)) {
+                return $decoded['form_data'];
+            }
+        }
+
+        $registration = $this->localRepository->findClientRegistrationByRadiusToken((string) ($checkpoint['token'] ?? ''));
+        if (!is_array($registration)) {
+            return [];
+        }
+
+        return [
+            'nome_completo' => (string) ($registration['client_name'] ?? ''),
+            'login' => (string) ($registration['mkauth_login'] ?? ''),
+            'cpf_cnpj' => (string) ($registration['cpf_cnpj'] ?? ''),
+            'plano' => (string) ($registration['plan_name'] ?? ''),
+        ];
+    }
+
+    private function loadDraftRecord(string $draftId): ?array
+    {
+        $path = $this->draftRecordPath($draftId, false);
+
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $decoded = json_decode((string) file_get_contents($path), true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function normalizeDraftId(?string $draftId): string
+    {
+        $draftId = trim((string) $draftId);
+        $draftId = preg_replace('/[^a-f0-9]/i', '', $draftId) ?? '';
+
+        return $draftId;
+    }
+
+    private function draftRecordPath(string $draftId, bool $createDirectory = true): string
+    {
+        $draftId = $this->normalizeDraftId($draftId);
+
+        if ($draftId === '') {
+            $draftId = 'draft';
+        }
+
+        $directory = $this->projectRootPath() . '/storage/cache/client_drafts';
+
+        if ($createDirectory && !is_dir($directory)) {
+            mkdir($directory, 0775, true);
+        }
+
+        return $directory . '/' . $draftId . '.json';
+    }
+
+    private function hasStoredEvidencePhotos(string $ref): bool
+    {
+        $folder = $this->evidenceFolderPath($ref);
+
+        if ($folder === null) {
+            return false;
+        }
+
+        return count(array_diff(scandir($folder) ?: [], ['.', '..', 'aceite.json'])) > 0;
+    }
+
+    private function clearDirectoryContents(string $directory): void
+    {
+        if (!is_dir($directory)) {
+            return;
+        }
+
+        foreach (glob($directory . '/*') ?: [] as $item) {
+            if (is_file($item)) {
+                @unlink($item);
+            }
+        }
+    }
+
     private function storeUploadedPhotos(Request $request, string $baseDir): array
     {
         if (!isset($_FILES['fotos_instalacao']) || !is_array($_FILES['fotos_instalacao']['name'] ?? null)) {
@@ -1133,6 +1466,7 @@ final class ClientController
             $destination = $baseDir . '/' . $filename;
 
             if (move_uploaded_file($tmpName, $destination)) {
+                $this->optimizeStoredImage($destination);
                 $saved[] = $filename;
             }
         }
@@ -1344,6 +1678,84 @@ final class ClientController
         };
     }
 
+    private function optimizeStoredImage(string $path): void
+    {
+        if (!is_file($path) || !function_exists('getimagesize') || !function_exists('imagecreatefromjpeg')) {
+            return;
+        }
+
+        $info = @getimagesize($path);
+
+        if (!is_array($info) || empty($info[0]) || empty($info[1]) || empty($info['mime'])) {
+            return;
+        }
+
+        $width = (int) $info[0];
+        $height = (int) $info[1];
+        $mime = strtolower((string) $info['mime']);
+        $maxWidth = 1280;
+        $maxHeight = 1280;
+
+        if ($width <= $maxWidth && $height <= $maxHeight && filesize($path) !== false && filesize($path) <= 1500000) {
+            return;
+        }
+
+        $source = match ($mime) {
+            'image/jpeg', 'image/jpg' => @imagecreatefromjpeg($path),
+            'image/png' => @imagecreatefrompng($path),
+            'image/webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false,
+            'image/gif' => @imagecreatefromgif($path),
+            default => false,
+        };
+
+        if (!$source) {
+            return;
+        }
+
+        $ratio = min($maxWidth / $width, $maxHeight / $height, 1);
+        $targetWidth = max(1, (int) round($width * $ratio));
+        $targetHeight = max(1, (int) round($height * $ratio));
+
+        if ($targetWidth === $width && $targetHeight === $height) {
+            imagedestroy($source);
+            return;
+        }
+
+        $target = imagecreatetruecolor($targetWidth, $targetHeight);
+
+        if (!$target) {
+            imagedestroy($source);
+            return;
+        }
+
+        if ($mime === 'image/png' || $mime === 'image/webp') {
+            imagealphablending($target, false);
+            imagesavealpha($target, true);
+        }
+
+        imagecopyresampled($target, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
+
+        switch ($mime) {
+            case 'image/png':
+                imagepng($target, $path, 6);
+                break;
+            case 'image/webp':
+                if (function_exists('imagewebp')) {
+                    imagewebp($target, $path, 78);
+                }
+                break;
+            case 'image/gif':
+                imagegif($target, $path);
+                break;
+            default:
+                imagejpeg($target, $path, 78);
+                break;
+        }
+
+        imagedestroy($source);
+        imagedestroy($target);
+    }
+
     private function safeFilename(string $value): string
     {
         $value = strtolower(trim($value));
@@ -1435,7 +1847,7 @@ final class ClientController
         $user = $this->resolveUser();
 
         try {
-            return $this->localRepository->createClientRegistration([
+            return $this->localRepository->upsertClientRegistrationByRadiusToken([
                 'mkauth_uuid' => (string) ($payload['uuid_cliente'] ?? $payload['uuid'] ?? ''),
                 'mkauth_login' => (string) ($payload['login'] ?? $data['login'] ?? ''),
                 'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
@@ -1456,6 +1868,7 @@ final class ClientController
     private function recordEvidenceFiles(?int $registrationId, string $evidenceRef, string $folder): void
     {
         try {
+            $this->localRepository->deleteEvidenceFilesByRegistrationId($registrationId);
             $this->localRepository->registerEvidenceFiles($registrationId, $evidenceRef, $folder);
         } catch (\Throwable) {
             // As evidencias ja estao salvas em disco; o indice local pode ser reprocessado depois.
@@ -1503,6 +1916,94 @@ final class ClientController
         }
 
         return $token;
+    }
+
+    private function findDraftRecordByLogin(string $login): ?array
+    {
+        $login = $this->sanitizeLogin($login);
+
+        if ($login === '') {
+            return null;
+        }
+
+        $directory = $this->projectRootPath() . '/storage/cache/client_drafts';
+
+        if (!is_dir($directory)) {
+            return null;
+        }
+
+        $latest = null;
+        $latestTimestamp = 0;
+
+        foreach (glob($directory . '/*.json') ?: [] as $file) {
+            $decoded = json_decode((string) file_get_contents($file), true);
+
+            if (!is_array($decoded)) {
+                continue;
+            }
+
+            $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : [];
+            $draftLogin = $this->sanitizeLogin((string) ($data['login'] ?? ''));
+
+            if ($draftLogin !== $login) {
+                continue;
+            }
+
+            $timestamp = strtotime((string) ($decoded['created_at'] ?? $decoded['updated_at'] ?? '')) ?: filemtime($file) ?: time();
+
+            if ($timestamp >= $latestTimestamp) {
+                $latestTimestamp = $timestamp;
+                $latest = [
+                    'draft_id' => basename($file, '.json'),
+                    'data' => $data,
+                    'created_at' => (string) ($decoded['created_at'] ?? ''),
+                    'updated_at' => (string) ($decoded['updated_at'] ?? ''),
+                ];
+            }
+        }
+
+        return $latest;
+    }
+
+    private function findCheckpointRecordByLogin(string $login): ?array
+    {
+        $login = $this->sanitizeLogin($login);
+
+        if ($login === '') {
+            return null;
+        }
+
+        $directory = $this->projectRootPath() . '/storage/installations';
+
+        if (!is_dir($directory)) {
+            return null;
+        }
+
+        $latest = null;
+        $latestTimestamp = 0;
+
+        foreach (glob($directory . '/*.json') ?: [] as $file) {
+            $decoded = json_decode((string) file_get_contents($file), true);
+
+            if (!is_array($decoded)) {
+                continue;
+            }
+
+            $checkpointLogin = $this->sanitizeLogin((string) ($decoded['login'] ?? ''));
+
+            if ($checkpointLogin !== $login) {
+                continue;
+            }
+
+            $timestamp = strtotime((string) ($decoded['updated_at'] ?? $decoded['created_at'] ?? '')) ?: filemtime($file) ?: time();
+
+            if ($timestamp >= $latestTimestamp) {
+                $latestTimestamp = $timestamp;
+                $latest = $decoded;
+            }
+        }
+
+        return $latest;
     }
 
     private function loadInstallationCheckpoint(string $token): ?array

@@ -30,13 +30,16 @@ return static function (Router $router): void {
     $router->post('/clientes/novo/aceite', [ClientController::class, 'finalize'], 'clients.finalize');
     $router->get('/clientes/conexao', [ClientController::class, 'connection'], 'clients.connection');
     $router->post('/clientes/conexao/finalizar', [ClientController::class, 'completeConnection'], 'clients.connection.complete');
+    $router->get('/clientes/retomar', [ClientController::class, 'resume'], 'clients.resume');
     $router->get('/clientes/evidencias', [ClientController::class, 'evidence'], 'clients.evidence');
     $router->get('/clientes/evidencias/arquivo', [ClientController::class, 'evidenceFile'], 'clients.evidence.file');
     $router->get('/api/cep/lookup', [ClientController::class, 'lookupCep'], 'api.cep.lookup');
     $router->get('/api/cliente/validar', [ClientController::class, 'validateClientField'], 'api.client.validate');
     $router->get('/api/cliente/conexao', [ClientController::class, 'checkConnection'], 'api.client.connection');
     $router->get('/instalacoes', [SystemController::class, 'installations'], 'installations.index');
+    $router->post('/instalacoes/excluir', [SystemController::class, 'deleteInstallation'], 'installations.delete');
     $router->get('/usuarios', [SystemController::class, 'users'], 'users.index');
+    $router->post('/usuarios/gestor', [SystemController::class, 'saveManager'], 'users.manager.save');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');

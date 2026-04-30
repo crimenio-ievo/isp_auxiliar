@@ -96,6 +96,11 @@ let mapInstance = null;
 let mapMarker = null;
 let pendingMapCoordinate = null;
 const remoteValidationTimers = new Map();
+const photoCompressionConfig = {
+    maxWidth: 1280,
+    maxHeight: 1280,
+    quality: 0.72,
+};
 
 function safeJsonParse(value, fallback = null) {
     try {
@@ -171,6 +176,108 @@ function dataUrlToFile(dataUrl, fileName = 'arquivo.jpg') {
     }
 
     return new File([bytes], fileName, { type: mimeType });
+}
+
+function createImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+
+        image.onload = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(image);
+        };
+
+        image.onerror = (error) => {
+            URL.revokeObjectURL(objectUrl);
+            reject(error);
+        };
+
+        image.src = objectUrl;
+    });
+}
+
+async function compressPhotoFile(file) {
+    if (!(file instanceof File) || !String(file.type || '').startsWith('image/')) {
+        return file;
+    }
+
+    const image = await createImageFromFile(file);
+    const width = image.naturalWidth || image.width || 0;
+    const height = image.naturalHeight || image.height || 0;
+
+    if (width === 0 || height === 0) {
+        return file;
+    }
+
+    const ratio = Math.min(
+        photoCompressionConfig.maxWidth / width,
+        photoCompressionConfig.maxHeight / height,
+        1
+    );
+
+    if (ratio >= 1 && file.size <= 1500000) {
+        return file;
+    }
+
+    const targetWidth = Math.max(1, Math.round(width * ratio));
+    const targetHeight = Math.max(1, Math.round(height * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+        return file;
+    }
+
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    const blob = await new Promise((resolve) => {
+        canvas.toBlob((result) => resolve(result), 'image/jpeg', photoCompressionConfig.quality);
+    });
+
+    if (!blob) {
+        return file;
+    }
+
+    const baseName = file.name.replace(/\.[^.]+$/, '') || 'foto';
+    const newName = `${baseName}.jpg`;
+
+    return new File([blob], newName, {
+        type: 'image/jpeg',
+        lastModified: file.lastModified || Date.now(),
+    });
+}
+
+async function compressPhotoFiles(files) {
+    const compressed = [];
+
+    for (const file of files) {
+        try {
+            compressed.push(await compressPhotoFile(file));
+        } catch (error) {
+            compressed.push(file);
+        }
+    }
+
+    return compressed;
+}
+
+function replaceFileInputFiles(input, files) {
+    const transfer = createDataTransfer();
+
+    if (!transfer) {
+        return;
+    }
+
+    for (const file of files) {
+        if (file instanceof File) {
+            transfer.items.add(file);
+        }
+    }
+
+    input.files = transfer.files;
 }
 
 async function hydrateDraftFiles(form, payload) {
@@ -320,17 +427,23 @@ function wirePhotoPicker(button, input, multiple = true) {
                 return;
             }
 
+            const selectedFiles = Array.from(fileInput.files);
             const nextInput = fileInput.cloneNode(false);
             nextInput.value = '';
             nextInput.multiple = Boolean(multiple);
             fileInput.insertAdjacentElement('afterend', nextInput);
             activeInput = nextInput;
             attachChangeHandler(nextInput);
-            refreshPhotoQueue();
 
-            if (fileInput.form) {
-                scheduleDraftSave(fileInput.form);
-            }
+            void (async () => {
+                const compressedFiles = await compressPhotoFiles(selectedFiles);
+                replaceFileInputFiles(fileInput, compressedFiles);
+                refreshPhotoQueue();
+
+                if (fileInput.form) {
+                    scheduleDraftSave(fileInput.form);
+                }
+            })();
         });
     };
 

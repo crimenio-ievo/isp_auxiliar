@@ -30,6 +30,20 @@ function bootstrapApplication(): Application
 
     Env::load($rootPath . '/.env');
 
+    if (!defined('APP_VERSION_INFO')) {
+        define('APP_VERSION_INFO', is_file($rootPath . '/config/version.php')
+            ? require $rootPath . '/config/version.php'
+            : [
+                'app_name' => 'ISP Auxiliar',
+                'app_version' => '0.1.0',
+                'build_date' => date('Y-m-d'),
+                'modules' => [
+                    'isp_auxiliar' => '0.1.0',
+                    'isp_map2' => '0.1.0',
+                ],
+            ]);
+    }
+
     $config = new Config([
         'app' => require __DIR__ . '/../config/app.php',
         'database' => require __DIR__ . '/../config/database.php',

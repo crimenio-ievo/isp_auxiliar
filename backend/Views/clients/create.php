@@ -20,6 +20,9 @@ $fieldSelected = static function (string $name, string $value, string $default =
 
     return $current === $value ? 'selected' : '';
 };
+$draftId = (string) ($draftId ?? '');
+$checkpointToken = (string) ($checkpointToken ?? '');
+$draftKey = (string) ($draftKey ?? 'client-create');
 $formCity = (string) ($form['cidade'] ?? '');
 $cityExists = false;
 
@@ -52,10 +55,13 @@ ob_start();
     action="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>"
     enctype="multipart/form-data"
     data-autosave-form
-    data-draft-key="client-create"
+    data-draft-key="<?= htmlspecialchars($draftKey, ENT_QUOTES, 'UTF-8'); ?>"
     data-clear-draft-keys="<?= htmlspecialchars(json_encode($clearDraftKeys, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]', ENT_QUOTES, 'UTF-8'); ?>"
     data-clear-draft-endpoint="<?= htmlspecialchars(Url::to('/clientes/rascunho/limpar'), ENT_QUOTES, 'UTF-8'); ?>"
 >
+    <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId, ENT_QUOTES, 'UTF-8'); ?>">
+    <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
+
     <section class="card">
         <div class="section-heading">
             <p class="section-heading__eyebrow">Dados principais</p>

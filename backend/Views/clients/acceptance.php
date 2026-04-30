@@ -15,6 +15,7 @@ $clientAddress = trim((string) ($draft['endereco'] ?? '') . ' ' . (string) ($dra
 $clientNeighborhood = (string) ($draft['bairro'] ?? '');
 $clientCep = (string) ($draft['cep'] ?? '');
 $acceptanceStamp = (string) ($acceptanceDateTime ?? date('d/m/Y H:i'));
+$checkpointToken = (string) ($checkpointToken ?? '');
 
 ob_start();
 ?>
@@ -93,6 +94,7 @@ ob_start();
         data-draft-json="<?= htmlspecialchars((string) ($draftJson ?? '{}'), ENT_QUOTES, 'UTF-8'); ?>"
     >
         <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="assinatura_cliente" data-signature-input value="">
 
         <div class="section-heading">

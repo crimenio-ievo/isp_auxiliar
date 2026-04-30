@@ -139,6 +139,12 @@ ob_start();
                     <input type="text" name="mkauth_db_hash_algos" value="<?= htmlspecialchars($value('mkauth_db_hash_algos', 'sha256,sha1'), ENT_QUOTES, 'UTF-8'); ?>">
                     <small class="field-help">Mantido para compatibilidade com a forma como o MkAuth salva senha dos operadores.</small>
                 </label>
+
+                <div class="field field--span-2">
+                    <span>Usuário gestor do MkAuth</span>
+                    <input type="text" value="Agora essa escolha é feita em Usuários." disabled>
+                    <small class="field-help">Use a tela de Usuários para definir quem terá perfil de gestão no ISP Auxiliar.</small>
+                </div>
             </div>
         </section>
 

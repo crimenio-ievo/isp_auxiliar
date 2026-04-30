@@ -919,6 +919,28 @@ body.modal-open {
     color: #506074;
 }
 
+.pill--success {
+    background: rgba(11, 95, 89, 0.12);
+    color: #0b5f59;
+}
+
+.button--small {
+    min-height: 38px;
+    padding: 0 14px;
+    border-radius: 12px;
+    font-size: 0.92rem;
+}
+
+.table-action-stack {
+    display: grid;
+    gap: 6px;
+}
+
+.table-action-stack small,
+.muted {
+    color: var(--muted);
+}
+
 .alert {
     padding: 14px 16px;
     border-radius: var(--radius-md);
