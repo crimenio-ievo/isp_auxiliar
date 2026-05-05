@@ -11,8 +11,14 @@ use App\Core\Container;
 use App\Core\Env;
 use App\Core\Router;
 use App\Core\View;
+use App\Infrastructure\Contracts\ContractAcceptanceRepository;
+use App\Infrastructure\Contracts\ContractRepository;
+use App\Infrastructure\Contracts\FinancialTaskRepository;
+use App\Infrastructure\Contracts\MessageTemplateRepository;
+use App\Infrastructure\Contracts\NotificationLogRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\Notifications\EvotrixService;
 use App\Infrastructure\MkAuth\ClientPayloadMapper;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
@@ -48,6 +54,8 @@ function bootstrapApplication(): Application
         'app' => require __DIR__ . '/../config/app.php',
         'database' => require __DIR__ . '/../config/database.php',
         'paths' => require __DIR__ . '/../config/paths.php',
+        'contracts' => require __DIR__ . '/../config/contracts.php',
+        'evotrix' => require __DIR__ . '/../config/evotrix.php',
     ]);
 
     date_default_timezone_set((string) $config->get('app.timezone', 'UTC'));
@@ -77,6 +85,15 @@ function bootstrapApplication(): Application
     $container->set(View::class, new View((string) $config->get('paths.views')));
     $container->set(Database::class, $localDatabase);
     $container->set(LocalRepository::class, $localRepository);
+    $container->set(ContractRepository::class, new ContractRepository($localDatabase));
+    $container->set(ContractAcceptanceRepository::class, new ContractAcceptanceRepository($localDatabase));
+    $container->set(FinancialTaskRepository::class, new FinancialTaskRepository($localDatabase));
+    $container->set(MessageTemplateRepository::class, new MessageTemplateRepository($localDatabase));
+    $container->set(NotificationLogRepository::class, new NotificationLogRepository($localDatabase));
+    $container->set(EvotrixService::class, new EvotrixService(
+        (array) $config->get('evotrix', []),
+        $container->get(NotificationLogRepository::class)
+    ));
     $container->set(MkAuthClient::class, new MkAuthClient(
         $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),

@@ -9,6 +9,7 @@ $userRole = strtolower((string) ($user['role'] ?? ''));
 $canManageSettings = in_array($userRole, ['platform_admin', 'manager', 'admin', 'administrador'], true);
 $navigationItems = [
     ['/dashboard', 'Dashboard'],
+    ['/contratos', 'Contratos & Aceites'],
     ['/clientes/novo', 'Novo Cliente'],
     ['/instalacoes', 'Instalacoes'],
     ['/usuarios', 'Usuarios'],
@@ -30,7 +31,7 @@ if ($canManageSettings) {
 
     <nav class="sidebar__nav" aria-label="Menu principal">
         <?php foreach ($navigationItems as [$href, $label]): ?>
-            <?php $isActive = $currentPath === $href; ?>
+            <?php $isActive = $currentPath === $href || ($href === '/contratos' && str_starts_with($currentPath, '/contratos')); ?>
             <a class="nav-link<?= $isActive ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to($href), ENT_QUOTES, 'UTF-8'); ?>">
                 <?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
             </a>

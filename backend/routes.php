@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Controllers\AuthController;
+use App\Controllers\ContractController;
 use App\Controllers\ClientController;
 use App\Controllers\DashboardController;
 use App\Controllers\SettingsController;
@@ -23,6 +24,9 @@ return static function (Router $router): void {
     $router->get('/api/usuario/validar', [AuthController::class, 'validateUser'], 'api.usuario.validate');
 
     $router->get('/dashboard', [DashboardController::class, 'index'], 'dashboard');
+    $router->get('/contratos', [ContractController::class, 'index'], 'contracts.index');
+    $router->get('/contratos/novos', [ContractController::class, 'novos'], 'contracts.new');
+    $router->get('/contratos/aceites/pendentes', [ContractController::class, 'aceitesPendentes'], 'contracts.acceptances.pending');
     $router->get('/clientes/novo', [ClientController::class, 'create'], 'clients.create');
     $router->post('/clientes/novo', [ClientController::class, 'store'], 'clients.store');
     $router->post('/clientes/rascunho/limpar', [ClientController::class, 'clearDraft'], 'clients.draft.clear');

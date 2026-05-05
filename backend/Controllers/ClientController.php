@@ -2015,12 +2015,20 @@ final class ClientController
         $path = $this->installationCheckpointPath($token, false);
 
         if (!is_file($path)) {
-            return null;
+            $checkpoint = $this->localRepository->findInstallationCheckpointByToken($token);
+
+            return $this->hydrateCheckpointRecord($checkpoint);
         }
 
         $decoded = json_decode((string) file_get_contents($path), true);
 
-        return is_array($decoded) ? $decoded : null;
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        $checkpoint = $this->localRepository->findInstallationCheckpointByToken($token);
+
+        return $this->hydrateCheckpointRecord($checkpoint);
     }
 
     private function updateInstallationCheckpoint(string $token, array $updates): void
@@ -2034,10 +2042,12 @@ final class ClientController
         $record = array_replace($record, $updates);
         $record['updated_at'] = date('Y-m-d H:i:s');
 
-        file_put_contents(
-            $this->installationCheckpointPath($token),
-            json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
-        );
+        $path = $this->installationCheckpointPath($token);
+        $encoded = json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+
+        if (file_put_contents($path, $encoded) === false) {
+            // Mantem a trilha no banco local mesmo se o arquivo do checkpoint falhar.
+        }
 
         try {
             $this->localRepository->updateInstallationCheckpoint($token, $record);
@@ -2060,6 +2070,24 @@ final class ClientController
     private function isValidCheckpointToken(string $token): bool
     {
         return (bool) preg_match('/^[a-f0-9]{32}$/', $token);
+    }
+
+    private function hydrateCheckpointRecord(?array $checkpoint): ?array
+    {
+        if (!is_array($checkpoint)) {
+            return null;
+        }
+
+        $payload = json_decode((string) ($checkpoint['payload_json'] ?? ''), true);
+        $payload = is_array($payload) ? $payload : [];
+
+        return array_replace($payload, [
+            'token' => (string) ($checkpoint['token'] ?? ($payload['token'] ?? '')),
+            'status' => (string) ($checkpoint['status'] ?? ($payload['status'] ?? 'awaiting_connection')),
+            'login' => (string) ($checkpoint['mkauth_login'] ?? ($payload['login'] ?? '')),
+            'updated_at' => (string) ($checkpoint['updated_at'] ?? ($payload['updated_at'] ?? '')),
+            'created_at' => (string) ($checkpoint['created_at'] ?? ($payload['created_at'] ?? '')),
+        ]);
     }
 
     private function projectRootPath(): string
