@@ -46,6 +46,22 @@ final class FinancialTaskRepository
         );
     }
 
+    public function updateById(int $id, array $data): int
+    {
+        return $this->database->execute(
+            'UPDATE financial_tasks
+             SET contract_id = :contract_id,
+                 mkauth_login = :mkauth_login,
+                 titulo = :titulo,
+                 descricao = :descricao,
+                 setor = :setor,
+                 status = :status,
+                 updated_at = NOW()
+             WHERE id = :id',
+            array_merge(['id' => $id], $this->normalizeData($data))
+        );
+    }
+
     public function listByStatus(string $status, int $limit = 100): array
     {
         $limit = max(1, min(500, $limit));

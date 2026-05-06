@@ -39,11 +39,44 @@ final class ContractRepository
         );
     }
 
+    public function findByClientId(int $clientId): ?array
+    {
+        return $this->database->fetchOne(
+            'SELECT * FROM client_contracts WHERE client_id = :client_id ORDER BY updated_at DESC, id DESC LIMIT 1',
+            ['client_id' => $clientId]
+        );
+    }
+
     public function findByLogin(string $login): ?array
     {
         return $this->database->fetchOne(
             'SELECT * FROM client_contracts WHERE LOWER(mkauth_login) = LOWER(:login) ORDER BY updated_at DESC, id DESC LIMIT 1',
             ['login' => trim($login)]
+        );
+    }
+
+    public function updateById(int $id, array $data): int
+    {
+        return $this->database->execute(
+            'UPDATE client_contracts
+             SET client_id = :client_id,
+                 mkauth_login = :mkauth_login,
+                 nome_cliente = :nome_cliente,
+                 telefone_cliente = :telefone_cliente,
+                 tipo_adesao = :tipo_adesao,
+                 valor_adesao = :valor_adesao,
+                 parcelas_adesao = :parcelas_adesao,
+                 valor_parcela_adesao = :valor_parcela_adesao,
+                 vencimento_primeira_parcela = :vencimento_primeira_parcela,
+                 fidelidade_meses = :fidelidade_meses,
+                 beneficio_valor = :beneficio_valor,
+                 multa_total = :multa_total,
+                 tipo_aceite = :tipo_aceite,
+                 observacao_adesao = :observacao_adesao,
+                 status_financeiro = :status_financeiro,
+                 updated_at = NOW()
+             WHERE id = :id',
+            array_merge(['id' => $id], $this->normalizeData($data))
         );
     }
 

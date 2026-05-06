@@ -39,11 +39,43 @@ final class ContractAcceptanceRepository
         );
     }
 
+    public function findLatestByContractId(int $contractId): ?array
+    {
+        return $this->database->fetchOne(
+            'SELECT * FROM contract_acceptances WHERE contract_id = :contract_id ORDER BY updated_at DESC, id DESC LIMIT 1',
+            ['contract_id' => $contractId]
+        );
+    }
+
     public function findByTokenHash(string $tokenHash): ?array
     {
         return $this->database->fetchOne(
             'SELECT * FROM contract_acceptances WHERE token_hash = :token_hash LIMIT 1',
             ['token_hash' => $this->normalizeTokenHash($tokenHash)]
+        );
+    }
+
+    public function updateById(int $id, array $data): int
+    {
+        return $this->database->execute(
+            'UPDATE contract_acceptances
+             SET contract_id = :contract_id,
+                 token_hash = :token_hash,
+                 token_expires_at = :token_expires_at,
+                 status = :status,
+                 telefone_enviado = :telefone_enviado,
+                 whatsapp_message_id = :whatsapp_message_id,
+                 sent_at = :sent_at,
+                 accepted_at = :accepted_at,
+                 ip_address = :ip_address,
+                 user_agent = :user_agent,
+                 termo_versao = :termo_versao,
+                 termo_hash = :termo_hash,
+                 pdf_path = :pdf_path,
+                 evidence_json_path = :evidence_json_path,
+                 updated_at = NOW()
+             WHERE id = :id',
+            array_merge(['id' => $id], $this->normalizeData($data))
         );
     }
 
@@ -129,7 +161,7 @@ final class ContractAcceptanceRepository
             'token_hash' => $this->normalizeTokenHash((string) ($data['token_hash'] ?? $data['token'] ?? '')),
             'token_expires_at' => (string) ($data['token_expires_at'] ?? date('Y-m-d H:i:s')),
             'status' => (string) ($data['status'] ?? 'criado'),
-            'telefone_enviado' => (string) ($data['telefone_enviado'] ?? ''),
+            'telefone_enviado' => trim((string) ($data['telefone_enviado'] ?? '')),
             'whatsapp_message_id' => $data['whatsapp_message_id'] ?? null,
             'sent_at' => $data['sent_at'] ?? null,
             'accepted_at' => $data['accepted_at'] ?? null,

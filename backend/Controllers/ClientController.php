@@ -9,6 +9,10 @@ use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
+use App\Infrastructure\Contracts\ContractAcceptanceRepository;
+use App\Infrastructure\Contracts\ContractRepository;
+use App\Infrastructure\Contracts\FinancialTaskRepository;
+use App\Infrastructure\Contracts\MessageTemplateRepository;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
@@ -26,7 +30,11 @@ final class ClientController
         private Config $config,
         private ClientProvisioner $provisioner,
         private MkAuthDatabase $mkauthDatabase,
-        private LocalRepository $localRepository
+        private LocalRepository $localRepository,
+        private ContractRepository $contractRepository,
+        private ContractAcceptanceRepository $contractAcceptanceRepository,
+        private FinancialTaskRepository $financialTaskRepository,
+        private MessageTemplateRepository $messageTemplateRepository
     ) {
     }
 
@@ -236,8 +244,10 @@ final class ClientController
         $message = $response['mensagem'] ?? 'Cliente provisionado com sucesso.';
         $successLabel = $action === 'update' ? 'Cliente atualizado com sucesso.' : 'Cliente cadastrado com sucesso.';
         $connectionToken = $editingCheckpoint ? $checkpointToken : bin2hex(random_bytes(16));
+        $this->syncContractArtifacts($data, $payload, null, $request);
         $registrationId = $this->recordClientRegistration($data, $payload, $connectionToken);
         $this->recordEvidenceFiles($registrationId, (string) ($data['evidence_ref'] ?? ''), (string) ($evidence['folder'] ?? ''));
+        $this->syncContractArtifacts($data, $payload, $registrationId, $request);
         $connectionToken = $this->saveInstallationCheckpoint([
             'status' => 'awaiting_connection',
             'login' => (string) ($payload['login'] ?? ''),
@@ -1873,6 +1883,297 @@ final class ClientController
         } catch (\Throwable) {
             // As evidencias ja estao salvas em disco; o indice local pode ser reprocessado depois.
         }
+    }
+
+    private function syncContractArtifacts(array $data, array $payload, ?int $registrationId, Request $request): void
+    {
+        try {
+            $this->messageTemplateRepository->ensureDefaults($this->defaultMessageTemplates());
+        } catch (\Throwable $exception) {
+            $this->recordAudit('contract.templates.sync_failed', 'message_template', null, [
+                'login' => (string) ($payload['login'] ?? $data['login'] ?? ''),
+                'error' => $exception->getMessage(),
+            ], $request);
+        }
+
+        $contractData = $this->buildContractData($data, $payload, $registrationId);
+
+        try {
+            $contract = $this->resolveContractRecord($contractData, $registrationId);
+            $contractId = (int) ($contract['id'] ?? 0);
+
+            if ($contractId <= 0) {
+                $contractId = $this->contractRepository->create($contractData) ?? 0;
+                if ($contractId > 0) {
+                    $this->recordAudit('contract.created', 'client_contract', $contractId, [
+                        'login' => (string) $contractData['mkauth_login'],
+                        'client_id' => $registrationId,
+                        'status_financeiro' => (string) $contractData['status_financeiro'],
+                    ], $request);
+                }
+            } else {
+                $this->contractRepository->updateById($contractId, $contractData);
+                $this->recordAudit('contract.updated', 'client_contract', $contractId, [
+                    'login' => (string) $contractData['mkauth_login'],
+                    'client_id' => $registrationId,
+                    'status_financeiro' => (string) $contractData['status_financeiro'],
+                ], $request);
+            }
+
+            if ($contractId <= 0) {
+                throw new \RuntimeException('Contrato não pôde ser identificado após a gravação.');
+            }
+
+            $termBody = $this->buildContractTermBody($contractData);
+            $termHash = hash('sha256', $termBody);
+            $acceptanceData = $this->buildAcceptanceData($contractId, $data, $contractData, $termHash, $request);
+
+            $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+            if (is_array($acceptance) && isset($acceptance['id'])) {
+                $this->contractAcceptanceRepository->updateById((int) $acceptance['id'], $acceptanceData);
+                $this->recordAudit('contract.acceptance.updated', 'contract_acceptance', (int) $acceptance['id'], [
+                    'login' => (string) $contractData['mkauth_login'],
+                    'contract_id' => $contractId,
+                    'status' => (string) $acceptanceData['status'],
+                ], $request);
+            } else {
+                $acceptanceId = $this->contractAcceptanceRepository->create($acceptanceData) ?? 0;
+                if ($acceptanceId > 0) {
+                    $this->recordAudit('contract.acceptance.created', 'contract_acceptance', $acceptanceId, [
+                        'login' => (string) $contractData['mkauth_login'],
+                        'contract_id' => $contractId,
+                        'status' => (string) $acceptanceData['status'],
+                    ], $request);
+                }
+            }
+
+            if (($contractData['status_financeiro'] ?? 'pendente_lancamento') === 'pendente_lancamento') {
+                $financialTaskData = $this->buildFinancialTaskData($contractId, $contractData);
+                $financialTask = $this->financialTaskRepository->findByContractId($contractId);
+
+                if (is_array($financialTask) && isset($financialTask['id'])) {
+                    $this->financialTaskRepository->updateById((int) $financialTask['id'], $financialTaskData);
+                    $this->recordAudit('contract.financial_task.updated', 'financial_task', (int) $financialTask['id'], [
+                        'login' => (string) $contractData['mkauth_login'],
+                        'contract_id' => $contractId,
+                        'status' => (string) $financialTaskData['status'],
+                    ], $request);
+                } else {
+                    $taskId = $this->financialTaskRepository->create($financialTaskData) ?? 0;
+                    if ($taskId > 0) {
+                        $this->recordAudit('contract.financial_task.created', 'financial_task', $taskId, [
+                            'login' => (string) $contractData['mkauth_login'],
+                            'contract_id' => $contractId,
+                            'status' => (string) $financialTaskData['status'],
+                        ], $request);
+                    }
+                }
+            }
+        } catch (\Throwable $exception) {
+            $this->recordAudit('contract.flow_failed', 'client_contract', $registrationId, [
+                'login' => (string) ($payload['login'] ?? $data['login'] ?? ''),
+                'client_id' => $registrationId,
+                'error' => $exception->getMessage(),
+            ], $request);
+        }
+    }
+
+    private function resolveContractRecord(array $contractData, ?int $registrationId): ?array
+    {
+        if ($registrationId !== null) {
+            try {
+                $contract = $this->contractRepository->findByClientId($registrationId);
+                if (is_array($contract)) {
+                    return $contract;
+                }
+            } catch (\Throwable) {
+            }
+        }
+
+        $login = trim((string) ($contractData['mkauth_login'] ?? ''));
+        if ($login !== '') {
+            try {
+                $contract = $this->contractRepository->findByLogin($login);
+                if (is_array($contract)) {
+                    return $contract;
+                }
+            } catch (\Throwable) {
+            }
+        }
+
+        return null;
+    }
+
+    private function buildContractData(array $data, array $payload, ?int $registrationId): array
+    {
+        $login = trim((string) ($payload['login'] ?? $data['login'] ?? ''));
+        $nome = trim((string) ($payload['nome'] ?? $data['nome_completo'] ?? ''));
+        $telefone = preg_replace('/\D+/', '', (string) ($payload['celular'] ?? $data['celular'] ?? '')) ?? '';
+        $tipoAdesao = trim((string) ($data['tipo_adesao'] ?? $this->config->get('contracts.default_type_adesao', 'cheia')));
+        $statusFinanceiro = $tipoAdesao === 'isenta' ? 'dispensado' : 'pendente_lancamento';
+        $valorAdesao = $this->normalizeMoney((string) ($data['valor_adesao'] ?? '0'));
+        $parcelasAdesao = max(1, (int) ($data['parcelas_adesao'] ?? 1));
+        $valorParcela = $this->normalizeMoney((string) ($data['valor_parcela_adesao'] ?? '0'));
+        $fidelidade = max(0, (int) ($data['fidelidade_meses'] ?? 12));
+
+        return [
+            'client_id' => $registrationId,
+            'mkauth_login' => $login,
+            'nome_cliente' => $nome,
+            'telefone_cliente' => $telefone,
+            'tipo_adesao' => $tipoAdesao,
+            'valor_adesao' => $valorAdesao,
+            'parcelas_adesao' => $parcelasAdesao,
+            'valor_parcela_adesao' => $valorParcela,
+            'vencimento_primeira_parcela' => $this->calculateFirstBillingDate((string) ($data['vencimento'] ?? '')),
+            'fidelidade_meses' => $fidelidade > 0 ? $fidelidade : 12,
+            'beneficio_valor' => $this->normalizeMoney((string) ($data['beneficio_valor'] ?? '0')),
+            'multa_total' => $this->normalizeMoney((string) ($data['multa_total'] ?? '0')),
+            'tipo_aceite' => trim((string) ($data['tipo_aceite'] ?? $this->config->get('contracts.default_tipo_aceite', 'nova_instalacao'))),
+            'observacao_adesao' => trim((string) ($data['observacao_adesao'] ?? $data['observacao'] ?? $data['observacao_aceite'] ?? '')),
+            'status_financeiro' => $statusFinanceiro,
+        ];
+    }
+
+    private function buildAcceptanceData(int $contractId, array $data, array $contractData, string $termHash, Request $request): array
+    {
+        $ttlHours = max(1, (int) $this->config->get('contracts.acceptance_ttl_hours', 48));
+        $expiresAt = (new \DateTimeImmutable())->modify('+' . $ttlHours . ' hours')->format('Y-m-d H:i:s');
+        $plainToken = bin2hex(random_bytes(16));
+        $acceptanceData = [
+            'contract_id' => $contractId,
+            'token' => $plainToken,
+            'token_expires_at' => $expiresAt,
+            'status' => 'criado',
+            'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'whatsapp_message_id' => null,
+            'sent_at' => null,
+            'accepted_at' => null,
+            'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
+            'user_agent' => (string) $request->header('User-Agent', ''),
+            'termo_versao' => (string) $this->config->get('contracts.term_version', '2026.1'),
+            'termo_hash' => $termHash,
+            'pdf_path' => null,
+            'evidence_json_path' => null,
+        ];
+
+        return $acceptanceData;
+    }
+
+    private function buildFinancialTaskData(int $contractId, array $contractData): array
+    {
+        $valorAdesao = $this->normalizeMoney((string) ($contractData['valor_adesao'] ?? '0'));
+        $parcelas = max(1, (int) ($contractData['parcelas_adesao'] ?? 1));
+        $tipoAdesao = (string) ($contractData['tipo_adesao'] ?? 'cheia');
+        $fidelidade = max(0, (int) ($contractData['fidelidade_meses'] ?? 12));
+
+        return [
+            'contract_id' => $contractId,
+            'mkauth_login' => (string) ($contractData['mkauth_login'] ?? ''),
+            'titulo' => 'Lançar adesão cliente ' . (string) ($contractData['nome_cliente'] ?? ''),
+            'descricao' => sprintf(
+                "Valor: R$ %s\nParcelas: %d\nTipo: %s\nFidelidade: %d meses",
+                number_format($valorAdesao, 2, ',', '.'),
+                $parcelas,
+                $tipoAdesao,
+                $fidelidade
+            ),
+            'setor' => 'financeiro',
+            'status' => 'aberto',
+        ];
+    }
+
+    private function buildContractTermBody(array $contractData): string
+    {
+        $nome = (string) ($contractData['nome_cliente'] ?? '');
+        $login = (string) ($contractData['mkauth_login'] ?? '');
+        $telefone = (string) ($contractData['telefone_cliente'] ?? '');
+        $tipoAdesao = (string) ($contractData['tipo_adesao'] ?? 'cheia');
+        $valorAdesao = number_format((float) ($contractData['valor_adesao'] ?? 0), 2, ',', '.');
+        $parcelas = (int) ($contractData['parcelas_adesao'] ?? 1);
+        $valorParcela = number_format((float) ($contractData['valor_parcela_adesao'] ?? 0), 2, ',', '.');
+        $fidelidade = (int) ($contractData['fidelidade_meses'] ?? 12);
+        $multa = number_format((float) ($contractData['multa_total'] ?? 0), 2, ',', '.');
+        $observacao = (string) ($contractData['observacao_adesao'] ?? '');
+
+        return trim(implode("\n", [
+            'CONTRATO DIGITAL ISP AUXILIAR',
+            'Cliente: ' . $nome,
+            'Login: ' . $login,
+            'Telefone: ' . $telefone,
+            'Tipo de adesão: ' . $tipoAdesao,
+            'Valor da adesão: R$ ' . $valorAdesao,
+            'Parcelas da adesão: ' . $parcelas,
+            'Valor por parcela: R$ ' . $valorParcela,
+            'Fidelidade: ' . $fidelidade . ' meses',
+            'Multa total: R$ ' . $multa,
+            'Observação: ' . $observacao,
+            '',
+            'A taxa de adesão poderá ser concedida com desconto, isenção ou parcelamento, condicionada à fidelidade de 12 meses. Em caso de cancelamento antecipado, poderá ser cobrado valor proporcional ao benefício concedido.',
+            'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
+        ]));
+    }
+
+    private function defaultMessageTemplates(): array
+    {
+        return [
+            'aceite_nova_instalacao' => [
+                'channel' => 'whatsapp',
+                'purpose' => 'aceite_nova_instalacao',
+                'body' => "Olá, {nome} 👋\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em 48 horas.",
+                'variables_json' => ['nome', 'link_aceite'],
+                'active' => 1,
+            ],
+            'aceite_regularizacao_contrato' => [
+                'channel' => 'whatsapp',
+                'purpose' => 'aceite_regularizacao_contrato',
+                'body' => "Olá, {nome} 👋\n\nSeu contrato foi preparado para regularização.\n\nConfira os dados e aceite no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em 48 horas.",
+                'variables_json' => ['nome', 'link_aceite'],
+                'active' => 1,
+            ],
+        ];
+    }
+
+    private function calculateFirstBillingDate(string $dueDay): ?string
+    {
+        $dueDay = preg_replace('/\D+/', '', $dueDay) ?? '';
+        $day = (int) $dueDay;
+
+        if ($day < 1 || $day > 31) {
+            return null;
+        }
+
+        $today = new \DateTimeImmutable('today');
+        $currentMonth = $today->modify(sprintf('first day of this month'))->setDate(
+            (int) $today->format('Y'),
+            (int) $today->format('m'),
+            min($day, (int) $today->format('t'))
+        );
+
+        if ($currentMonth >= $today) {
+            return $currentMonth->format('Y-m-d');
+        }
+
+        $nextMonth = $today->modify('first day of next month')->setDate(
+            (int) $today->modify('first day of next month')->format('Y'),
+            (int) $today->modify('first day of next month')->format('m'),
+            min($day, (int) $today->modify('last day of next month')->format('t'))
+        );
+
+        return $nextMonth->format('Y-m-d');
+    }
+
+    private function normalizeMoney(string $value): float
+    {
+        $value = trim($value);
+
+        if ($value === '') {
+            return 0.0;
+        }
+
+        $normalized = str_replace(['.', ','], ['', '.'], $value);
+
+        return (float) $normalized;
     }
 
     private function recordAudit(string $action, string $entityType, ?int $entityId, array $context, Request $request): void

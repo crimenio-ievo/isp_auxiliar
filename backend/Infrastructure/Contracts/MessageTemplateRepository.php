@@ -39,6 +39,17 @@ final class MessageTemplateRepository
         );
     }
 
+    public function findByPurpose(string $purpose, string $channel = 'whatsapp'): ?array
+    {
+        return $this->database->fetchOne(
+            'SELECT * FROM message_templates WHERE purpose = :purpose AND channel = :channel LIMIT 1',
+            [
+                'purpose' => trim($purpose),
+                'channel' => trim($channel) ?: 'whatsapp',
+            ]
+        );
+    }
+
     public function findByName(string $name, string $channel = 'whatsapp'): ?array
     {
         return $this->database->fetchOne(
@@ -48,6 +59,46 @@ final class MessageTemplateRepository
                 'channel' => trim($channel) ?: 'whatsapp',
             ]
         );
+    }
+
+    public function upsertByName(string $name, array $data, string $channel = 'whatsapp'): ?int
+    {
+        $existing = $this->findByName($name, $channel);
+
+        if (is_array($existing) && isset($existing['id'])) {
+            $this->database->execute(
+                'UPDATE message_templates
+                 SET purpose = :purpose,
+                     body = :body,
+                     variables_json = :variables_json,
+                     active = :active,
+                     updated_at = NOW()
+                 WHERE id = :id',
+                array_merge(
+                    ['id' => (int) $existing['id']],
+                    $this->normalizeData(array_merge($data, ['name' => $name, 'channel' => $channel]), false)
+                )
+            );
+
+            return (int) $existing['id'];
+        }
+
+        return $this->create(array_merge($data, ['name' => $name, 'channel' => $channel]));
+    }
+
+    public function ensureDefaults(array $templates): array
+    {
+        $ids = [];
+
+        foreach ($templates as $name => $template) {
+            if (!is_array($template)) {
+                continue;
+            }
+
+            $ids[$name] = $this->upsertByName((string) $name, $template, (string) ($template['channel'] ?? 'whatsapp'));
+        }
+
+        return $ids;
     }
 
     public function listActive(?string $channel = null): array
