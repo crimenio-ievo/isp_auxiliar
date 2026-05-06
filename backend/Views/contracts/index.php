@@ -7,6 +7,7 @@ use App\Core\Url;
 $summaryCards = is_array($summaryCards ?? null) ? $summaryCards : [];
 $recentContracts = is_array($recentContracts ?? null) ? $recentContracts : [];
 $pendingAcceptances = is_array($pendingAcceptances ?? null) ? $pendingAcceptances : [];
+$canManageContracts = !empty($canManageContracts);
 
 ob_start();
 ?>
@@ -78,24 +79,38 @@ ob_start();
                     <tr>
                         <th>Cliente</th>
                         <th>Login</th>
-                        <th>Tipo</th>
+                        <th>Adesão</th>
                         <th>Financeiro</th>
-                        <th>Criado em</th>
+                        <th>Aceite</th>
+                        <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($recentContracts as $contract): ?>
+                        <?php
+                            $contractId = (int) ($contract['id'] ?? 0);
+                            $acceptanceId = (int) ($contract['acceptance_id'] ?? 0);
+                            $simulatedLink = Url::to('/aceite/' . rawurlencode((string) ($acceptanceId > 0 ? $acceptanceId : $contractId)));
+                        ?>
                         <tr>
                             <td><?= htmlspecialchars((string) ($contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?= htmlspecialchars((string) ($contract['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?= htmlspecialchars((string) ($contract['tipo_adesao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><span class="pill"><?= htmlspecialchars((string) ($contract['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                            <td><?= htmlspecialchars((string) ($contract['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($contract['acceptance_status'] ?? 'criado'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                            <td>
+                                <div class="inline-actions">
+                                    <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId), ENT_QUOTES, 'UTF-8'); ?>">Visualizar contrato</a>
+                                    <button type="button" class="button button--ghost button--small" data-copy-text="<?= htmlspecialchars($simulatedLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link</button>
+                                    <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#financeiro'), ENT_QUOTES, 'UTF-8'); ?>">Ver pendência financeira</a>
+                                    <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#logs'), ENT_QUOTES, 'UTF-8'); ?>">Ver logs relacionados</a>
+                                </div>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($recentContracts === []): ?>
                         <tr>
-                            <td colspan="5">Nenhum contrato encontrado neste momento.</td>
+                            <td colspan="6">Nenhum contrato encontrado neste momento.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -116,21 +131,37 @@ ob_start();
                         <th>Cliente</th>
                         <th>Login</th>
                         <th>Status</th>
+                        <th>Financeiro</th>
                         <th>Expira em</th>
+                        <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($pendingAcceptances as $acceptance): ?>
+                        <?php
+                            $contractId = (int) ($acceptance['contract_id'] ?? 0);
+                            $acceptanceId = (int) ($acceptance['acceptance_id'] ?? 0);
+                            $simulatedLink = Url::to('/aceite/' . rawurlencode((string) ($acceptanceId > 0 ? $acceptanceId : $contractId)));
+                        ?>
                         <tr>
                             <td><?= htmlspecialchars((string) ($acceptance['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?= htmlspecialchars((string) ($acceptance['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($acceptance['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                            <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($acceptance['acceptance_status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                            <td><span class="pill"><?= htmlspecialchars((string) ($acceptance['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
                             <td><?= htmlspecialchars((string) ($acceptance['token_expires_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td>
+                                <div class="inline-actions">
+                                    <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId), ENT_QUOTES, 'UTF-8'); ?>">Visualizar contrato</a>
+                                    <button type="button" class="button button--ghost button--small" data-copy-text="<?= htmlspecialchars($simulatedLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link</button>
+                                    <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#financeiro'), ENT_QUOTES, 'UTF-8'); ?>">Ver pendência financeira</a>
+                                    <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#logs'), ENT_QUOTES, 'UTF-8'); ?>">Ver logs relacionados</a>
+                                </div>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($pendingAcceptances === []): ?>
                         <tr>
-                            <td colspan="4">Nenhum aceite pendente encontrado neste momento.</td>
+                            <td colspan="6">Nenhum aceite pendente encontrado neste momento.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>

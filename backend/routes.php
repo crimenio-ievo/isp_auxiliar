@@ -27,6 +27,9 @@ return static function (Router $router): void {
     $router->get('/contratos', [ContractController::class, 'index'], 'contracts.index');
     $router->get('/contratos/novos', [ContractController::class, 'novos'], 'contracts.new');
     $router->get('/contratos/aceites/pendentes', [ContractController::class, 'aceitesPendentes'], 'contracts.acceptances.pending');
+    $router->get('/contratos/detalhe', [ContractController::class, 'detalhe'], 'contracts.detail');
+    $router->post('/contratos/financeiro/concluir', [ContractController::class, 'concluirFinanceiro'], 'contracts.financial.complete');
+    $router->post('/contratos/financeiro/cancelar', [ContractController::class, 'cancelarFinanceiro'], 'contracts.financial.cancel');
     $router->get('/clientes/novo', [ClientController::class, 'create'], 'clients.create');
     $router->post('/clientes/novo', [ClientController::class, 'store'], 'clients.store');
     $router->post('/clientes/rascunho/limpar', [ClientController::class, 'clearDraft'], 'clients.draft.clear');

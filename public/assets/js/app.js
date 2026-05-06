@@ -1869,3 +1869,59 @@ if (acceptanceForm) {
         }
     });
 }
+
+async function copyTextToClipboard(text) {
+    const normalizedText = String(text || '').trim();
+
+    if (!normalizedText) {
+        throw new Error('Texto vazio.');
+    }
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(normalizedText);
+        return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = normalizedText;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textarea);
+
+    if (!successful) {
+        throw new Error('Falha ao copiar.');
+    }
+}
+
+document.querySelectorAll('[data-copy-text]').forEach((button) => {
+    button.addEventListener('click', async () => {
+        const originalLabel = button.dataset.copyLabel || button.textContent || 'Copiar';
+        const copyText = button.getAttribute('data-copy-text') || '';
+
+        try {
+            await copyTextToClipboard(copyText);
+            button.textContent = 'Copiado';
+            button.disabled = true;
+            window.setTimeout(() => {
+                button.textContent = originalLabel;
+                button.disabled = false;
+            }, 1600);
+        } catch (error) {
+            const fallback = window.prompt('Copie o link abaixo:', copyText);
+            if (fallback !== null) {
+                button.textContent = 'Copiado';
+                button.disabled = true;
+                window.setTimeout(() => {
+                    button.textContent = originalLabel;
+                    button.disabled = false;
+                }, 1600);
+            }
+        }
+    });
+});

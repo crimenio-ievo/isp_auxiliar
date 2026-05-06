@@ -608,6 +608,59 @@ final class LocalRepository
         );
     }
 
+    public function auditLogsForContract(
+        ?int $contractId = null,
+        ?int $acceptanceId = null,
+        ?int $financialTaskId = null,
+        ?int $registrationId = null,
+        int $limit = 100
+    ): array {
+        $providerId = $this->currentProviderId();
+
+        if ($providerId === null || !$this->isAvailable()) {
+            return [];
+        }
+
+        $conditions = [];
+        $params = ['provider_id' => $providerId];
+
+        if ($contractId !== null && $contractId > 0) {
+            $conditions[] = '(entity_type = "client_contract" AND entity_id = :contract_id)';
+            $params['contract_id'] = $contractId;
+        }
+
+        if ($acceptanceId !== null && $acceptanceId > 0) {
+            $conditions[] = '(entity_type = "contract_acceptance" AND entity_id = :acceptance_id)';
+            $params['acceptance_id'] = $acceptanceId;
+        }
+
+        if ($financialTaskId !== null && $financialTaskId > 0) {
+            $conditions[] = '(entity_type = "financial_task" AND entity_id = :financial_task_id)';
+            $params['financial_task_id'] = $financialTaskId;
+        }
+
+        if ($registrationId !== null && $registrationId > 0) {
+            $conditions[] = '(entity_type = "client_registration" AND entity_id = :registration_id)';
+            $params['registration_id'] = $registrationId;
+        }
+
+        if ($conditions === []) {
+            return [];
+        }
+
+        $limit = max(1, min(500, $limit));
+
+        return $this->database->fetchAll(
+            'SELECT id, actor_login, action, entity_type, entity_id, ip_address, context_json, created_at
+             FROM audit_logs
+             WHERE provider_id = :provider_id
+             AND (' . implode(' OR ', $conditions) . ')
+             ORDER BY created_at DESC
+             LIMIT ' . (int) $limit,
+            $params
+        );
+    }
+
     private function slug(string $value): string
     {
         $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
