@@ -388,6 +388,26 @@ final class LocalRepository
         );
     }
 
+    public function findClientRegistrationById(int $registrationId): ?array
+    {
+        $providerId = $this->currentProviderId();
+
+        if ($providerId === null || !$this->isAvailable() || $registrationId <= 0) {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT *
+             FROM client_registrations
+             WHERE provider_id = :provider_id AND id = :registration_id
+             LIMIT 1',
+            [
+                'provider_id' => $providerId,
+                'registration_id' => $registrationId,
+            ]
+        );
+    }
+
     public function deleteClientRegistrationByRadiusToken(string $token): void
     {
         $providerId = $this->currentProviderId();
@@ -522,6 +542,27 @@ final class LocalRepository
             [
                 'provider_id' => $providerId,
                 'login' => $login,
+            ]
+        );
+    }
+
+    public function findLatestInstallationCheckpointByRegistrationId(int $registrationId): ?array
+    {
+        $providerId = $this->currentProviderId();
+
+        if ($providerId === null || !$this->isAvailable() || $registrationId <= 0) {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT *
+             FROM installation_checkpoints
+             WHERE provider_id = :provider_id AND registration_id = :registration_id
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1',
+            [
+                'provider_id' => $providerId,
+                'registration_id' => $registrationId,
             ]
         );
     }

@@ -88,6 +88,7 @@ final class ClientController
             'defaultPassword' => '13v0',
             'defaultLocalDici' => 'r',
             'defaultInstallType' => 'fibra',
+            'contractCommercial' => $this->contractCommercialConfig(),
         ]);
 
         return Response::html($html);
@@ -284,6 +285,18 @@ final class ClientController
         }
 
         $connection = $this->resolveRadiusConnection((string) ($record['login'] ?? ''));
+        $acceptanceStatus = $this->resolveAcceptanceStatusForLogin((string) ($record['login'] ?? ''));
+        $statusMessage = 'Status do aceite: ' . (string) ($acceptanceStatus['label'] ?? 'pendente') . '.';
+        $flash = Flash::get();
+
+        if (is_array($flash)) {
+            $flash['message'] = trim((string) ($flash['message'] ?? '') . ' ' . $statusMessage);
+        } else {
+            $flash = [
+                'type' => !empty($acceptanceStatus['accepted']) ? 'success' : 'error',
+                'message' => $statusMessage,
+            ];
+        }
 
         $html = $this->view->render('clients/connection', [
             'pageTitle' => 'Validar Conexão',
@@ -291,10 +304,11 @@ final class ClientController
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $this->resolveUser(),
-            'flash' => Flash::get(),
+            'flash' => $flash,
             'token' => $token,
             'record' => $record,
             'connection' => $connection,
+            'acceptanceStatus' => $acceptanceStatus,
         ]);
 
         return Response::html($html);
@@ -308,6 +322,16 @@ final class ClientController
         if ($record === null) {
             Flash::set('error', 'Nao foi possivel localizar a instalação para finalizar.');
             return Response::redirect('/clientes/novo');
+        }
+
+        $acceptanceStatus = $this->resolveAcceptanceStatusForLogin((string) ($record['login'] ?? ''));
+        $acceptanceState = (string) ($acceptanceStatus['status'] ?? 'pendente');
+        $canBypassAcceptance = $this->canManageContracts();
+
+        if ($acceptanceState !== 'aceito' && !$canBypassAcceptance) {
+            $statusLabel = (string) ($acceptanceStatus['label'] ?? 'pendente');
+            Flash::set('error', 'Status do aceite: ' . $statusLabel . '. Aguarde a confirmação do cliente antes de finalizar.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
         }
 
         $connection = $this->resolveRadiusConnection((string) ($record['login'] ?? ''));
@@ -326,6 +350,13 @@ final class ClientController
             'completed_at' => date('Y-m-d H:i:s'),
             'completed_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
         ]);
+        if ($acceptanceState !== 'aceito' && $canBypassAcceptance) {
+            $this->recordAudit('installation.completed_with_acceptance_override', 'installation_checkpoint', null, [
+                'token' => $token,
+                'login' => (string) ($record['login'] ?? ''),
+                'acceptance_status' => $acceptanceState,
+            ], $request);
+        }
         $this->recordAudit('installation.completed', 'installation_checkpoint', null, [
             'token' => $token,
             'login' => (string) ($record['login'] ?? ''),
@@ -618,9 +649,55 @@ final class ClientController
 
     private function collectFormData(Request $request): array
     {
+        $commercial = $this->contractCommercialConfig();
         $document = preg_replace('/\D+/', '', (string) $request->input('cpf_cnpj', '')) ?? '';
         $login = $this->sanitizeLogin((string) $request->input('login', ''));
         $person = $this->inferPersonFromDocument($document);
+        $installType = strtolower(trim((string) $request->input('tipo_instalacao', 'fibra')));
+        $installType = in_array($installType, ['fibra', 'radio'], true) ? $installType : 'fibra';
+        $adhesionType = strtolower(trim((string) $request->input('tipo_adesao', '')));
+        if (!in_array($adhesionType, ['cheia', 'promocional', 'isenta'], true)) {
+            $adhesionType = $installType === 'fibra' ? 'isenta' : 'cheia';
+        }
+
+        $maxInstallments = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
+        $installments = (int) $request->input('parcelas_adesao', 1);
+        $installments = max(1, min($maxInstallments, $installments > 0 ? $installments : 1));
+
+        $baseValue = (float) ($commercial['valor_adesao_padrao'] ?? 0);
+        $promoValue = (float) ($commercial['valor_adesao_promocional'] ?? 0);
+        $discountPercent = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
+        $defaultValue = $this->resolveAdhesionValue($adhesionType, $baseValue, $promoValue, $discountPercent);
+        $adhesionValue = $this->normalizeMoney((string) $request->input('valor_adesao', ''));
+        if ($adhesionValue <= 0) {
+            $adhesionValue = $defaultValue;
+        }
+
+        if ($adhesionType === 'isenta') {
+            $adhesionValue = 0.0;
+        }
+
+        $benefitValue = $this->normalizeMoney((string) $request->input('beneficio_valor', ''));
+        if ($benefitValue <= 0) {
+            if ($adhesionType === 'isenta') {
+                $benefitValue = $baseValue;
+            } elseif ($adhesionType === 'promocional') {
+                $benefitValue = max(0.0, $baseValue - $adhesionValue);
+            } else {
+                $benefitValue = max(0.0, $baseValue - $adhesionValue);
+            }
+        }
+
+        $penaltyValue = $this->normalizeMoney((string) $request->input('multa_total', ''));
+        if ($penaltyValue <= 0) {
+            $penaltyValue = (float) ($commercial['multa_padrao'] ?? 0);
+        }
+
+        $firstBillingDate = $this->normalizeDateInput((string) $request->input('vencimento_primeira_parcela', ''));
+        if ($firstBillingDate === null) {
+            $firstBillingDate = $this->calculateFirstBillingDate((string) $request->input('vencimento', ''));
+        }
+
         $city = $this->resolveCity(
             (string) $request->input('cidade', ''),
             (string) $request->input('estado', ''),
@@ -658,7 +735,7 @@ final class ClientController
             'assinatura_cliente' => (string) $request->input('assinatura_cliente', ''),
             'login' => $login,
             'senha' => $request->input('senha', '13v0'),
-            'tipo_instalacao' => $request->input('tipo_instalacao', 'fibra'),
+            'tipo_instalacao' => $installType,
             'plano' => $request->input('plano', ''),
             'cep' => $cep,
             'endereco' => $request->input('endereco', ''),
@@ -672,7 +749,19 @@ final class ClientController
             'coordenadas_precisao' => $request->input('coordenadas_precisao', ''),
             'coordenadas_capturadas_em' => $request->input('coordenadas_capturadas_em', ''),
             'local_dici' => $request->input('local_dici', 'r'),
+            'tipo_adesao' => $adhesionType,
+            'valor_adesao' => number_format($adhesionValue, 2, '.', ''),
+            'parcelas_adesao' => (string) $installments,
+            'valor_parcela_adesao' => number_format($installments > 0 ? ($adhesionValue / $installments) : 0, 2, '.', ''),
+            'vencimento_primeira_parcela' => $firstBillingDate ?? '',
+            'fidelidade_meses' => (string) (($requestedFidelity = trim((string) $request->input('fidelidade_meses', ''))) !== ''
+                ? max(1, (int) $requestedFidelity)
+                : (int) ($commercial['fidelidade_meses_padrao'] ?? 12)),
+            'beneficio_concedido_por' => trim((string) $request->input('beneficio_concedido_por', '')),
+            'beneficio_valor' => number_format($benefitValue, 2, '.', ''),
+            'multa_total' => number_format($penaltyValue, 2, '.', ''),
             'observacao' => $request->input('observacao', ''),
+            'observacao_adesao' => $request->input('observacao_adesao', ''),
             'vencimento' => $request->input('vencimento', '05'),
             'conta_boleto' => $defaults['billing_account_id'],
             'contrato' => $defaults['contract_code'],
@@ -689,6 +778,7 @@ final class ClientController
     private function validateDraft(array $data, Request $request, array $originalData = [], bool $editingCheckpoint = false, bool $hasExistingPhotos = false): array
     {
         $errors = [];
+        $commercial = $this->contractCommercialConfig();
 
         if (trim((string) $data['nome_completo']) === '') {
             $errors[] = 'Informe o nome completo do cliente.';
@@ -728,6 +818,22 @@ final class ClientController
 
         if (trim((string) $data['cidade']) === '') {
             $errors[] = 'Informe a cidade.';
+        }
+
+        $tipoAdesao = strtolower(trim((string) ($data['tipo_adesao'] ?? '')));
+        if (!in_array($tipoAdesao, ['cheia', 'promocional', 'isenta'], true)) {
+            $errors[] = 'Selecione um tipo de adesão válido.';
+        }
+
+        $parcelasMaximas = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
+        $parcelasAdesao = (int) ($data['parcelas_adesao'] ?? 1);
+        if ($parcelasAdesao < 1 || $parcelasAdesao > $parcelasMaximas) {
+            $errors[] = 'As parcelas de adesão não podem ultrapassar o máximo configurado.';
+        }
+
+        $fidelidadeMeses = (int) ($data['fidelidade_meses'] ?? 0);
+        if ($fidelidadeMeses < 1) {
+            $errors[] = 'Informe a fidelidade em meses.';
         }
 
         if (!$this->isValidEmail((string) $data['email'])) {
@@ -1852,6 +1958,64 @@ final class ClientController
         }
     }
 
+    private function resolveAcceptanceStatusForLogin(string $login): array
+    {
+        $login = trim($login);
+
+        if ($login === '') {
+            return [
+                'status' => 'pendente',
+                'label' => 'pendente',
+                'accepted' => false,
+                'acceptance' => null,
+                'contract' => null,
+            ];
+        }
+
+        $contract = null;
+
+        try {
+            $contract = $this->contractRepository->findByLogin($login);
+        } catch (\Throwable) {
+            $contract = null;
+        }
+
+        if (!is_array($contract) || !isset($contract['id'])) {
+            return [
+                'status' => 'pendente',
+                'label' => 'pendente',
+                'accepted' => false,
+                'acceptance' => null,
+                'contract' => null,
+            ];
+        }
+
+        $acceptance = null;
+
+        try {
+            $acceptance = $this->contractAcceptanceRepository->findLatestByContractId((int) $contract['id']);
+        } catch (\Throwable) {
+            $acceptance = null;
+        }
+
+        $status = strtolower((string) ($acceptance['status'] ?? 'pendente'));
+        $label = match ($status) {
+            'aceito' => 'aceite aceito',
+            'enviado' => 'aceite enviado',
+            'expirado' => 'aceite expirado',
+            'cancelado' => 'aceite cancelado',
+            default => 'aceite pendente',
+        };
+
+        return [
+            'status' => $status,
+            'label' => $label,
+            'accepted' => $status === 'aceito',
+            'acceptance' => $acceptance,
+            'contract' => $contract,
+        ];
+    }
+
     private function recordClientRegistration(array $data, array $payload, string $connectionToken): ?int
     {
         $user = $this->resolveUser();
@@ -1930,6 +2094,10 @@ final class ClientController
 
             $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
             if (is_array($acceptance) && isset($acceptance['id'])) {
+                $existingTokenHash = trim((string) ($acceptance['token_hash'] ?? ''));
+                if ($existingTokenHash !== '') {
+                    $acceptanceData['token_hash'] = $existingTokenHash;
+                }
                 $this->contractAcceptanceRepository->updateById((int) $acceptance['id'], $acceptanceData);
                 $this->recordAudit('contract.acceptance.updated', 'contract_acceptance', (int) $acceptance['id'], [
                     'login' => (string) $contractData['mkauth_login'],
@@ -2009,12 +2177,60 @@ final class ClientController
         $login = trim((string) ($payload['login'] ?? $data['login'] ?? ''));
         $nome = trim((string) ($payload['nome'] ?? $data['nome_completo'] ?? ''));
         $telefone = preg_replace('/\D+/', '', (string) ($payload['celular'] ?? $data['celular'] ?? '')) ?? '';
-        $tipoAdesao = trim((string) ($data['tipo_adesao'] ?? $this->config->get('contracts.default_type_adesao', 'cheia')));
-        $statusFinanceiro = $tipoAdesao === 'isenta' ? 'dispensado' : 'pendente_lancamento';
+        $commercial = $this->contractCommercialConfig();
+        $tipoInstalacao = strtolower(trim((string) ($data['tipo_instalacao'] ?? 'fibra')));
+        $tipoInstalacao = in_array($tipoInstalacao, ['fibra', 'radio'], true) ? $tipoInstalacao : 'fibra';
+        $tipoAdesao = strtolower(trim((string) ($data['tipo_adesao'] ?? '')));
+        if (!in_array($tipoAdesao, ['cheia', 'promocional', 'isenta'], true)) {
+            $tipoAdesao = $tipoInstalacao === 'fibra' ? 'isenta' : 'cheia';
+        }
+
+        $parcelasMaximas = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
+        $parcelasAdesao = max(1, min($parcelasMaximas, (int) ($data['parcelas_adesao'] ?? 1)));
+        $valorBase = (float) ($commercial['valor_adesao_padrao'] ?? 0);
+        $valorPromocional = (float) ($commercial['valor_adesao_promocional'] ?? 0);
+        $descontoPromocional = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
         $valorAdesao = $this->normalizeMoney((string) ($data['valor_adesao'] ?? '0'));
-        $parcelasAdesao = max(1, (int) ($data['parcelas_adesao'] ?? 1));
+        if ($valorAdesao <= 0) {
+            $valorAdesao = $this->resolveAdhesionValue($tipoAdesao, $valorBase, $valorPromocional, $descontoPromocional);
+        }
+
+        if ($tipoAdesao === 'isenta') {
+            $valorAdesao = 0.0;
+        }
+
         $valorParcela = $this->normalizeMoney((string) ($data['valor_parcela_adesao'] ?? '0'));
-        $fidelidade = max(0, (int) ($data['fidelidade_meses'] ?? 12));
+        if ($valorParcela <= 0) {
+            $valorParcela = $parcelasAdesao > 0 ? round($valorAdesao / $parcelasAdesao, 2) : 0.0;
+        }
+
+        $fidelidade = (int) ($data['fidelidade_meses'] ?? 0);
+        if ($fidelidade <= 0) {
+            $fidelidade = max(1, (int) ($commercial['fidelidade_meses_padrao'] ?? 12));
+        }
+        $beneficioConcedidoPor = trim((string) ($data['beneficio_concedido_por'] ?? ''));
+        $beneficioValor = $tipoAdesao === 'isenta'
+            ? $valorBase
+            : max(0.0, $valorBase - $valorAdesao);
+        $multaTotal = max(0.0, (float) ($commercial['multa_padrao'] ?? 0));
+
+        $vencimentoPrimeiraParcela = $this->calculateFirstBillingDate((string) ($data['vencimento'] ?? ''));
+        if ($vencimentoPrimeiraParcela === null) {
+            $vencimentoPrimeiraParcela = $this->normalizeDateInput((string) ($data['vencimento_primeira_parcela'] ?? ''));
+        }
+
+        $observacaoAdesao = trim((string) ($data['observacao_adesao'] ?? $data['observacao'] ?? $data['observacao_aceite'] ?? ''));
+        $observacaoAdesaoLines = [];
+
+        if ($beneficioConcedidoPor !== '') {
+            $observacaoAdesaoLines[] = 'Autorizado por: ' . $beneficioConcedidoPor;
+        }
+
+        if ($observacaoAdesao !== '') {
+            $observacaoAdesaoLines[] = 'Observação: ' . $observacaoAdesao;
+        }
+
+        $observacaoAdesao = trim(implode("\n", $observacaoAdesaoLines));
 
         return [
             'client_id' => $registrationId,
@@ -2025,19 +2241,20 @@ final class ClientController
             'valor_adesao' => $valorAdesao,
             'parcelas_adesao' => $parcelasAdesao,
             'valor_parcela_adesao' => $valorParcela,
-            'vencimento_primeira_parcela' => $this->calculateFirstBillingDate((string) ($data['vencimento'] ?? '')),
-            'fidelidade_meses' => $fidelidade > 0 ? $fidelidade : 12,
-            'beneficio_valor' => $this->normalizeMoney((string) ($data['beneficio_valor'] ?? '0')),
-            'multa_total' => $this->normalizeMoney((string) ($data['multa_total'] ?? '0')),
+            'vencimento_primeira_parcela' => $vencimentoPrimeiraParcela,
+            'fidelidade_meses' => $fidelidade,
+            'beneficio_valor' => $beneficioValor,
+            'multa_total' => $multaTotal,
+            'beneficio_concedido_por' => $beneficioConcedidoPor,
             'tipo_aceite' => trim((string) ($data['tipo_aceite'] ?? $this->config->get('contracts.default_tipo_aceite', 'nova_instalacao'))),
-            'observacao_adesao' => trim((string) ($data['observacao_adesao'] ?? $data['observacao'] ?? $data['observacao_aceite'] ?? '')),
+            'observacao_adesao' => $observacaoAdesao,
             'status_financeiro' => $statusFinanceiro,
         ];
     }
 
     private function buildAcceptanceData(int $contractId, array $data, array $contractData, string $termHash, Request $request): array
     {
-        $ttlHours = max(1, (int) $this->config->get('contracts.acceptance_ttl_hours', 48));
+        $ttlHours = max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48));
         $expiresAt = (new \DateTimeImmutable())->modify('+' . $ttlHours . ' hours')->format('Y-m-d H:i:s');
         $plainToken = bin2hex(random_bytes(16));
         $acceptanceData = [
@@ -2093,7 +2310,7 @@ final class ClientController
         $parcelas = (int) ($contractData['parcelas_adesao'] ?? 1);
         $valorParcela = number_format((float) ($contractData['valor_parcela_adesao'] ?? 0), 2, ',', '.');
         $fidelidade = (int) ($contractData['fidelidade_meses'] ?? 12);
-        $multa = number_format((float) ($contractData['multa_total'] ?? 0), 2, ',', '.');
+        $autorizadoPor = trim((string) ($contractData['beneficio_concedido_por'] ?? ''));
         $observacao = (string) ($contractData['observacao_adesao'] ?? '');
 
         return trim(implode("\n", [
@@ -2106,28 +2323,31 @@ final class ClientController
             'Parcelas da adesão: ' . $parcelas,
             'Valor por parcela: R$ ' . $valorParcela,
             'Fidelidade: ' . $fidelidade . ' meses',
-            'Multa total: R$ ' . $multa,
+            $autorizadoPor !== '' ? 'Autorizado por: ' . $autorizadoPor : 'Autorizado por: -',
             'Observação: ' . $observacao,
             '',
-            'A taxa de adesão poderá ser concedida com desconto, isenção ou parcelamento, condicionada à fidelidade de 12 meses. Em caso de cancelamento antecipado, poderá ser cobrado valor proporcional ao benefício concedido.',
+            'A taxa de adesão poderá ser concedida com desconto, isenção ou parcelamento, condicionada à fidelidade de 12 meses. O cancelamento antes do fim da fidelidade poderá gerar cobrança proporcional conforme condições contratadas.',
             'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
+            'O aceite é realizado por link enviado ao telefone por WhatsApp e/ou e-mail cadastrado. A confirmação por qualquer um desses canais valida o aceite eletrônico.',
         ]));
     }
 
     private function defaultMessageTemplates(): array
     {
+        $ttlHours = max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48));
+
         return [
             'aceite_nova_instalacao' => [
                 'channel' => 'whatsapp',
                 'purpose' => 'aceite_nova_instalacao',
-                'body' => "Olá, {nome} 👋\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em 48 horas.",
+                'body' => "Olá, {nome} 👋\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {$ttlHours} horas.",
                 'variables_json' => ['nome', 'link_aceite'],
                 'active' => 1,
             ],
             'aceite_regularizacao_contrato' => [
                 'channel' => 'whatsapp',
                 'purpose' => 'aceite_regularizacao_contrato',
-                'body' => "Olá, {nome} 👋\n\nSeu contrato foi preparado para regularização.\n\nConfira os dados e aceite no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em 48 horas.",
+                'body' => "Olá, {nome} 👋\n\nSeu contrato foi preparado para regularização.\n\nConfira os dados e aceite no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {$ttlHours} horas.",
                 'variables_json' => ['nome', 'link_aceite'],
                 'active' => 1,
             ],
@@ -2174,6 +2394,51 @@ final class ClientController
         $normalized = str_replace(['.', ','], ['', '.'], $value);
 
         return (float) $normalized;
+    }
+
+    private function normalizeDateInput(string $value): ?string
+    {
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $date = \DateTimeImmutable::createFromFormat('Y-m-d', $value);
+
+        if (!$date || $date->format('Y-m-d') !== $value) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private function resolveAdhesionValue(string $tipoAdesao, float $baseValue, float $promoValue, float $discountPercent): float
+    {
+        return match ($tipoAdesao) {
+            'isenta' => 0.0,
+            'promocional' => $promoValue > 0
+                ? $promoValue
+                : max(0.0, $baseValue - ($baseValue * max(0.0, $discountPercent) / 100)),
+            default => max(0.0, $baseValue),
+        };
+    }
+
+    private function contractCommercialConfig(): array
+    {
+        $commercial = $this->config->get('contracts.commercial', []);
+
+        return [
+            'valor_adesao_padrao' => (float) ($commercial['valor_adesao_padrao'] ?? 0),
+            'valor_adesao_promocional' => (float) ($commercial['valor_adesao_promocional'] ?? 0),
+            'percentual_desconto_promocional' => (float) ($commercial['percentual_desconto_promocional'] ?? 0),
+            'parcelas_maximas_adesao' => max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3)),
+            'fidelidade_meses_padrao' => max(1, (int) ($commercial['fidelidade_meses_padrao'] ?? 12)),
+            'multa_padrao' => (float) ($commercial['multa_padrao'] ?? 0),
+            'exigir_validacao_cpf_aceite' => (bool) ($commercial['exigir_validacao_cpf_aceite'] ?? true),
+            'quantidade_digitos_validacao_cpf' => max(1, (int) ($commercial['quantidade_digitos_validacao_cpf'] ?? 4)),
+            'validade_link_aceite_horas' => max(1, (int) ($commercial['validade_link_aceite_horas'] ?? 48)),
+        ];
     }
 
     private function recordAudit(string $action, string $entityType, ?int $entityId, array $context, Request $request): void

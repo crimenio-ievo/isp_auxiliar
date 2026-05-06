@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Controllers\AuthController;
+use App\Controllers\AcceptanceController;
 use App\Controllers\ContractController;
 use App\Controllers\ClientController;
 use App\Controllers\DashboardController;
@@ -25,11 +26,14 @@ return static function (Router $router): void {
 
     $router->get('/dashboard', [DashboardController::class, 'index'], 'dashboard');
     $router->get('/contratos', [ContractController::class, 'index'], 'contracts.index');
+    $router->post('/contratos', [ContractController::class, 'index'], 'contracts.index.save');
     $router->get('/contratos/novos', [ContractController::class, 'novos'], 'contracts.new');
     $router->get('/contratos/aceites/pendentes', [ContractController::class, 'aceitesPendentes'], 'contracts.acceptances.pending');
     $router->get('/contratos/detalhe', [ContractController::class, 'detalhe'], 'contracts.detail');
     $router->post('/contratos/financeiro/concluir', [ContractController::class, 'concluirFinanceiro'], 'contracts.financial.complete');
     $router->post('/contratos/financeiro/cancelar', [ContractController::class, 'cancelarFinanceiro'], 'contracts.financial.cancel');
+    $router->get('/aceite/{token}', [AcceptanceController::class, 'show'], 'acceptance.show');
+    $router->post('/aceite/{token}/confirmar', [AcceptanceController::class, 'confirm'], 'acceptance.confirm');
     $router->get('/clientes/novo', [ClientController::class, 'create'], 'clients.create');
     $router->post('/clientes/novo', [ClientController::class, 'store'], 'clients.store');
     $router->post('/clientes/rascunho/limpar', [ClientController::class, 'clearDraft'], 'clients.draft.clear');

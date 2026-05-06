@@ -613,6 +613,11 @@ textarea {
     background: rgba(247, 249, 252, 0.92);
 }
 
+.photo-uploader.is-invalid {
+    border-color: rgba(185, 28, 28, 0.55);
+    box-shadow: 0 0 0 4px rgba(185, 28, 28, 0.08);
+}
+
 .photo-uploader__actions {
     display: flex;
     gap: 10px;
@@ -628,9 +633,26 @@ textarea {
     font-size: 0.98rem;
 }
 
+.photo-uploader__summary strong[data-tone="error"] {
+    color: #b3261e;
+}
+
+.photo-uploader__summary strong[data-tone="success"] {
+    color: #0b5f59;
+}
+
 .photo-uploader__preview {
     display: grid;
     gap: 10px;
+}
+
+.contract-commercial-card {
+    display: grid;
+    gap: 18px;
+}
+
+.contract-commercial-card .form-grid {
+    gap: 14px;
 }
 
 .photo-chip {
@@ -802,6 +824,26 @@ textarea {
     flex-wrap: wrap;
 }
 
+.contract-signature-preview {
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: rgba(247, 249, 252, 0.92);
+}
+
+.contract-signature-preview img {
+    width: 100%;
+    max-width: 360px;
+    min-height: 120px;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(23, 50, 77, 0.1);
+    background: #ffffff;
+}
+
 .field input,
 .field select,
 .field textarea {
@@ -820,6 +862,26 @@ textarea {
     outline: none;
     border-color: rgba(31, 94, 255, 0.45);
     box-shadow: 0 0 0 4px rgba(31, 94, 255, 0.1);
+}
+
+.field input:invalid,
+.field select:invalid,
+.field textarea:invalid,
+.field input[aria-invalid="true"],
+.field select[aria-invalid="true"],
+.field textarea[aria-invalid="true"] {
+    border-color: rgba(185, 28, 28, 0.55);
+    box-shadow: 0 0 0 4px rgba(185, 28, 28, 0.08);
+}
+
+.field input:invalid:focus,
+.field select:invalid:focus,
+.field textarea:invalid:focus,
+.field input[aria-invalid="true"]:focus,
+.field select[aria-invalid="true"]:focus,
+.field textarea[aria-invalid="true"]:focus {
+    border-color: rgba(185, 28, 28, 0.75);
+    box-shadow: 0 0 0 4px rgba(185, 28, 28, 0.12);
 }
 
 .button {

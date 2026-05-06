@@ -50,9 +50,37 @@ final class Router
                 $methodMatches = true;
             }
 
-            if ($methodMatches && $route['path'] === $normalizedPath) {
+            if (!$methodMatches) {
+                continue;
+            }
+
+            if ($route['path'] === $normalizedPath) {
+                $route['params'] = [];
+
                 return $route;
             }
+
+            $pattern = $this->compilePathPattern($route['path']);
+            if ($pattern === null) {
+                continue;
+            }
+
+            if (preg_match($pattern, $normalizedPath, $matches) !== 1) {
+                continue;
+            }
+
+            $params = [];
+            foreach ($matches as $key => $value) {
+                if (!is_string($key)) {
+                    continue;
+                }
+
+                $params[$key] = rawurldecode($value);
+            }
+
+            $route['params'] = $params;
+
+            return $route;
         }
 
         return null;
@@ -72,5 +100,25 @@ final class Router
         $normalized = '/' . trim($path, '/');
 
         return $normalized === '//' ? '/' : $normalized;
+    }
+
+    private function compilePathPattern(string $path): ?string
+    {
+        if (!str_contains($path, '{')) {
+            return null;
+        }
+
+        $escaped = preg_quote($path, '#');
+        $pattern = preg_replace_callback(
+            '#\\\\\{([a-zA-Z_][a-zA-Z0-9_]*)\\\\\}#',
+            static fn (array $matches): string => '(?P<' . $matches[1] . '>[^/]+)',
+            $escaped
+        );
+
+        if (!is_string($pattern)) {
+            return null;
+        }
+
+        return '#^' . $pattern . '$#';
     }
 }

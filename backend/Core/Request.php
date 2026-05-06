@@ -16,7 +16,8 @@ final class Request
         private array $queryParams = [],
         private array $bodyParams = [],
         private array $headers = [],
-        private array $server = []
+        private array $server = [],
+        private array $routeParams = []
     ) {
     }
 
@@ -92,6 +93,25 @@ final class Request
     public function server(string $key, mixed $default = null): mixed
     {
         return $this->server[$key] ?? $default;
+    }
+
+    public function route(string $key, mixed $default = null): mixed
+    {
+        return $this->routeParams[$key] ?? $default;
+    }
+
+    public function withRouteParams(array $routeParams): self
+    {
+        return new self(
+            $this->method,
+            $this->path,
+            $this->basePath,
+            $this->queryParams,
+            $this->bodyParams,
+            $this->headers,
+            $this->server,
+            $routeParams
+        );
     }
 
     private static function extractHeaders(): array

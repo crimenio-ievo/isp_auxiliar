@@ -43,6 +43,24 @@ final class ContractController
 
     public function index(Request $request): Response
     {
+        $currentTab = $this->normalizeTab((string) ($request->input('tab', $request->query('tab', 'resumo'))));
+
+        if ($currentTab === 'configuracoes' && $request->method() === 'POST' && $request->input('save_config', '') === '1') {
+            if (!$this->canManageContracts()) {
+                Flash::set('error', 'Somente o gestor pode alterar as configuracoes do modulo.');
+                return Response::redirect('/contratos?tab=configuracoes');
+            }
+
+            try {
+                $this->saveCommercialSettings($this->normalizeCommercialSettingsFromRequest($request));
+                Flash::set('success', 'Configuracoes comerciais atualizadas com sucesso.');
+            } catch (\Throwable $exception) {
+                Flash::set('error', 'Nao foi possivel salvar as configuracoes agora. Verifique permissões e tente novamente.');
+            }
+
+            return Response::redirect('/contratos?tab=configuracoes');
+        }
+
         $state = $this->buildState();
 
         $html = $this->view->render('contracts/index', [
@@ -51,11 +69,13 @@ final class ContractController
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $this->resolveUser(),
+            'currentTab' => $currentTab,
             'moduleReady' => $state['moduleReady'],
             'moduleMessage' => $state['moduleMessage'],
             'summaryCards' => $state['summaryCards'],
             'recentContracts' => $state['recentContracts'],
             'pendingAcceptances' => $state['pendingAcceptances'],
+            'commercialConfig' => $this->config->get('contracts.commercial', []),
             'canManageContracts' => $this->canManageContracts(),
         ]);
 
@@ -473,6 +493,9 @@ final class ContractController
             $financialTask = null;
         }
 
+        $acceptanceId = is_array($acceptance) && isset($acceptance['id']) ? (int) $acceptance['id'] : null;
+        $financialTaskId = is_array($financialTask) && isset($financialTask['id']) ? (int) $financialTask['id'] : null;
+
         try {
             $notificationLogs = $this->notificationLogRepository->listByContractId($contractId, 100);
             if ($acceptanceId !== null) {
@@ -497,9 +520,6 @@ final class ContractController
             $notificationLogs = [];
         }
 
-        $acceptanceId = is_array($acceptance) && isset($acceptance['id']) ? (int) $acceptance['id'] : null;
-        $financialTaskId = is_array($financialTask) && isset($financialTask['id']) ? (int) $financialTask['id'] : null;
-
         try {
             $auditLogs = $this->localRepository->auditLogsForContract(
                 $contractId,
@@ -519,6 +539,91 @@ final class ContractController
             'notificationLogs' => $notificationLogs,
             'auditLogs' => $auditLogs,
         ];
+    }
+
+    private function normalizeTab(string $tab): string
+    {
+        $tab = strtolower(trim($tab));
+
+        return in_array($tab, ['resumo', 'novos', 'aceites-pendentes', 'configuracoes'], true) ? $tab : 'resumo';
+    }
+
+    private function normalizeCommercialSettingsFromRequest(Request $request): array
+    {
+        $commercial = $this->config->get('contracts.commercial', []);
+
+        return [
+            'valor_adesao_padrao' => $this->normalizeMoney((string) $request->input('valor_adesao_padrao', (string) ($commercial['valor_adesao_padrao'] ?? 0))),
+            'valor_adesao_promocional' => $this->normalizeMoney((string) $request->input('valor_adesao_promocional', (string) ($commercial['valor_adesao_promocional'] ?? 0))),
+            'percentual_desconto_promocional' => $this->normalizeMoney((string) $request->input('percentual_desconto_promocional', (string) ($commercial['percentual_desconto_promocional'] ?? 0))),
+            'parcelas_maximas_adesao' => max(1, (int) $request->input('parcelas_maximas_adesao', (string) ($commercial['parcelas_maximas_adesao'] ?? 3))),
+            'fidelidade_meses_padrao' => max(1, (int) $request->input('fidelidade_meses_padrao', (string) ($commercial['fidelidade_meses_padrao'] ?? 12))),
+            'validade_link_aceite_horas' => max(1, (int) $request->input('validade_link_aceite_horas', (string) ($commercial['validade_link_aceite_horas'] ?? 48))),
+            'exigir_validacao_cpf_aceite' => $this->normalizeBooleanQuery((string) $request->input('exigir_validacao_cpf_aceite', '1')),
+            'quantidade_digitos_validacao_cpf' => max(1, (int) $request->input('quantidade_digitos_validacao_cpf', (string) ($commercial['quantidade_digitos_validacao_cpf'] ?? 3))),
+            'multa_padrao' => $this->normalizeMoney((string) $request->input('multa_padrao', (string) ($commercial['multa_padrao'] ?? 0))),
+        ];
+    }
+
+    private function saveCommercialSettings(array $commercial): void
+    {
+        $path = $this->contractSettingsPath();
+        $directory = dirname($path);
+
+        if (!is_dir($directory)) {
+            if (!mkdir($directory, 0775, true) && !is_dir($directory)) {
+                throw new \RuntimeException('Nao foi possivel criar o diretorio de configuracoes.');
+            }
+        }
+
+        if (!is_writable($directory)) {
+            throw new \RuntimeException('Diretorio de configuracoes sem permissão de escrita.');
+        }
+
+        $written = file_put_contents(
+            $path,
+            json_encode([
+                'commercial' => $commercial,
+                'saved_at' => date('Y-m-d H:i:s'),
+                'saved_by' => (string) ($this->resolveUser()['login'] ?? ''),
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
+        );
+
+        if ($written === false) {
+            throw new \RuntimeException('Nao foi possivel escrever o arquivo de configuracoes.');
+        }
+    }
+
+    private function contractSettingsPath(): string
+    {
+        return $this->projectRootPath() . '/storage/contracts/config.json';
+    }
+
+    private function projectRootPath(): string
+    {
+        return dirname(__DIR__, 2);
+    }
+
+    private function normalizeBooleanQuery(string $value): bool
+    {
+        $value = strtolower(trim($value));
+
+        return in_array($value, ['1', 'true', 'sim', 'on', 'yes'], true);
+    }
+
+    private function normalizeMoney(string $value): float
+    {
+        $value = trim($value);
+
+        if ($value === '') {
+            return 0.0;
+        }
+
+        $normalized = preg_replace('/[^\d,.\-]/', '', $value) ?? '';
+        $normalized = preg_replace('/\.(?=\d{3}(?:\D|$))/', '', $normalized) ?? '';
+        $normalized = str_replace(',', '.', $normalized);
+
+        return is_numeric($normalized) ? (float) $normalized : 0.0;
     }
 
     private function countRows(string $table, string $where = '1 = 1'): int
@@ -676,9 +781,13 @@ final class ContractController
     {
         $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : [];
         $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
-        $contractId = (int) ($contract['id'] ?? 0);
-        $acceptanceId = (int) ($acceptance['id'] ?? 0);
-        $tokenFragment = $acceptanceId > 0 ? (string) $acceptanceId : (string) $contractId;
+        $tokenFragment = trim((string) ($acceptance['token_hash'] ?? ''));
+
+        if ($tokenFragment === '') {
+            $contractId = (int) ($contract['id'] ?? 0);
+            $acceptanceId = (int) ($acceptance['id'] ?? 0);
+            $tokenFragment = $acceptanceId > 0 ? (string) $acceptanceId : (string) $contractId;
+        }
 
         return Url::to('/aceite/' . rawurlencode($tokenFragment));
     }

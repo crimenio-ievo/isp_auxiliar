@@ -1,0 +1,36 @@
+{
+    "contract": {
+        "id": 2,
+        "client_id": 4,
+        "mkauth_login": "crimenio",
+        "nome_cliente": "Crimenio Lopes de Faria",
+        "telefone_cliente": "32999908856",
+        "tipo_adesao": "cheia",
+        "valor_adesao": 0,
+        "parcelas_adesao": 1,
+        "valor_parcela_adesao": 0,
+        "vencimento_primeira_parcela": "2026-06-05",
+        "fidelidade_meses": 12,
+        "beneficio_valor": 0,
+        "multa_total": 0,
+        "tipo_aceite": "nova_instalacao",
+        "observacao_adesao": "",
+        "status_financeiro": "pendente_lancamento"
+    },
+    "acceptance": {
+        "id": 2,
+        "contract_id": 2,
+        "status": "aceito",
+        "accepted_at": "2026-05-06 16:25:23",
+        "ip_address": "10.4.0.2",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        "termo_versao": "2026.1",
+        "termo_hash": "a5c71a97a329261a5b347ce65768c380a402fbe515d388e76c8395ec70e91d24"
+    },
+    "accepted_at": "2026-05-06 16:25:23",
+    "ip_address": "10.4.0.2",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "term_hash": "a5c71a97a329261a5b347ce65768c380a402fbe515d388e76c8395ec70e91d24",
+    "term_version": "2026.1",
+    "token_reference": "757b25f50575a8f9842a77fbdad808ed1ab2b8f39b127f1be5f504f33d4e148e"
+}

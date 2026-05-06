@@ -34,7 +34,7 @@ final class Application
             return Response::redirect('/login');
         }
 
-        $result = $this->dispatch($route['action'], $request);
+        $result = $this->dispatch($route['action'], $request->withRouteParams(is_array($route['params'] ?? null) ? $route['params'] : []));
 
         if ($result instanceof Response) {
             return $result;
@@ -85,7 +85,11 @@ final class Application
             '/clientes/evidencias/arquivo',
         ];
 
-        return in_array($request->path(), $publicPaths, true);
+        if (in_array($request->path(), $publicPaths, true)) {
+            return true;
+        }
+
+        return (bool) preg_match('#^/aceite/[^/]+(?:/confirmar)?$#', $request->path());
     }
 
     /**

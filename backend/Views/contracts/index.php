@@ -7,7 +7,14 @@ use App\Core\Url;
 $summaryCards = is_array($summaryCards ?? null) ? $summaryCards : [];
 $recentContracts = is_array($recentContracts ?? null) ? $recentContracts : [];
 $pendingAcceptances = is_array($pendingAcceptances ?? null) ? $pendingAcceptances : [];
+$commercialConfig = is_array($commercialConfig ?? null) ? $commercialConfig : [];
+$currentTab = (string) ($currentTab ?? 'resumo');
 $canManageContracts = !empty($canManageContracts);
+$moneyValue = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
+$tabLink = static function (string $tab) use ($currentTab): string {
+    $active = $currentTab === $tab ? ' is-active' : '';
+    return $active;
+};
 
 ob_start();
 ?>
@@ -16,6 +23,20 @@ ob_start();
         <p class="section-heading__eyebrow">Operação</p>
         <h1>Contratos &amp; Aceites</h1>
         <p class="page-description">Painel inicial do módulo de contratos, aceite digital e pendências vinculadas ao atendimento.</p>
+    </div>
+</section>
+
+<section class="card" style="margin-bottom: 20px;">
+    <div class="section-heading">
+        <p class="section-heading__eyebrow">Navegação</p>
+        <h2>Áreas do módulo</h2>
+    </div>
+
+    <div class="hero-actions">
+        <a class="button button--ghost<?= $currentTab === 'resumo' ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/contratos'), ENT_QUOTES, 'UTF-8'); ?>">Resumo</a>
+        <a class="button button--ghost<?= $currentTab === 'novos' ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/contratos/novos'), ENT_QUOTES, 'UTF-8'); ?>">Novos Contratos</a>
+        <a class="button button--ghost<?= $currentTab === 'aceites-pendentes' ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/contratos/aceites/pendentes'), ENT_QUOTES, 'UTF-8'); ?>">Aceites Pendentes</a>
+        <a class="button button--ghost<?= $currentTab === 'configuracoes' ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/contratos?tab=configuracoes'), ENT_QUOTES, 'UTF-8'); ?>">Configurações</a>
     </div>
 </section>
 
@@ -29,16 +50,92 @@ ob_start();
     </section>
 <?php endif; ?>
 
-<section class="stats-grid">
-    <?php foreach ($summaryCards as $card): ?>
-        <article class="card stat-card">
-            <p class="stat-card__label"><?= htmlspecialchars((string) ($card['label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
-            <strong class="stat-card__value"><?= htmlspecialchars((string) ($card['value'] ?? '0'), ENT_QUOTES, 'UTF-8'); ?></strong>
-            <span class="stat-card__hint"><?= htmlspecialchars((string) ($card['hint'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
-        </article>
-    <?php endforeach; ?>
-</section>
+<?php if ($currentTab !== 'configuracoes'): ?>
+    <section class="stats-grid">
+        <?php foreach ($summaryCards as $card): ?>
+            <article class="card stat-card">
+                <p class="stat-card__label"><?= htmlspecialchars((string) ($card['label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
+                <strong class="stat-card__value"><?= htmlspecialchars((string) ($card['value'] ?? '0'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                <span class="stat-card__hint"><?= htmlspecialchars((string) ($card['hint'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+            </article>
+        <?php endforeach; ?>
+    </section>
+<?php endif; ?>
 
+<?php if ($currentTab === 'configuracoes'): ?>
+    <section class="content-grid" style="margin-top: 20px;">
+        <article class="card card--span-2">
+            <div class="section-heading">
+                <p class="section-heading__eyebrow">Configuração</p>
+                <h2>Parâmetros comerciais</h2>
+            </div>
+
+            <?php if (!empty($moduleMessage)): ?>
+                <div class="status-card status-card--warning" style="margin-bottom: 18px;">
+                    <strong><?= htmlspecialchars((string) $moduleMessage, ENT_QUOTES, 'UTF-8'); ?></strong>
+                    <small>As configurações podem ser salvas antes da base completa existir.</small>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($canManageContracts): ?>
+                <form method="post" action="<?= htmlspecialchars(Url::to('/contratos'), ENT_QUOTES, 'UTF-8'); ?>" class="content-grid content-grid--form">
+                    <input type="hidden" name="tab" value="configuracoes">
+                    <input type="hidden" name="save_config" value="1">
+
+                    <label class="field">
+                        <span>Valor adesão padrão</span>
+                        <input type="text" name="valor_adesao_padrao" inputmode="decimal" value="<?= htmlspecialchars($moneyValue($commercialConfig['valor_adesao_padrao'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>Valor adesão promocional</span>
+                        <input type="text" name="valor_adesao_promocional" inputmode="decimal" value="<?= htmlspecialchars($moneyValue($commercialConfig['valor_adesao_promocional'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>Percentual desconto promocional</span>
+                        <input type="text" name="percentual_desconto_promocional" inputmode="decimal" value="<?= htmlspecialchars($moneyValue($commercialConfig['percentual_desconto_promocional'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>Parcelas máximas da adesão</span>
+                        <input type="number" name="parcelas_maximas_adesao" min="1" value="<?= htmlspecialchars((string) ($commercialConfig['parcelas_maximas_adesao'] ?? 3), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>Fidelidade padrão</span>
+                        <input type="number" name="fidelidade_meses_padrao" min="1" value="<?= htmlspecialchars((string) ($commercialConfig['fidelidade_meses_padrao'] ?? 12), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>Validade do link do aceite (horas)</span>
+                        <input type="number" name="validade_link_aceite_horas" min="1" value="<?= htmlspecialchars((string) ($commercialConfig['validade_link_aceite_horas'] ?? 48), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>Exigir validação parcial do CPF/CNPJ</span>
+                        <select name="exigir_validacao_cpf_aceite">
+                            <option value="1" <?= !empty($commercialConfig['exigir_validacao_cpf_aceite']) ? 'selected' : ''; ?>>Sim</option>
+                            <option value="0" <?= empty($commercialConfig['exigir_validacao_cpf_aceite']) ? 'selected' : ''; ?>>Não</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span>Quantidade de dígitos da validação</span>
+                        <input type="number" name="quantidade_digitos_validacao_cpf" min="1" value="<?= htmlspecialchars((string) ($commercialConfig['quantidade_digitos_validacao_cpf'] ?? 3), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <div class="form-actions field--span-2">
+                        <button type="submit" class="button">Salvar configurações</button>
+                        <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/contratos'), ENT_QUOTES, 'UTF-8'); ?>">Voltar ao resumo</a>
+                    </div>
+                </form>
+            <?php else: ?>
+                <p class="page-description">Apenas o gestor pode ajustar os parâmetros comerciais do módulo.</p>
+            <?php endif; ?>
+        </article>
+    </section>
+<?php else: ?>
 <section class="content-grid" style="margin-top: 20px;">
     <article class="card">
         <div class="section-heading">
@@ -90,7 +187,9 @@ ob_start();
                         <?php
                             $contractId = (int) ($contract['id'] ?? 0);
                             $acceptanceId = (int) ($contract['acceptance_id'] ?? 0);
-                            $simulatedLink = Url::to('/aceite/' . rawurlencode((string) ($acceptanceId > 0 ? $acceptanceId : $contractId)));
+                            $tokenHash = trim((string) ($contract['token_hash'] ?? ''));
+                            $linkToken = $tokenHash !== '' ? $tokenHash : (string) ($acceptanceId > 0 ? $acceptanceId : $contractId);
+                            $simulatedLink = Url::to('/aceite/' . rawurlencode($linkToken));
                         ?>
                         <tr>
                             <td><?= htmlspecialchars((string) ($contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
@@ -141,7 +240,9 @@ ob_start();
                         <?php
                             $contractId = (int) ($acceptance['contract_id'] ?? 0);
                             $acceptanceId = (int) ($acceptance['acceptance_id'] ?? 0);
-                            $simulatedLink = Url::to('/aceite/' . rawurlencode((string) ($acceptanceId > 0 ? $acceptanceId : $contractId)));
+                            $tokenHash = trim((string) ($acceptance['token_hash'] ?? ''));
+                            $linkToken = $tokenHash !== '' ? $tokenHash : (string) ($acceptanceId > 0 ? $acceptanceId : $contractId);
+                            $simulatedLink = Url::to('/aceite/' . rawurlencode($linkToken));
                         ?>
                         <tr>
                             <td><?= htmlspecialchars((string) ($acceptance['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
@@ -169,6 +270,7 @@ ob_start();
         </div>
     </article>
 </section>
+<?php endif; ?>
 <?php
 $content = (string) ob_get_clean();
 

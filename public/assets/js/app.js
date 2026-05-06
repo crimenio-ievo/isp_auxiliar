@@ -65,7 +65,10 @@ const photoCameraInput = document.querySelector('[data-photo-camera-input]');
 const photoInputContainer = document.querySelector('[data-photo-inputs]');
 const photoPreview = document.querySelector('[data-photo-preview]');
 const photoCount = document.querySelector('[data-photo-count]');
+const photoUploader = document.querySelector('[data-photo-uploader]');
 const acceptanceForm = document.querySelector('[data-acceptance-form]');
+const acceptanceDocumentInput = document.querySelector('[data-acceptance-document-input]');
+const acceptanceDocumentHelp = acceptanceDocumentInput ? acceptanceDocumentInput.closest('.field')?.querySelector('[data-acceptance-document-help]') : null;
 const cpfInput = document.querySelector('[data-cpf-input]');
 const loginInput = document.querySelector('[data-login-input]');
 const systemLoginInput = document.querySelector('[data-system-login-input]');
@@ -85,6 +88,7 @@ const installationTypeSelect = document.querySelector('[data-install-type-select
 const localDiciSelect = document.querySelector('[data-local-dici-select]');
 const planSelect = document.querySelector('[data-plan-select]');
 const planHelp = document.querySelector('[data-plan-help]');
+const contractCommercialForm = document.querySelector('[data-contract-commercial-form]');
 let signatureContext = null;
 let isDrawing = false;
 let hasSignatureStroke = false;
@@ -346,6 +350,11 @@ function refreshPhotoQueue() {
 
     if (photoCount) {
         photoCount.textContent = `${items.length} foto${items.length === 1 ? '' : 's'} anexada${items.length === 1 ? '' : 's'}`;
+        photoCount.dataset.tone = items.length > 0 ? 'success' : 'neutral';
+    }
+
+    if (photoUploader) {
+        photoUploader.classList.remove('is-invalid');
     }
 
     if (photoPreview) {
@@ -696,6 +705,42 @@ function wireAutosave(form) {
     form.addEventListener('submit', () => {
         saveDraftFromForm(form).catch(() => {});
     });
+
+    form.addEventListener('submit', (event) => {
+        if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
+            event.preventDefault();
+
+            const firstInvalid = form.querySelector(':invalid');
+            if (firstInvalid) {
+                if (typeof firstInvalid.focus === 'function') {
+                    firstInvalid.focus({ preventScroll: true });
+                }
+                if (typeof firstInvalid.scrollIntoView === 'function') {
+                    firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            if (typeof form.reportValidity === 'function') {
+                form.reportValidity();
+            }
+            return;
+        }
+
+        if (photoUploader) {
+            const hasPhotos = getPhotoItems().length > 0;
+            if (!hasPhotos) {
+                event.preventDefault();
+                photoUploader.classList.add('is-invalid');
+                if (photoCount) {
+                    photoCount.textContent = 'Envie ao menos uma foto da instalacao.';
+                    photoCount.dataset.tone = 'error';
+                }
+                if (typeof photoUploader.scrollIntoView === 'function') {
+                    photoUploader.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        }
+    }, true);
 }
 
 function buildAppUrl(path) {
@@ -1064,6 +1109,244 @@ if (installationTypeSelect) {
 
 if (localDiciSelect) {
     localDiciSelect.addEventListener('change', updatePlanOptions);
+}
+
+function parseMoneyFieldValue(value) {
+    const text = String(value || '').trim();
+
+    if (!text) {
+        return 0;
+    }
+
+    const normalized = text
+        .replace(/[^\d,.-]/g, '')
+        .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+        .replace(/,/g, '.');
+
+    const parsed = Number(normalized);
+
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoneyFieldValue(value) {
+    const parsed = Number(value) || 0;
+
+    return parsed.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function formatLocalDate(date) {
+    return [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+}
+
+function calculateNextBillingDateFromDay(dueDayValue) {
+    const dueDay = Number.parseInt(String(dueDayValue || '').replace(/\D+/g, ''), 10);
+
+    if (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31) {
+        return '';
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const current = new Date(today.getFullYear(), today.getMonth(), Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()));
+    current.setHours(0, 0, 0, 0);
+
+    if (current >= today) {
+        return formatLocalDate(current);
+    }
+
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate()));
+    nextMonth.setHours(0, 0, 0, 0);
+
+    return formatLocalDate(nextMonth);
+}
+
+function readCommercialConfig() {
+    if (!contractCommercialForm) {
+        return null;
+    }
+
+    return safeJsonParse(contractCommercialForm.closest('form')?.dataset.contractCommercialConfig || '{}', {});
+}
+
+function markCommercialManual(input) {
+    if (!input) {
+        return;
+    }
+
+    input.dataset.manualValue = '1';
+}
+
+function setCommercialValue(input, value, allowOverride = false) {
+    if (!input) {
+        return;
+    }
+
+    if (allowOverride || input.dataset.manualValue !== '1' || input.value.trim() === '') {
+        input.value = value;
+        input.dataset.manualValue = '0';
+    }
+}
+
+function updateCommercialSection(force = false) {
+    if (!contractCommercialForm) {
+        return;
+    }
+
+    const config = readCommercialConfig() || {};
+    const installTypeInput = contractCommercialForm.querySelector('[data-install-type-select]');
+    const typeSelect = contractCommercialForm.querySelector('[data-adhesion-type-input]');
+    const valueInput = contractCommercialForm.querySelector('[data-adhesion-value-input]');
+    const parcelsInput = contractCommercialForm.querySelector('[data-adhesion-parcels-input]');
+    const parcelValueInput = contractCommercialForm.querySelector('[data-adhesion-parcel-value-input]');
+    const firstDueInput = contractCommercialForm.querySelector('[data-adhesion-first-due-input]');
+    const fidelityInput = contractCommercialForm.querySelector('[data-adhesion-fidelity-input]');
+    const authorizerInput = contractCommercialForm.querySelector('[data-adhesion-authorizer-input]');
+    const benefitInput = contractCommercialForm.querySelector('[data-adhesion-benefit-input]');
+    const dueDaySelect = contractCommercialForm.querySelector('[name="vencimento"]');
+
+    const installType = String(installTypeInput?.value || 'fibra').toLowerCase() === 'radio' ? 'radio' : 'fibra';
+    const defaultAdhesionType = installType === 'fibra' ? 'isenta' : 'cheia';
+    const baseValue = Number(config.valor_adesao_padrao || 0);
+    const promoValue = Number(config.valor_adesao_promocional || 0);
+    const discountPercent = Number(config.percentual_desconto_promocional || 0);
+    const maxParcels = Math.max(1, Number(config.parcelas_maximas_adesao || 1));
+    const defaultFidelity = Math.max(1, Number(config.fidelidade_meses_padrao || 12));
+
+    if (typeSelect) {
+        if (force || typeSelect.dataset.manualValue !== '1' || !typeSelect.value) {
+            typeSelect.value = defaultAdhesionType;
+            typeSelect.dataset.manualValue = '0';
+        }
+    }
+
+    const currentType = String(typeSelect?.value || defaultAdhesionType);
+    let adhesionValue = parseMoneyFieldValue(valueInput?.value);
+    const isTypingAdhesionValue = document.activeElement === valueInput;
+
+    if (force || valueInput?.dataset.manualValue !== '1' || !valueInput?.value.trim()) {
+        if (currentType === 'isenta') {
+            adhesionValue = 0;
+        } else if (currentType === 'promocional') {
+            adhesionValue = promoValue > 0
+                ? promoValue
+                : Math.max(0, baseValue - (baseValue * Math.max(0, discountPercent) / 100));
+        } else {
+            adhesionValue = baseValue;
+        }
+
+        if (!isTypingAdhesionValue || force) {
+            setCommercialValue(valueInput, formatMoneyFieldValue(adhesionValue), true);
+        }
+    }
+
+    const parcelsValue = Number.parseInt(String(parcelsInput?.value || '1').replace(/\D+/g, ''), 10);
+    const normalizedParcels = Math.max(1, Math.min(maxParcels, Number.isFinite(parcelsValue) ? parcelsValue : 1));
+    if (parcelsInput) {
+        parcelsInput.max = String(maxParcels);
+        if (force || parcelsInput.dataset.manualValue !== '1' || !parcelsInput.value) {
+            parcelsInput.value = String(normalizedParcels);
+            parcelsInput.dataset.manualValue = '0';
+        } else if (parcelsValue > maxParcels) {
+            parcelsInput.value = String(maxParcels);
+        }
+    }
+
+    const currentParcels = Math.max(1, Number.parseInt(String(parcelsInput?.value || '1').replace(/\D+/g, ''), 10) || 1);
+    const parcelValue = currentParcels > 0 ? (adhesionValue / currentParcels) : 0;
+    if (parcelValueInput) {
+        parcelValueInput.value = formatMoneyFieldValue(parcelValue);
+    }
+
+    if (fidelityInput) {
+        if (force || fidelityInput.dataset.manualValue !== '1' || !fidelityInput.value) {
+            fidelityInput.value = String(defaultFidelity);
+            fidelityInput.dataset.manualValue = '0';
+        }
+    }
+
+    if (benefitInput) {
+        const benefitValue = currentType === 'isenta'
+            ? baseValue
+            : Math.max(0, baseValue - adhesionValue);
+
+        if (force || benefitInput.dataset.manualValue !== '1' || !benefitInput.value.trim()) {
+            setCommercialValue(benefitInput, formatMoneyFieldValue(benefitValue), true);
+        }
+    }
+
+    if (authorizerInput && authorizerInput.dataset.manualValue !== '1' && !authorizerInput.value.trim() && !force) {
+        // Campo livre; nada a normalizar automaticamente.
+    }
+
+    if (firstDueInput && dueDaySelect) {
+        if (force || firstDueInput.dataset.manualValue !== '1' || !firstDueInput.value) {
+            const computedDate = calculateNextBillingDateFromDay(dueDaySelect.value);
+            if (computedDate) {
+                firstDueInput.value = computedDate;
+                firstDueInput.dataset.manualValue = '0';
+            }
+        }
+    }
+}
+
+if (contractCommercialForm) {
+    const commercialInputs = contractCommercialForm.querySelectorAll('input, select, textarea');
+
+    commercialInputs.forEach((input) => {
+        input.addEventListener('input', () => {
+            markCommercialManual(input);
+            updateCommercialSection();
+        });
+
+        input.addEventListener('change', () => {
+            markCommercialManual(input);
+            updateCommercialSection();
+        });
+    });
+
+    const adhesionValueInput = contractCommercialForm.querySelector('[data-adhesion-value-input]');
+    if (adhesionValueInput) {
+        adhesionValueInput.addEventListener('blur', () => {
+            const parsed = parseMoneyFieldValue(adhesionValueInput.value);
+            if (adhesionValueInput.value.trim() === '') {
+                adhesionValueInput.dataset.manualValue = '0';
+                updateCommercialSection(true);
+                return;
+            }
+
+            adhesionValueInput.value = formatMoneyFieldValue(parsed);
+            adhesionValueInput.dataset.manualValue = '1';
+            updateCommercialSection();
+        });
+    }
+
+    if (installationTypeSelect) {
+        installationTypeSelect.addEventListener('change', () => updateCommercialSection());
+    }
+
+    if (localDiciSelect) {
+        localDiciSelect.addEventListener('change', () => updateCommercialSection());
+    }
+
+    const dueDaySelect = contractCommercialForm.querySelector('[name="vencimento"]');
+    if (dueDaySelect) {
+        dueDaySelect.addEventListener('change', () => {
+            const firstDueInput = contractCommercialForm.querySelector('[data-adhesion-first-due-input]');
+            if (firstDueInput && (firstDueInput.dataset.manualValue !== '1' || !firstDueInput.value)) {
+                firstDueInput.value = calculateNextBillingDateFromDay(dueDaySelect.value);
+                firstDueInput.dataset.manualValue = '0';
+            }
+        });
+    }
+
+    updateCommercialSection(true);
 }
 
 function normalizeCep(value) {
@@ -1846,26 +2129,51 @@ autosaveForms.forEach((form) => {
 });
 
 if (acceptanceForm) {
+    const acceptanceDocumentRequired = acceptanceForm.dataset.documentValidationRequired === '1';
+    const acceptanceDocumentDigits = Math.max(1, Number.parseInt(acceptanceForm.dataset.documentValidationDigits || '3', 10) || 3);
+
+    if (acceptanceDocumentInput) {
+        acceptanceDocumentInput.addEventListener('input', () => {
+            const sanitized = String(acceptanceDocumentInput.value || '').replace(/\D+/g, '').slice(0, acceptanceDocumentDigits);
+            if (acceptanceDocumentInput.value !== sanitized) {
+                acceptanceDocumentInput.value = sanitized;
+            }
+
+            if (acceptanceDocumentHelp) {
+                acceptanceDocumentHelp.textContent = sanitized.length > 0
+                    ? `${sanitized.length}/${acceptanceDocumentDigits} dígitos informados.`
+                    : 'Digite apenas os primeiros dígitos para confirmar a identidade documentada.';
+                acceptanceDocumentHelp.dataset.tone = sanitized.length === acceptanceDocumentDigits ? 'success' : 'neutral';
+            }
+        });
+    }
+
     acceptanceForm.addEventListener('submit', (event) => {
         if (!acceptanceSelect || !acceptanceSelect.checked) {
             event.preventDefault();
-            if (signatureHelp) {
-                signatureHelp.textContent = 'Marque a confirmação do aceite para concluir.';
-                signatureHelp.dataset.tone = 'warning';
+            if (acceptanceDocumentHelp) {
+                acceptanceDocumentHelp.textContent = 'Confirme o aceite para concluir.';
+                acceptanceDocumentHelp.dataset.tone = 'warning';
             }
-            signaturePad?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            acceptanceSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
         }
 
-        const hasSignature = signatureInput && signatureInput.value.trim() !== '';
+        if (acceptanceDocumentRequired && acceptanceDocumentInput) {
+            const sanitized = String(acceptanceDocumentInput.value || '').replace(/\D+/g, '').slice(0, acceptanceDocumentDigits);
 
-        if (!hasSignature) {
-            event.preventDefault();
-            if (signatureHelp) {
-                signatureHelp.textContent = 'Para concluir o aceite, registre a assinatura do cliente.';
-                signatureHelp.dataset.tone = 'warning';
+            if (sanitized.length !== acceptanceDocumentDigits) {
+                event.preventDefault();
+                if (acceptanceDocumentHelp) {
+                    acceptanceDocumentHelp.textContent = `Informe os primeiros ${acceptanceDocumentDigits} dígitos do CPF/CNPJ para continuar.`;
+                    acceptanceDocumentHelp.dataset.tone = 'warning';
+                }
+                acceptanceDocumentInput.focus({ preventScroll: true });
+                acceptanceDocumentInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
             }
-            signaturePad?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            acceptanceDocumentInput.value = sanitized;
         }
     });
 }

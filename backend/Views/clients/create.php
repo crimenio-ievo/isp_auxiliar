@@ -23,6 +23,34 @@ $fieldSelected = static function (string $name, string $value, string $default =
 $draftId = (string) ($draftId ?? '');
 $checkpointToken = (string) ($checkpointToken ?? '');
 $draftKey = (string) ($draftKey ?? 'client-create');
+$commercial = is_array($contractCommercial ?? null) ? $contractCommercial : [];
+$maxAdhesionInstallments = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
+$initialInstallType = strtolower(trim((string) ($form['tipo_instalacao'] ?? ($defaultInstallType ?? 'fibra'))));
+$initialInstallType = in_array($initialInstallType, ['fibra', 'radio'], true) ? $initialInstallType : 'fibra';
+$initialAdhesionType = strtolower(trim((string) ($form['tipo_adesao'] ?? '')));
+if (!in_array($initialAdhesionType, ['cheia', 'promocional', 'isenta'], true)) {
+    $initialAdhesionType = $initialInstallType === 'fibra' ? 'isenta' : 'cheia';
+}
+$initialAdhesionInstallments = max(1, min($maxAdhesionInstallments, (int) ($form['parcelas_adesao'] ?? 1)));
+$initialAdhesionFidelity = max(1, (int) ($form['fidelidade_meses'] ?? ($commercial['fidelidade_meses_padrao'] ?? 12)));
+$initialAdhesionValue = (string) ($form['valor_adesao'] ?? '');
+$initialBenefitAuthorizer = (string) ($form['beneficio_concedido_por'] ?? '');
+$baseAdhesionValue = (float) ($commercial['valor_adesao_padrao'] ?? 0);
+$promoAdhesionValue = (float) ($commercial['valor_adesao_promocional'] ?? 0);
+$promoDiscountPercent = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
+$defaultAdhesionValue = match ($initialAdhesionType) {
+    'isenta' => 0.0,
+    'promocional' => $promoAdhesionValue > 0
+        ? $promoAdhesionValue
+        : max(0.0, $baseAdhesionValue - ($baseAdhesionValue * max(0.0, $promoDiscountPercent) / 100)),
+    default => max(0.0, $baseAdhesionValue),
+};
+$defaultBenefitValue = $initialAdhesionType === 'isenta'
+    ? number_format($baseAdhesionValue, 2, ',', '.')
+    : number_format(max(0.0, $baseAdhesionValue - $defaultAdhesionValue), 2, ',', '.');
+$defaultParcelValue = $initialAdhesionInstallments > 0
+    ? number_format($defaultAdhesionValue / $initialAdhesionInstallments, 2, ',', '.')
+    : '0,00';
 $formCity = (string) ($form['cidade'] ?? '');
 $cityExists = false;
 
@@ -58,6 +86,7 @@ ob_start();
     data-draft-key="<?= htmlspecialchars($draftKey, ENT_QUOTES, 'UTF-8'); ?>"
     data-clear-draft-keys="<?= htmlspecialchars(json_encode($clearDraftKeys, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]', ENT_QUOTES, 'UTF-8'); ?>"
     data-clear-draft-endpoint="<?= htmlspecialchars(Url::to('/clientes/rascunho/limpar'), ENT_QUOTES, 'UTF-8'); ?>"
+    data-contract-commercial-config="<?= htmlspecialchars(json_encode($commercial, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}', ENT_QUOTES, 'UTF-8'); ?>"
 >
     <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
@@ -71,7 +100,7 @@ ob_start();
         <div class="form-grid">
             <label class="field field--span-2">
                 <span>Nome completo</span>
-                <input type="text" name="nome_completo" placeholder="Nome do titular" value="<?= $fieldValue('nome_completo'); ?>">
+                <input type="text" name="nome_completo" placeholder="Nome do titular" value="<?= $fieldValue('nome_completo'); ?>" required>
             </label>
 
             <label class="field field--span-2">
@@ -87,13 +116,13 @@ ob_start();
 
             <label class="field">
                 <span>CPF/CNPJ</span>
-                <input type="text" name="cpf_cnpj" placeholder="Somente numeros ou com pontuacao" value="<?= $fieldValue('cpf_cnpj'); ?>" data-cpf-input>
+                <input type="text" name="cpf_cnpj" placeholder="Somente numeros ou com pontuacao" value="<?= $fieldValue('cpf_cnpj'); ?>" data-cpf-input required>
                 <small class="field-help" data-live-feedback="cpf">Digite 11 digitos para CPF ou 14 para CNPJ.</small>
             </label>
 
             <label class="field">
                 <span>Celular</span>
-                <input type="text" name="celular" placeholder="(xx) x xxxx-xxxx" inputmode="tel" autocomplete="tel" value="<?= $fieldValue('celular'); ?>" data-phone-input>
+                <input type="text" name="celular" placeholder="(xx) x xxxx-xxxx" inputmode="tel" autocomplete="tel" value="<?= $fieldValue('celular'); ?>" data-phone-input required>
                 <small class="field-help" data-live-feedback="phone">Use DDD + numero. O sistema vai formatar automaticamente.</small>
             </label>
 
@@ -108,7 +137,7 @@ ob_start();
 
             <label class="field">
                 <span>Login</span>
-                <input type="text" name="login" placeholder="primeiroNome_local" value="<?= $fieldValue('login'); ?>" data-login-input>
+                <input type="text" name="login" placeholder="primeiroNome_local" value="<?= $fieldValue('login'); ?>" data-login-input required>
                 <small class="field-help" data-live-feedback="login">O sistema vai normalizar para minusculas, sem acento e sem espacos.</small>
             </label>
 
@@ -128,7 +157,7 @@ ob_start();
         <div class="form-grid">
             <label class="field">
                 <span>Tipo de instalação</span>
-                <select name="tipo_instalacao" data-install-type-select>
+                <select name="tipo_instalacao" data-install-type-select required>
                     <option value="fibra" <?= $fieldSelected('tipo_instalacao', 'fibra', (string) ($defaultInstallType ?? 'fibra')); ?>>Fibra</option>
                     <option value="radio" <?= $fieldSelected('tipo_instalacao', 'radio', (string) ($defaultInstallType ?? 'fibra')); ?>>Rádio</option>
                 </select>
@@ -136,7 +165,7 @@ ob_start();
 
             <label class="field">
                 <span>Local DICI</span>
-                <select name="local_dici" data-local-dici-select>
+                <select name="local_dici" data-local-dici-select required>
                     <option value="u" <?= $fieldSelected('local_dici', 'u', (string) ($defaultLocalDici ?? 'r')); ?>>Urbano</option>
                     <option value="r" <?= $fieldSelected('local_dici', 'r', (string) ($defaultLocalDici ?? 'r')); ?>>Rural</option>
                 </select>
@@ -144,8 +173,8 @@ ob_start();
 
             <label class="field">
                 <span>Plano</span>
-                <select name="plano" data-plan-select>
-                    <option value="">Selecione tipo de instalação e Local DICI</option>
+                <select name="plano" data-plan-select required>
+                    <option value="">Selecione um plano</option>
                     <?php foreach ($plans as $plan): ?>
                         <option
                             value="<?= htmlspecialchars((string) $plan['id'], ENT_QUOTES, 'UTF-8'); ?>"
@@ -162,7 +191,7 @@ ob_start();
 
             <label class="field">
                 <span>Vencimento</span>
-                <select name="vencimento">
+                <select name="vencimento" required>
                     <?php foreach ($dueDays as $dueDay): ?>
                         <?php $day = str_pad((string) ($dueDay['day'] ?? ''), 2, '0', STR_PAD_LEFT); ?>
                         <option value="<?= htmlspecialchars($day, ENT_QUOTES, 'UTF-8'); ?>" <?= $fieldSelected('vencimento', $day, (string) ($defaultDueDay ?? '05')); ?>>
@@ -239,7 +268,7 @@ ob_start();
             <label class="field field--span-2">
                 <span>Coordenada da instalação</span>
                 <div class="geo-capture" data-geo-capture>
-                    <input type="text" name="coordenadas" placeholder="-20.850552,-42.803886" value="<?= $fieldValue('coordenadas'); ?>" data-geo-coordinate>
+                <input type="text" name="coordenadas" placeholder="-20.850552,-42.803886" value="<?= $fieldValue('coordenadas'); ?>" data-geo-coordinate required>
                     <input type="hidden" name="coordenadas_precisao" value="<?= $fieldValue('coordenadas_precisao'); ?>" data-geo-accuracy>
                     <input type="hidden" name="coordenadas_capturadas_em" value="<?= $fieldValue('coordenadas_capturadas_em'); ?>" data-geo-captured-at>
                     <button class="button button--ghost" type="button" data-geo-button>Capturar coordenada do celular</button>
@@ -247,6 +276,74 @@ ob_start();
                 </div>
                 <small class="field-help" data-geo-help>Obrigatório. O sistema tenta capturar automaticamente pelo GPS do celular; se falhar, informe a coordenada ou marque no mapa.</small>
             </label>
+
+            <section class="card card--span-2 contract-commercial-card">
+                <div class="section-heading">
+                    <p class="section-heading__eyebrow">Contrato</p>
+                    <h2>Adesão e Fidelidade</h2>
+                </div>
+
+                <input type="hidden" name="vencimento_primeira_parcela" value="<?= $fieldValue('vencimento_primeira_parcela'); ?>" data-adhesion-first-due-input>
+
+                <div class="form-grid" data-contract-commercial-form>
+                    <label class="field">
+                        <span>Tipo de adesão</span>
+                        <select name="tipo_adesao" data-adhesion-type-input>
+                            <option value="cheia" <?= $fieldSelected('tipo_adesao', 'cheia', $initialAdhesionType); ?>>Cheia</option>
+                            <option value="promocional" <?= $fieldSelected('tipo_adesao', 'promocional', $initialAdhesionType); ?>>Promocional</option>
+                            <option value="isenta" <?= $fieldSelected('tipo_adesao', 'isenta', $initialAdhesionType); ?>>Isenta</option>
+                        </select>
+                        <small class="field-help">Fibra pode começar como isenta. O técnico pode ajustar antes de concluir.</small>
+                    </label>
+
+                    <label class="field">
+                        <span>Valor da adesão</span>
+                        <input type="text" name="valor_adesao" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('valor_adesao', $defaultAdhesionValue !== 0.0 ? number_format($defaultAdhesionValue, 2, ',', '.') : '0,00'); ?>" data-adhesion-value-input required>
+                        <small class="field-help">Preenchido com o padrão comercial e ajustável no atendimento.</small>
+                    </label>
+
+                    <label class="field">
+                        <span>Parcelas da adesão</span>
+                        <select name="parcelas_adesao" data-adhesion-parcels-input required>
+                            <?php for ($installment = 1; $installment <= $maxAdhesionInstallments; $installment += 1): ?>
+                                <option value="<?= htmlspecialchars((string) $installment, ENT_QUOTES, 'UTF-8'); ?>" <?= $fieldSelected('parcelas_adesao', (string) $installment, (string) $initialAdhesionInstallments); ?>>
+                                    <?= htmlspecialchars((string) $installment, ENT_QUOTES, 'UTF-8'); ?>
+                                </option>
+                            <?php endfor; ?>
+                        </select>
+                        <small class="field-help">Não ultrapassa o máximo configurado no módulo.</small>
+                    </label>
+
+                    <label class="field">
+                        <span>Valor da parcela da adesão</span>
+                        <input type="text" name="valor_parcela_adesao" placeholder="Calculado automaticamente" value="<?= $fieldValue('valor_parcela_adesao', $defaultParcelValue); ?>" readonly data-adhesion-parcel-value-input>
+                        <small class="field-help">Atualiza sozinho conforme o valor e a quantidade de parcelas.</small>
+                    </label>
+
+                    <label class="field">
+                        <span>Fidelidade</span>
+                        <input type="number" name="fidelidade_meses" min="1" value="<?= $fieldValue('fidelidade_meses', (string) $initialAdhesionFidelity); ?>" data-adhesion-fidelity-input required>
+                        <small class="field-help">Padrão configurado: <?= htmlspecialchars((string) ($commercial['fidelidade_meses_padrao'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses.</small>
+                    </label>
+
+                    <label class="field">
+                        <span>Autorizado por</span>
+                        <input type="text" name="beneficio_concedido_por" placeholder="Quem aprovou o benefício" value="<?= htmlspecialchars($initialBenefitAuthorizer, ENT_QUOTES, 'UTF-8'); ?>" data-adhesion-authorizer-input>
+                        <small class="field-help">Informe quem aprovou a condição comercial. O valor do benefício é calculado automaticamente.</small>
+                    </label>
+
+                    <label class="field">
+                        <span>Benefício calculado</span>
+                        <input type="text" name="beneficio_valor" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('beneficio_valor', $defaultBenefitValue); ?>" readonly data-adhesion-benefit-input>
+                        <small class="field-help">Calculado a partir da diferença entre a adesão padrão e o valor informado.</small>
+                    </label>
+
+                    <label class="field field--span-2">
+                        <span>Observação da adesão</span>
+                        <textarea rows="4" name="observacao_adesao" placeholder="Descreva observações do acordo. O campo Autorizado por acima já registra a aprovação comercial."><?= htmlspecialchars((string) ($form['observacao_adesao'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    </label>
+                </div>
+            </section>
 
             <label class="field field--span-2">
                 <span>Fotos da instalação</span>

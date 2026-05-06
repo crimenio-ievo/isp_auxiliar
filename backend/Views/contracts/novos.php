@@ -111,7 +111,9 @@ ob_start();
                     <?php
                         $contractId = (int) ($contract['id'] ?? 0);
                         $acceptanceId = (int) ($contract['acceptance_id'] ?? 0);
-                        $simulatedLink = Url::to('/aceite/' . rawurlencode((string) ($acceptanceId > 0 ? $acceptanceId : $contractId)));
+                        $tokenHash = trim((string) ($contract['token_hash'] ?? ''));
+                        $linkToken = $tokenHash !== '' ? $tokenHash : (string) ($acceptanceId > 0 ? $acceptanceId : $contractId);
+                        $simulatedLink = Url::to('/aceite/' . rawurlencode($linkToken));
                     ?>
                     <tr>
                         <td><?= htmlspecialchars((string) ($contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
