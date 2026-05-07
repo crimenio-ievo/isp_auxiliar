@@ -647,6 +647,15 @@ final class ClientController
         ];
     }
 
+    private function canManageContracts(): bool
+    {
+        $user = $this->resolveUser();
+        $role = strtolower(trim((string) ($user['role'] ?? '')));
+
+        return in_array($role, ['manager', 'platform_admin', 'gestor', 'admin', 'administrador'], true)
+            || !empty($user['can_manage']);
+    }
+
     private function collectFormData(Request $request): array
     {
         $commercial = $this->contractCommercialConfig();

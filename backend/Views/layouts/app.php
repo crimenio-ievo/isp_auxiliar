@@ -7,6 +7,7 @@ use App\Core\Url;
 $pageTitle = $pageTitle ?? 'ISP Auxiliar';
 $layoutMode = $layoutMode ?? 'app';
 $content = $content ?? '';
+$hideFooter = !empty($hideFooter);
 $bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
 $basePath = Url::basePath();
 ?>
@@ -31,7 +32,9 @@ $basePath = Url::basePath();
 
         <main class="main-content">
             <?= $content; ?>
-            <?php require __DIR__ . '/footer.php'; ?>
+            <?php if (!$hideFooter): ?>
+                <?php require __DIR__ . '/footer.php'; ?>
+            <?php endif; ?>
         </main>
     </div>
 

@@ -706,18 +706,29 @@ function wireAutosave(form) {
         saveDraftFromForm(form).catch(() => {});
     });
 
+    const focusFieldOnSubmit = (field) => {
+        if (!field) {
+            return;
+        }
+
+        if (typeof field.focus === 'function') {
+            field.focus({ preventScroll: true });
+        }
+
+        if (typeof field.scrollIntoView === 'function') {
+            field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    };
+
     form.addEventListener('submit', (event) => {
         if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
             event.preventDefault();
 
-            const firstInvalid = form.querySelector(':invalid');
+            const invalidFields = Array.from(form.querySelectorAll(':invalid'));
+            invalidFields.forEach((field) => field.setAttribute('aria-invalid', 'true'));
+            const firstInvalid = invalidFields[0] || null;
             if (firstInvalid) {
-                if (typeof firstInvalid.focus === 'function') {
-                    firstInvalid.focus({ preventScroll: true });
-                }
-                if (typeof firstInvalid.scrollIntoView === 'function') {
-                    firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
+                focusFieldOnSubmit(firstInvalid);
             }
 
             if (typeof form.reportValidity === 'function') {
@@ -735,9 +746,7 @@ function wireAutosave(form) {
                     photoCount.textContent = 'Envie ao menos uma foto da instalacao.';
                     photoCount.dataset.tone = 'error';
                 }
-                if (typeof photoUploader.scrollIntoView === 'function') {
-                    photoUploader.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
+                focusFieldOnSubmit(photoUploader);
             }
         }
     }, true);
@@ -937,9 +946,6 @@ function applyLiveValidation(input, validator, normalizer = null, options = {}) 
     if (settings.validateOnBlur) {
         input.addEventListener('blur', () => {
             runValidation(true);
-            if (!input.checkValidity()) {
-                input.reportValidity();
-            }
         });
     }
 
@@ -1068,9 +1074,16 @@ function updatePlanOptions() {
     let selectedStillVisible = false;
 
     Array.from(planSelect.options).forEach((option) => {
-        if (!option.value) {
+        const optionLabel = String(option.textContent || '').trim().toLowerCase();
+        const looksLikePlaceholder = optionLabel.includes('selecione tipo de instalação e local dici')
+            || optionLabel.includes('selecione tipo de instalacao e local dici');
+
+        if (!option.value || looksLikePlaceholder) {
             option.hidden = false;
-            option.disabled = false;
+            option.disabled = !option.value || looksLikePlaceholder;
+            if (looksLikePlaceholder && option.selected) {
+                option.selected = false;
+            }
             return;
         }
 
@@ -1327,8 +1340,41 @@ if (contractCommercialForm) {
         });
     }
 
+    const adhesionTypeInput = contractCommercialForm.querySelector('[data-adhesion-type-input]');
+    if (adhesionTypeInput) {
+        adhesionTypeInput.addEventListener('change', () => {
+            const valueInput = contractCommercialForm.querySelector('[data-adhesion-value-input]');
+            const benefitInput = contractCommercialForm.querySelector('[data-adhesion-benefit-input]');
+
+            if (valueInput) {
+                valueInput.dataset.manualValue = '0';
+            }
+            if (benefitInput) {
+                benefitInput.dataset.manualValue = '0';
+            }
+
+            updateCommercialSection(true);
+        });
+    }
+
     if (installationTypeSelect) {
-        installationTypeSelect.addEventListener('change', () => updateCommercialSection());
+        installationTypeSelect.addEventListener('change', () => {
+            const typeSelect = contractCommercialForm.querySelector('[data-adhesion-type-input]');
+            const valueInput = contractCommercialForm.querySelector('[data-adhesion-value-input]');
+            const benefitInput = contractCommercialForm.querySelector('[data-adhesion-benefit-input]');
+
+            if (typeSelect) {
+                typeSelect.dataset.manualValue = '0';
+            }
+            if (valueInput) {
+                valueInput.dataset.manualValue = '0';
+            }
+            if (benefitInput) {
+                benefitInput.dataset.manualValue = '0';
+            }
+
+            updateCommercialSection(true);
+        });
     }
 
     if (localDiciSelect) {
@@ -1544,7 +1590,7 @@ function setupSignaturePad() {
 }
 
 function updateAcceptanceVisibility() {
-        if (!signaturePad || !acceptanceSelect) {
+    if (!signaturePad || !acceptanceSelect) {
         return;
     }
 
@@ -1556,6 +1602,17 @@ function updateAcceptanceVisibility() {
             ? 'Assinatura obrigatória: conclua o desenho para liberar o envio.'
             : 'Quando o aceite for Sim, a assinatura se torna obrigatória.';
     }
+}
+
+function syncChoiceCards() {
+    document.querySelectorAll('[data-choice-card]').forEach((card) => {
+        const input = card.querySelector('input[type="checkbox"], input[type="radio"]');
+        if (!input) {
+            return;
+        }
+
+        card.classList.toggle('is-selected', Boolean(input.checked));
+    });
 }
 
 function setCityOption(cityName, uf, ibge) {
@@ -2118,6 +2175,31 @@ if (acceptanceSelect) {
     updateAcceptanceVisibility();
 }
 
+document.querySelectorAll('[data-choice-card]').forEach((card) => {
+    const input = card.querySelector('input[type="checkbox"], input[type="radio"]');
+    if (!input) {
+        return;
+    }
+
+    card.addEventListener('click', (event) => {
+        if (event.target instanceof HTMLElement && event.target.closest('input, button, a')) {
+            return;
+        }
+
+        if (input.type === 'checkbox') {
+            input.checked = !input.checked;
+        } else {
+            input.checked = true;
+        }
+
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    input.addEventListener('change', syncChoiceCards);
+});
+
+syncChoiceCards();
+
 setupSignaturePad();
 updatePlanOptions();
 refreshPhotoQueue();
@@ -2155,6 +2237,7 @@ if (acceptanceForm) {
                 acceptanceDocumentHelp.textContent = 'Confirme o aceite para concluir.';
                 acceptanceDocumentHelp.dataset.tone = 'warning';
             }
+            acceptanceSelect.focus({ preventScroll: true });
             acceptanceSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
         }
@@ -2177,6 +2260,17 @@ if (acceptanceForm) {
         }
     });
 }
+
+document.querySelectorAll('[data-close-page]').forEach((button) => {
+    button.addEventListener('click', () => {
+        if (window.history.length > 1) {
+            window.history.back();
+            return;
+        }
+
+        window.location.href = buildAppUrl('/');
+    });
+});
 
 async function copyTextToClipboard(text) {
     const normalizedText = String(text || '').trim();

@@ -8,16 +8,27 @@ $record = is_array($record ?? null) ? $record : [];
 $connection = is_array($connection ?? null) ? $connection : [];
 $session = is_array($connection['session'] ?? null) ? $connection['session'] : [];
 $lastAuth = is_array($connection['last_auth'] ?? null) ? $connection['last_auth'] : [];
+$acceptanceStatus = is_array($acceptanceStatus ?? null) ? $acceptanceStatus : [];
 $online = (bool) ($connection['online'] ?? false);
 $completed = (string) ($record['status'] ?? '') === 'completed';
+$acceptanceAccepted = !empty($acceptanceStatus['accepted']);
+$acceptanceLabel = (string) ($acceptanceStatus['label'] ?? 'aceite pendente');
+$connectionHeading = $completed
+    ? 'Instalação finalizada'
+    : ($online ? 'Conexão confirmada' : 'Aguardando conexão Radius');
+$connectionDescription = $completed
+    ? 'O cadastro foi concluído, o aceite está registrado e o login já apareceu conectado no Radius.'
+    : ($acceptanceAccepted
+        ? 'O aceite do cliente já foi concluído. Falta apenas o login aparecer conectado no Radius.'
+        : 'Configure o equipamento, acompanhe o status do aceite e finalize somente quando o Radius confirmar conexão ativa.');
 
 ob_start();
 ?>
 <section class="page-header">
     <div>
         <p class="section-heading__eyebrow">Instalação</p>
-        <h1>Validar conexão Radius</h1>
-        <p class="page-description">Cliente cadastrado no MkAuth. Agora configure o equipamento com o login abaixo e finalize somente quando o Radius confirmar conexão ativa.</p>
+        <h1><?= htmlspecialchars($connectionHeading, ENT_QUOTES, 'UTF-8'); ?></h1>
+        <p class="page-description"><?= htmlspecialchars($connectionDescription, ENT_QUOTES, 'UTF-8'); ?></p>
     </div>
 </section>
 
@@ -27,11 +38,17 @@ ob_start();
     </section>
 <?php endif; ?>
 
-<section class="content-grid">
+<section class="content-grid connection-screen">
     <article class="card">
         <div class="section-heading">
             <p class="section-heading__eyebrow">Próximo passo</p>
-            <h2>Configurar equipamento do cliente</h2>
+            <h2><?= $completed ? 'Tudo concluído' : 'Configurar equipamento do cliente'; ?></h2>
+        </div>
+
+        <div class="status-card <?= $completed ? 'status-card--success' : ($acceptanceAccepted ? 'status-card--success' : 'status-card--warning'); ?> connection-state-card">
+            <span><?= $completed ? 'Fluxo concluído' : ($acceptanceAccepted ? 'Aceite já concluído' : 'Aceite ainda pendente'); ?></span>
+            <strong><?= $completed ? 'Instalação e validação finalizadas.' : ($acceptanceAccepted ? 'Falta apenas a conexão ativa no Radius.' : 'O cliente ainda precisa concluir o aceite para liberar a finalização padrão.'); ?></strong>
+            <small>Status do aceite: <?= htmlspecialchars($acceptanceLabel, ENT_QUOTES, 'UTF-8'); ?>.</small>
         </div>
 
         <div class="connection-login">
@@ -51,6 +68,10 @@ ob_start();
             <div class="summary-item">
                 <span>Status</span>
                 <strong><?= $completed ? 'Instalação finalizada' : 'Aguardando conexão'; ?></strong>
+            </div>
+            <div class="summary-item">
+                <span>Aceite</span>
+                <strong><?= htmlspecialchars($acceptanceLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
             </div>
             <div class="summary-item">
                 <span>Evidências</span>

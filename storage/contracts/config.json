@@ -1,0 +1,15 @@
+{
+    "commercial": {
+        "valor_adesao_padrao": 1200,
+        "valor_adesao_promocional": 600,
+        "percentual_desconto_promocional": 50,
+        "parcelas_maximas_adesao": 3,
+        "fidelidade_meses_padrao": 12,
+        "validade_link_aceite_horas": 48,
+        "exigir_validacao_cpf_aceite": true,
+        "quantidade_digitos_validacao_cpf": 3,
+        "multa_padrao": 0
+    },
+    "saved_at": "2026-05-06 19:49:53",
+    "saved_by": "gestor"
+}

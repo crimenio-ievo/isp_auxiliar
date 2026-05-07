@@ -84,7 +84,7 @@ ob_start();
     </article>
 
     <form
-        class="card acceptance-form"
+        class="card acceptance-form acceptance-form--highlight"
         method="post"
         action="<?= htmlspecialchars(Url::to('/clientes/novo/aceite'), ENT_QUOTES, 'UTF-8'); ?>"
         enctype="multipart/form-data"
@@ -99,7 +99,13 @@ ob_start();
 
         <div class="section-heading">
             <p class="section-heading__eyebrow">Conferência</p>
-            <h2>Assinatura de aceite</h2>
+            <h2>Finalizar aceite e envio</h2>
+        </div>
+
+        <div class="status-card">
+            <span>Etapa final do técnico</span>
+            <strong>Confira os dados, registre a assinatura e envie para o MkAuth.</strong>
+            <small>Depois disso, a próxima tela ficará dedicada apenas à validação da conexão Radius.</small>
         </div>
 
         <div class="form-grid form-grid--compact">
@@ -110,10 +116,14 @@ ob_start();
 
             <label class="field field--span-2">
                 <span>Cliente confirma o aceite?</span>
-                <div class="check-inline">
+                <label class="choice-card" data-choice-card>
                     <input type="checkbox" name="aceite_cliente" value="sim" data-acceptance-select>
-                    <span>Li e aceito o termo acima</span>
-                </div>
+                    <span class="choice-card__icon" aria-hidden="true">✓</span>
+                    <span class="choice-card__content">
+                        <strong>Cliente confirma o aceite do contrato</strong>
+                        <small>Toque no card inteiro para confirmar antes de finalizar o envio.</small>
+                    </span>
+                </label>
                 <small class="field-help">Esse registro confirma a concordância com os dados, instalação e evidências anexadas.</small>
             </label>
 
@@ -135,7 +145,7 @@ ob_start();
             </label>
 
             <div class="form-actions field--span-2">
-                <button class="button" type="submit">Finalizar cadastro e enviar ao MkAuth</button>
+                <button class="button" type="submit">Finalizar cadastro e seguir para conexão</button>
                 <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>">Voltar ao cadastro</a>
             </div>
         </div>

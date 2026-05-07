@@ -295,6 +295,73 @@ textarea {
     align-content: start;
 }
 
+.acceptance-form--highlight {
+    border: 1px solid rgba(15, 118, 110, 0.16);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(232, 246, 242, 0.82));
+}
+
+.acceptance-layout--completed {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 1040px;
+    margin-inline: auto;
+}
+
+.acceptance-card--success {
+    border-color: rgba(15, 118, 110, 0.18);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 251, 243, 0.94));
+}
+
+.acceptance-status-banner,
+.connection-state-card {
+    margin-bottom: 18px;
+}
+
+.acceptance-success-screen {
+    min-height: calc(100vh - 180px);
+    display: grid;
+    place-items: center;
+}
+
+.acceptance-success-card {
+    max-width: 720px;
+    margin-inline: auto;
+    text-align: center;
+    gap: 18px;
+    display: grid;
+    padding: 32px;
+    border-color: rgba(15, 118, 110, 0.18);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 251, 243, 0.94));
+}
+
+.acceptance-success-card__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 74px;
+    height: 74px;
+    margin: 0 auto;
+    border-radius: 24px;
+    background: linear-gradient(135deg, var(--primary), #14b8a6);
+    color: #ffffff;
+    font-size: 2rem;
+    font-weight: 800;
+    box-shadow: 0 20px 40px rgba(15, 118, 110, 0.22);
+}
+
+.acceptance-success-card .page-description {
+    max-width: 42ch;
+    margin-inline: auto;
+}
+
+.acceptance-success-card__meta {
+    max-width: 520px;
+    margin: 0 auto;
+}
+
+.acceptance-success-card__actions {
+    justify-content: center;
+}
+
 .acceptance-header {
     align-items: start;
 }
@@ -731,6 +798,73 @@ textarea {
     margin: 0;
 }
 
+.choice-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    min-height: 88px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(247, 249, 252, 0.96), rgba(255, 255, 255, 0.98));
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.choice-card:hover {
+    border-color: rgba(15, 118, 110, 0.28);
+    transform: translateY(-1px);
+}
+
+.choice-card input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.choice-card__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    background: rgba(15, 118, 110, 0.1);
+    color: var(--primary);
+    font-size: 1.25rem;
+    font-weight: 800;
+    transition: 0.2s ease;
+}
+
+.choice-card__content {
+    display: grid;
+    gap: 4px;
+}
+
+.choice-card__content strong {
+    font-size: 1rem;
+    line-height: 1.35;
+}
+
+.choice-card__content small {
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.choice-card.is-selected,
+.choice-card:has(input:checked) {
+    border-color: rgba(15, 118, 110, 0.36);
+    background: linear-gradient(180deg, rgba(232, 246, 242, 0.96), rgba(255, 255, 255, 0.98));
+    box-shadow: 0 16px 36px rgba(15, 118, 110, 0.12);
+}
+
+.choice-card.is-selected .choice-card__icon,
+.choice-card:has(input:checked) .choice-card__icon {
+    background: linear-gradient(135deg, var(--primary), #14b8a6);
+    color: #ffffff;
+}
+
 .field--span-2 {
     grid-column: 1 / -1;
 }
@@ -882,6 +1016,18 @@ textarea {
 .field textarea[aria-invalid="true"]:focus {
     border-color: rgba(185, 28, 28, 0.75);
     box-shadow: 0 0 0 4px rgba(185, 28, 28, 0.12);
+}
+
+.field:has(input[aria-invalid="true"]) span,
+.field:has(select[aria-invalid="true"]) span,
+.field:has(textarea[aria-invalid="true"]) span {
+    color: #b91c1c;
+}
+
+.field:has(input[aria-invalid="true"]) span,
+.field:has(select[aria-invalid="true"]) span,
+.field:has(textarea[aria-invalid="true"]) span {
+    color: #b91c1c;
 }
 
 .button {
@@ -1216,6 +1362,20 @@ body.modal-open {
 
     .geo-capture {
         grid-template-columns: 1fr;
+    }
+
+    .choice-card {
+        min-height: 96px;
+        padding: 18px 16px;
+    }
+
+    .acceptance-success-screen {
+        min-height: auto;
+    }
+
+    .acceptance-success-card {
+        padding: 24px 20px;
+        border-radius: 22px;
     }
 
     .map-modal {

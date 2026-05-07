@@ -112,6 +112,9 @@ final class AcceptanceController
                 'required_digits' => $requiredDigits,
                 'document_available' => false,
             ], $request);
+
+            Flash::set('error', 'Este aceite esta bloqueado porque o CPF/CNPJ do cliente nao foi localizado no cadastro. Solicite a correcao interna antes de reenviar o link.');
+            return Response::redirect('/aceite/' . rawurlencode($token));
         }
 
         $acceptanceConfirmed = strtolower(trim((string) $request->input('aceite_cliente', 'nao'))) === 'sim';

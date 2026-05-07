@@ -25,6 +25,7 @@ $checkpointToken = (string) ($checkpointToken ?? '');
 $draftKey = (string) ($draftKey ?? 'client-create');
 $commercial = is_array($contractCommercial ?? null) ? $contractCommercial : [];
 $maxAdhesionInstallments = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
+$loggedUserName = trim((string) (($user['name'] ?? $user['login'] ?? '')));
 $initialInstallType = strtolower(trim((string) ($form['tipo_instalacao'] ?? ($defaultInstallType ?? 'fibra'))));
 $initialInstallType = in_array($initialInstallType, ['fibra', 'radio'], true) ? $initialInstallType : 'fibra';
 $initialAdhesionType = strtolower(trim((string) ($form['tipo_adesao'] ?? '')));
@@ -34,7 +35,7 @@ if (!in_array($initialAdhesionType, ['cheia', 'promocional', 'isenta'], true)) {
 $initialAdhesionInstallments = max(1, min($maxAdhesionInstallments, (int) ($form['parcelas_adesao'] ?? 1)));
 $initialAdhesionFidelity = max(1, (int) ($form['fidelidade_meses'] ?? ($commercial['fidelidade_meses_padrao'] ?? 12)));
 $initialAdhesionValue = (string) ($form['valor_adesao'] ?? '');
-$initialBenefitAuthorizer = (string) ($form['beneficio_concedido_por'] ?? '');
+$initialBenefitAuthorizer = (string) ($form['beneficio_concedido_por'] ?? ($loggedUserName !== '' ? $loggedUserName : ''));
 $baseAdhesionValue = (float) ($commercial['valor_adesao_padrao'] ?? 0);
 $promoAdhesionValue = (float) ($commercial['valor_adesao_promocional'] ?? 0);
 $promoDiscountPercent = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
@@ -176,13 +177,19 @@ ob_start();
                 <select name="plano" data-plan-select required>
                     <option value="">Selecione um plano</option>
                     <?php foreach ($plans as $plan): ?>
+                        <?php
+                            $planLabel = trim((string) ($plan['label'] ?? ''));
+                            if ($planLabel === '' || stripos($planLabel, 'Selecione tipo de instalação e local DICI') !== false || stripos($planLabel, 'Selecione tipo de instalacao e local DICI') !== false) {
+                                continue;
+                            }
+                        ?>
                         <option
                             value="<?= htmlspecialchars((string) $plan['id'], ENT_QUOTES, 'UTF-8'); ?>"
                             data-install-type="<?= htmlspecialchars((string) ($plan['install_type'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
                             data-local-dici="<?= htmlspecialchars((string) ($plan['local_dici'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
                             <?= $fieldSelected('plano', (string) $plan['id']); ?>
                         >
-                            <?= htmlspecialchars((string) $plan['label'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?= htmlspecialchars($planLabel, ENT_QUOTES, 'UTF-8'); ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -332,15 +339,11 @@ ob_start();
                         <small class="field-help">Informe quem aprovou a condição comercial. O valor do benefício é calculado automaticamente.</small>
                     </label>
 
-                    <label class="field">
-                        <span>Benefício calculado</span>
-                        <input type="text" name="beneficio_valor" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('beneficio_valor', $defaultBenefitValue); ?>" readonly data-adhesion-benefit-input>
-                        <small class="field-help">Calculado a partir da diferença entre a adesão padrão e o valor informado.</small>
-                    </label>
+                    <input type="hidden" name="beneficio_valor" value="<?= $fieldValue('beneficio_valor', $defaultBenefitValue); ?>" data-adhesion-benefit-input>
 
                     <label class="field field--span-2">
                         <span>Observação da adesão</span>
-                        <textarea rows="4" name="observacao_adesao" placeholder="Descreva observações do acordo. O campo Autorizado por acima já registra a aprovação comercial."><?= htmlspecialchars((string) ($form['observacao_adesao'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
+                        <textarea rows="4" name="observacao_adesao" placeholder="Descreva apenas condições complementares do acordo comercial."><?= htmlspecialchars((string) ($form['observacao_adesao'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
                     </label>
                 </div>
             </section>

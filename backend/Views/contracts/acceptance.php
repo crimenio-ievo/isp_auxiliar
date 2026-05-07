@@ -20,18 +20,53 @@ if ($signaturePath !== '') {
 $documentValidationRequired = (bool) ($documentValidationRequired ?? ($context['documentValidationRequired'] ?? false));
 $documentValidationDigits = max(1, (int) ($documentValidationDigits ?? ($context['documentValidationDigits'] ?? 3)));
 $documentValidationPossible = (bool) ($documentValidationPossible ?? ($context['documentValidationPossible'] ?? false));
+$documentValidationBlocked = $documentValidationRequired && !$documentValidationPossible;
 $termBody = (string) ($context['termBody'] ?? '');
 $maskedDocument = (string) ($context['maskedDocument'] ?? '-');
 $status = (string) ($acceptance['status'] ?? '');
 $isAccepted = $status === 'aceito';
 $isExpired = str_contains((string) ($context['error'] ?? ''), 'expirou');
 $hasError = !empty($context['error']) || !empty($errorMessage);
+$acceptedAt = trim((string) ($acceptance['accepted_at'] ?? ''));
+$protocol = trim((string) ($acceptance['token_hash'] ?? ''));
+$protocol = $protocol !== '' ? strtoupper(substr($protocol, 0, 12)) : ('ACEITE-' . str_pad((string) ((int) ($acceptance['id'] ?? 0)), 6, '0', STR_PAD_LEFT));
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
+$hideFooter = $isAccepted;
 
 ob_start();
 ?>
-<section class="acceptance-layout">
+<?php if ($isAccepted): ?>
+<section class="acceptance-success-screen">
+    <article class="card acceptance-success-card">
+        <div class="acceptance-success-card__icon" aria-hidden="true">✓</div>
+        <p class="section-heading__eyebrow">Aceite concluído</p>
+        <h1>Seu aceite foi confirmado com sucesso.</h1>
+        <p class="page-description">
+            O contrato foi registrado com segurança.<br>
+            A iEvo agradece a confiança.<br>
+            Qualquer dúvida, nossa equipe estará à disposição.
+        </p>
+
+        <div class="summary-grid acceptance-success-card__meta">
+            <div class="summary-item">
+                <span>Protocolo</span>
+                <strong><?= htmlspecialchars($protocol, ENT_QUOTES, 'UTF-8'); ?></strong>
+            </div>
+            <div class="summary-item">
+                <span>Data / hora</span>
+                <strong><?= htmlspecialchars($acceptedAt !== '' ? $acceptedAt : date('Y-m-d H:i:s'), ENT_QUOTES, 'UTF-8'); ?></strong>
+            </div>
+        </div>
+
+        <div class="hero-actions acceptance-success-card__actions">
+            <button type="button" class="button" data-close-page>Fechar</button>
+            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/'), ENT_QUOTES, 'UTF-8'); ?>">Voltar</a>
+        </div>
+    </article>
+</section>
+<?php else: ?>
+<section class="acceptance-layout<?= $isAccepted ? ' acceptance-layout--completed' : ''; ?>">
     <article class="acceptance-summary">
         <div class="card acceptance-header">
             <p class="section-heading__eyebrow">Aceite digital</p>
@@ -65,11 +100,19 @@ ob_start();
             <?php endif; ?>
         </div>
 
-        <div class="card">
+        <div class="card<?= $isAccepted ? ' acceptance-card--success' : ''; ?>">
             <div class="section-heading">
                 <p class="section-heading__eyebrow">Dados do contrato</p>
-                <h2>Resumo conferido</h2>
+                <h2><?= $isAccepted ? 'Aceite concluído com sucesso' : 'Resumo conferido'; ?></h2>
             </div>
+
+            <?php if ($isAccepted): ?>
+                <div class="status-card status-card--success acceptance-status-banner">
+                    <span>Aceite concluído</span>
+                    <strong>O contrato foi confirmado e registrado com evidências.</strong>
+                    <small>Os dados abaixo mostram exatamente o que foi apresentado ao cliente antes da confirmação.</small>
+                </div>
+            <?php endif; ?>
 
             <div class="summary-grid">
                 <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
@@ -90,7 +133,7 @@ ob_start();
                 <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($contractDetails['fidelidade_meses'] ?? $contract['fidelidade_meses'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
                 <div class="summary-item"><span>Autorizado por</span><strong><?= htmlspecialchars((string) ($contractDetails['beneficio_concedido_por'] ?? $contract['beneficio_concedido_por'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 <div class="summary-item summary-item--span-2"><span>Equipamentos / comodato</span><strong><?= htmlspecialchars((string) ($contractDetails['equipamentos_comodato'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item summary-item--span-2"><span>Observações</span><strong><?= htmlspecialchars(trim((string) ($contractDetails['observacao_adesao'] ?? '-') . ' · ' . (string) ($installationDetails['observacao'] ?? '-')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                <div class="summary-item summary-item--span-2"><span>Observações</span><strong><?= htmlspecialchars(trim(implode(' · ', array_filter([(string) ($contractDetails['observacao_adesao'] ?? ''), (string) ($installationDetails['observacao'] ?? '')], static fn (string $value): bool => trim($value) !== ''))) ?: '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 <div class="summary-item summary-item--span-2"><span>Versão do termo</span><strong><?= htmlspecialchars((string) ($publicDetails['termo_versao'] ?? ($acceptance['termo_versao'] ?? '2026.1')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             </div>
         </div>
@@ -136,6 +179,12 @@ ob_start();
                 <p class="page-description">Este termo já foi aceito e não pode ser reutilizado.</p>
             <?php elseif ($isExpired): ?>
                 <p class="page-description">Este link expirou e não pode mais ser concluído.</p>
+            <?php elseif ($documentValidationBlocked): ?>
+                <div class="status-card status-card--warning">
+                    <span>Cadastro incompleto</span>
+                    <strong>Este aceite está bloqueado porque o CPF/CNPJ não está disponível para validação.</strong>
+                    <small>Solicite a correção interna do cadastro antes de reenviar o link ao cliente.</small>
+                </div>
             <?php elseif ($hasError): ?>
                 <p class="page-description">O aceite não está disponível neste momento.</p>
             <?php else: ?>
@@ -150,10 +199,14 @@ ob_start();
 
                     <label class="field">
                         <span>Cliente confirma o aceite?</span>
-                        <div class="check-inline">
+                        <label class="choice-card" data-choice-card>
                             <input type="checkbox" name="aceite_cliente" value="sim" data-acceptance-select required>
-                            <span>Li e aceito o termo acima</span>
-                        </div>
+                            <span class="choice-card__icon" aria-hidden="true">✓</span>
+                            <span class="choice-card__content">
+                                <strong>Cliente confirma o aceite do contrato</strong>
+                                <small>Toque no card inteiro para confirmar a concordância com o termo acima.</small>
+                            </span>
+                        </label>
                         <small class="field-help">Esse registro confirma a concordância com os dados, instalação e evidências anexadas.</small>
                     </label>
 
@@ -163,13 +216,7 @@ ob_start();
                             <input type="password" name="document_prefix" inputmode="numeric" maxlength="<?= htmlspecialchars((string) $documentValidationDigits, ENT_QUOTES, 'UTF-8'); ?>" autocomplete="off" data-acceptance-document-input required>
                             <small class="field-help" data-acceptance-document-help>Digite apenas os primeiros dígitos para confirmar a identidade documentada.</small>
                         </label>
-                    <?php elseif ($documentValidationRequired && !$documentValidationPossible): ?>
-                        <div class="rotate-tip" style="margin-bottom: 16px;">
-                            <strong>CPF/CNPJ não disponível para validação parcial.</strong>
-                            <span>O aceite ainda poderá ser concluído, mas a evidência registrará essa limitação.</span>
-                        </div>
                     <?php endif; ?>
-
                     <div class="rotate-tip" style="margin-top: 12px;">
                         <strong>Assinatura já registrada na instalação.</strong>
                         <span>O aceite público usa a assinatura existente, sem solicitar novo desenho.</span>
@@ -181,6 +228,7 @@ ob_start();
         </div>
     </aside>
 </section>
+<?php endif; ?>
 <?php
 $content = (string) ob_get_clean();
 
