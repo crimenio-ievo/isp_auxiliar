@@ -32,7 +32,9 @@ final class Response
 
     public static function redirect(string $location, int $status = 302): self
     {
-        if (str_starts_with($location, '/')) {
+        $basePath = Url::basePath();
+
+        if (str_starts_with($location, '/') && ($basePath === '' || !str_starts_with($location, $basePath . '/'))) {
             $location = Url::to($location);
         }
 

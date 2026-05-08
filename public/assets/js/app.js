@@ -610,6 +610,10 @@ function applyDraftToField(element, value) {
 }
 
 async function restoreDraftToForm(form) {
+    if (form?.dataset?.skipDraftRestore === '1') {
+        return;
+    }
+
     const payload = readDraftStorage(form) || safeJsonParse(form.dataset.draftJson || '', null) || null;
 
     if (!payload) {
@@ -1441,6 +1445,24 @@ if (contractCommercialForm) {
     }
 
     updateCommercialSection(true);
+}
+
+const addressNumberInput = document.querySelector('[data-address-number-input]');
+
+if (addressNumberInput instanceof HTMLInputElement) {
+    addressNumberInput.addEventListener('focus', () => {
+        if (addressNumberInput.value.trim().toUpperCase() === 'SN') {
+            addressNumberInput.value = '';
+        }
+    });
+
+    addressNumberInput.addEventListener('blur', () => {
+        if (addressNumberInput.value.trim() === '') {
+            addressNumberInput.value = 'SN';
+        } else {
+            addressNumberInput.value = addressNumberInput.value.trim().toUpperCase();
+        }
+    });
 }
 
 function normalizeCep(value) {
@@ -2334,6 +2356,52 @@ document.querySelectorAll('[data-pppoe-secret-toggle]').forEach((button) => {
     button.addEventListener('pointerleave', hideSecret);
     button.addEventListener('pointercancel', hideSecret);
 });
+
+const permissionEditor = document.querySelector('[data-permission-editor]');
+
+if (permissionEditor instanceof HTMLElement) {
+    const rowsContainer = permissionEditor.querySelector('[data-permission-rows]');
+    const template = permissionEditor.querySelector('[data-permission-row-template]');
+    const addButton = permissionEditor.querySelector('[data-permission-add]');
+
+    const bindPermissionRow = (row) => {
+        const removeButton = row.querySelector('[data-permission-remove]');
+        if (removeButton instanceof HTMLButtonElement) {
+            removeButton.addEventListener('click', () => {
+                const rows = rowsContainer?.querySelectorAll('.permissions-row') || [];
+                if (rows.length <= 1) {
+                    row.querySelectorAll('input').forEach((input) => {
+                        if (input.type === 'checkbox') {
+                            input.checked = input.name === 'permission_tecnico[]';
+                            return;
+                        }
+
+                        input.value = '';
+                    });
+                    return;
+                }
+
+                row.remove();
+            });
+        }
+    };
+
+    permissionEditor.querySelectorAll('.permissions-row').forEach((row) => bindPermissionRow(row));
+
+    if (rowsContainer && template instanceof HTMLTemplateElement && addButton instanceof HTMLButtonElement) {
+        addButton.addEventListener('click', () => {
+            const nextIndex = rowsContainer.querySelectorAll('.permissions-row').length;
+            const html = template.innerHTML.replaceAll('__INDEX__', String(nextIndex));
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = html.trim();
+            const row = wrapper.firstElementChild;
+            if (row) {
+                bindPermissionRow(row);
+                rowsContainer.appendChild(row);
+            }
+        });
+    }
+}
 
 async function copyTextToClipboard(text) {
     const normalizedText = String(text || '').trim();

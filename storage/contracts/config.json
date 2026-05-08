@@ -10,6 +10,34 @@
         "quantidade_digitos_validacao_cpf": 3,
         "multa_padrao": 0
     },
-    "saved_at": "2026-05-07 17:40:42",
-    "saved_by": "gestor"
+    "saved_at": "2026-05-08 20:04:33",
+    "saved_by": "gestor",
+    "email": {
+        "enabled": true,
+        "dry_run": true,
+        "allow_only_test_email": true,
+        "test_to": "crimenio@gmail.com",
+        "smtp_host": "smtp.zoho.com",
+        "smtp_port": 587,
+        "smtp_username": "financeiro@ievo.com.br",
+        "smtp_password": "#Financeiro13v0",
+        "smtp_encryption": "tls",
+        "smtp_from": "financeiro@ievo.com.br",
+        "smtp_from_name": "iEvo Technology - Financeiro"
+    },
+    "system": {
+        "settings_saved_at": "2026-05-08 20:04:33",
+        "settings_saved_by": "gestor"
+    },
+    "evotrix": {
+        "enabled": true,
+        "dry_run": true,
+        "base_url": "https://api.evotrix.com.br",
+        "token": "4q9hpiWl91Z6s09exaUd1aLkqk23f67Ty2j7y1V4",
+        "channel_id": "68e42b2ad53bf3e827fd4322",
+        "allow_only_test_phone": true,
+        "test_phone": "32999908856",
+        "timeout_seconds": 15,
+        "retry_attempts": 1
+    }
 }

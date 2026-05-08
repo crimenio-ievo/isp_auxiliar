@@ -21,7 +21,7 @@ use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
 
 /**
- * Primeira interface visual do modulo Contratos & Aceites.
+ * Primeira interface visual do modulo Contratos e Aceites.
  *
  * Nesta fase o controlador apenas consulta dados reais quando as tabelas
  * existem e mostra mensagens amigaveis quando a base ainda nao foi criada.
@@ -53,11 +53,20 @@ final class ContractController
 
     public function index(Request $request): Response
     {
+        if (!$this->canAccessContracts()) {
+            Flash::set('error', 'Seu usuário não possui acesso ao módulo Contratos e Aceites.');
+            return Response::redirect('/dashboard');
+        }
+
         $currentTab = $this->normalizeTab((string) ($request->input('tab', $request->query('tab', 'resumo'))));
+
+        if ($currentTab === 'configuracoes' && $request->method() === 'GET') {
+            return Response::redirect('/configuracoes?tab=contratos');
+        }
 
         if ($currentTab === 'configuracoes' && $request->method() === 'POST' && $request->input('save_config', '') === '1') {
             if (!$this->canManageContracts()) {
-                Flash::set('error', 'Somente o gestor pode alterar as configuracoes do modulo.');
+                Flash::set('error', 'Seu usuário não possui permissão para alterar as configurações do módulo.');
                 return Response::redirect('/contratos?tab=configuracoes');
             }
 
@@ -77,11 +86,11 @@ final class ContractController
         $state = $this->buildState();
 
         $html = $this->view->render('contracts/index', [
-            'pageTitle' => 'Contratos & Aceites',
+            'pageTitle' => 'Contratos e Aceites',
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'currentTab' => $currentTab,
             'moduleReady' => $state['moduleReady'],
             'moduleMessage' => $state['moduleMessage'],
@@ -98,6 +107,11 @@ final class ContractController
 
     public function novos(Request $request): Response
     {
+        if (!$this->canAccessContracts()) {
+            Flash::set('error', 'Seu usuário não possui acesso à lista de contratos.');
+            return Response::redirect('/dashboard');
+        }
+
         $state = $this->buildState();
         $filters = $this->normalizeListFilters($request);
 
@@ -106,7 +120,7 @@ final class ContractController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'moduleReady' => $state['moduleReady'],
             'moduleMessage' => $state['moduleMessage'],
             'filters' => $filters,
@@ -119,6 +133,11 @@ final class ContractController
 
     public function aceitesPendentes(Request $request): Response
     {
+        if (!$this->canAccessContracts()) {
+            Flash::set('error', 'Seu usuário não possui acesso aos aceites pendentes.');
+            return Response::redirect('/dashboard');
+        }
+
         $state = $this->buildState();
         $filters = $this->normalizeListFilters($request);
 
@@ -127,7 +146,7 @@ final class ContractController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'moduleReady' => $state['moduleReady'],
             'moduleMessage' => $state['moduleMessage'],
             'filters' => $filters,
@@ -140,6 +159,11 @@ final class ContractController
 
     public function detalhe(Request $request): Response
     {
+        if (!$this->canAccessContracts()) {
+            Flash::set('error', 'Seu usuário não possui acesso ao detalhe de contratos.');
+            return Response::redirect('/dashboard');
+        }
+
         $state = $this->buildState();
         $contractId = (int) $request->query('id', 0);
         $detail = $contractId > 0 ? $this->loadContractDetail($contractId) : null;
@@ -154,11 +178,13 @@ final class ContractController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'moduleReady' => $state['moduleReady'],
             'moduleMessage' => $state['moduleMessage'],
             'detail' => $detail,
             'canManageContracts' => $this->canManageContracts(),
+            'canManageFinancial' => $this->canManageFinancial(),
+            'canManageSettings' => $this->canManageSettings(),
             'simulatedAcceptanceLink' => $this->buildSimulatedAcceptanceLink($detail),
             'integrationStatus' => $this->buildIntegrationStatus($detail),
         ]);
@@ -168,8 +194,8 @@ final class ContractController
 
     public function concluirFinanceiro(Request $request): Response
     {
-        if (!$this->canManageContracts()) {
-            Flash::set('error', 'Somente o gestor pode concluir pendencias financeiras.');
+        if (!$this->canManageFinancial()) {
+            Flash::set('error', 'Seu usuário não possui permissão para concluir pendências financeiras.');
             return Response::redirect('/contratos');
         }
 
@@ -202,8 +228,8 @@ final class ContractController
 
     public function cancelarFinanceiro(Request $request): Response
     {
-        if (!$this->canManageContracts()) {
-            Flash::set('error', 'Somente o gestor pode cancelar pendencias financeiras.');
+        if (!$this->canManageFinancial()) {
+            Flash::set('error', 'Seu usuário não possui permissão para cancelar pendências financeiras.');
             return Response::redirect('/contratos');
         }
 
@@ -231,7 +257,7 @@ final class ContractController
     public function enviarAceiteWhatsapp(Request $request): Response
     {
         if (!$this->canManageContracts()) {
-            Flash::set('error', 'Somente o gestor pode enviar o aceite manualmente.');
+            Flash::set('error', 'Seu usuário não possui permissão para enviar o aceite manualmente.');
             return Response::redirect('/contratos');
         }
 
@@ -247,7 +273,10 @@ final class ContractController
         $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
         $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : [];
         $acceptanceId = (int) ($acceptance['id'] ?? 0);
-        $recipient = trim((string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? ''));
+        $recipient = $this->resolveManualRecipient(
+            trim((string) $request->input('recipient_phone_override', '')),
+            (string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? '')
+        );
         $acceptanceStatus = trim((string) ($acceptance['status'] ?? 'criado'));
 
         if ($acceptanceId <= 0 || $recipient === '') {
@@ -278,8 +307,8 @@ final class ContractController
                 $acceptanceId,
                 [
                 'contract_id' => $contractId,
-                'recipient' => $recipient,
-                'result' => $response,
+                    'recipient' => $recipient,
+                    'result' => $response,
                 ],
                 $request
             );
@@ -306,7 +335,7 @@ final class ContractController
     public function enviarAceiteEmail(Request $request): Response
     {
         if (!$this->canManageContracts()) {
-            Flash::set('error', 'Somente o gestor pode enviar o aceite manualmente por e-mail.');
+            Flash::set('error', 'Seu usuário não possui permissão para enviar o aceite manualmente por e-mail.');
             return Response::redirect('/contratos');
         }
 
@@ -323,7 +352,10 @@ final class ContractController
         $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : [];
         $acceptanceId = (int) ($acceptance['id'] ?? 0);
         $emailConfig = (array) $this->config->get('email', []);
-        $recipient = trim((string) ($contract['email_cliente'] ?? $contract['email'] ?? ''));
+        $recipient = $this->resolveManualRecipient(
+            trim((string) $request->input('recipient_email_override', '')),
+            (string) ($contract['email_cliente'] ?? $contract['email'] ?? '')
+        );
         $testRecipient = trim((string) ($emailConfig['test_to'] ?? ''));
         $allowOnlyTest = (bool) ($emailConfig['allow_only_test_email'] ?? true);
         $acceptanceStatus = trim((string) ($acceptance['status'] ?? 'criado'));
@@ -375,8 +407,8 @@ final class ContractController
 
     public function abrirChamadoFinanceiro(Request $request): Response
     {
-        if (!$this->canManageContracts()) {
-            Flash::set('error', 'Somente o gestor pode abrir o chamado financeiro manual.');
+        if (!$this->canManageFinancial()) {
+            Flash::set('error', 'Seu usuário não possui permissão para abrir o chamado financeiro manual.');
             return Response::redirect('/contratos');
         }
 
@@ -422,11 +454,18 @@ final class ContractController
                 $this->buildFinancialTicketPayload($detail)
             );
 
+            $responseSummary = sprintf(
+                'HTTP %s · %sms%s',
+                (string) ($response['http_status'] ?? '-'),
+                (string) ($response['duration_ms'] ?? 0),
+                isset($response['ticket_id']) && $response['ticket_id'] !== null ? ' · ID ' . (string) $response['ticket_id'] : ''
+            );
             $note = sprintf(
-                '[%s] Chamado financeiro %s no MkAuth. Endpoint: %s.',
+                '[%s] Chamado financeiro %s no MkAuth. Endpoint: %s. %s',
                 date('Y-m-d H:i:s'),
                 (($response['dry_run'] ?? true) ? 'simulado' : 'aberto'),
-                (string) ($response['endpoint'] ?? '/api/chamado/inserir')
+                (string) ($response['endpoint'] ?? '/api/chamado/inserir'),
+                $responseSummary
             );
 
             $this->financialTaskRepository->appendSystemNote($taskId, $note, 'em_andamento');
@@ -438,7 +477,7 @@ final class ContractController
             Flash::set(
                 'success',
                 (($response['dry_run'] ?? true) ? 'Chamado simulado com sucesso. ' : 'Chamado aberto com sucesso no MkAuth. ')
-                . 'A tarefa financeira foi atualizada localmente.'
+                . 'A tarefa financeira foi atualizada localmente. ' . $responseSummary . '.'
             );
         } catch (\Throwable $exception) {
             $this->financialTaskRepository->appendSystemNote(
@@ -467,7 +506,7 @@ final class ContractController
         if (!$moduleReady) {
             return [
                 'moduleReady' => false,
-                'moduleMessage' => 'O modulo Contratos & Aceites ainda aguarda as tabelas da migration 002. A interface esta pronta para quando a base estiver disponivel.',
+                'moduleMessage' => 'O modulo Contratos e Aceites ainda aguarda as tabelas da migration 002. A interface esta pronta para quando a base estiver disponivel.',
                 'summaryCards' => $this->emptySummaryCards(),
                 'recentContracts' => [],
                 'pendingAcceptances' => [],
@@ -1170,32 +1209,37 @@ final class ContractController
         $tipoAdesao = strtolower(trim((string) ($contract['tipo_adesao'] ?? 'cheia')));
         $observacaoAdesao = trim((string) ($contract['observacao_adesao'] ?? ''));
         $autorizadoPor = trim((string) ($contract['beneficio_concedido_por'] ?? ''));
+        $assunto = $tipoAdesao === 'isenta'
+            ? 'Financeiro outros'
+            : (string) ($settings['subject'] ?? 'Financeiro - Boleto / Carne');
+        $instruction = $tipoAdesao === 'isenta'
+            ? 'Instrução: validar internamente se a adesão isenta procede. Não gerar cobrança automática.'
+            : 'Instrução: lançar ou conferir manualmente a adesão no financeiro. Não gerar cobrança automática pelo ISP Auxiliar.';
 
         $description = implode("\n", array_filter([
             'Cliente: ' . (string) ($contract['nome_cliente'] ?? '-'),
+            'Login: ' . (string) ($contract['mkauth_login'] ?? '-'),
             'Telefone: ' . (string) ($contract['telefone_cliente'] ?? '-'),
             'Tipo adesao: ' . (string) ($contract['tipo_adesao'] ?? '-'),
             'Valor adesao: R$ ' . number_format((float) ($contract['valor_adesao'] ?? 0), 2, ',', '.'),
             'Parcelas: ' . (string) ($contract['parcelas_adesao'] ?? '1'),
-            'Vencimento: ' . (string) ($contract['vencimento_primeira_parcela'] ?? '-'),
+            'Valor da parcela: R$ ' . number_format((float) ($contract['valor_parcela_adesao'] ?? 0), 2, ',', '.'),
+            'Vencimento da primeira parcela: ' . (string) ($contract['vencimento_primeira_parcela'] ?? '-'),
             'Autorizado por: ' . ($autorizadoPor !== '' ? $autorizadoPor : $this->extractAuthorizedBy($observacaoAdesao)),
             'Observacoes da adesao: ' . ($observacaoAdesao !== '' ? $observacaoAdesao : '-'),
             'Contrato ID: ' . (string) ($contract['id'] ?? 0),
             'Tarefa financeira ID: ' . (string) ($financialTask['id'] ?? 0),
+            $instruction,
         ]));
 
         return [
             'login' => (string) ($contract['mkauth_login'] ?? ''),
             'nome' => (string) ($contract['nome_cliente'] ?? ''),
             'telefone' => (string) ($contract['telefone_cliente'] ?? ''),
-            'assunto' => $tipoAdesao === 'isenta'
-                ? 'Financeiro outros'
-                : (string) ($settings['subject'] ?? 'Financeiro - Boleto / Carne'),
+            'assunto' => $assunto,
             'prioridade' => (string) ($settings['priority'] ?? 'normal'),
             'descricao' => $description,
-            'observacao' => $tipoAdesao === 'isenta'
-                ? "Adesao marcada como isenta. Favor validar internamente se a isencao procede.\n\n" . $description
-                : $description,
+            'observacao' => $description,
         ];
     }
 
@@ -1234,6 +1278,10 @@ final class ContractController
             'evotrix' => [
                 'enabled' => (bool) $this->config->get('evotrix.enabled', false),
                 'dry_run' => (bool) $this->config->get('evotrix.dry_run', true),
+                'allow_only_test_phone' => (bool) $this->config->get('evotrix.allow_only_test_phone', true),
+                'test_phone' => (string) $this->config->get('evotrix.test_phone', ''),
+                'timeout_seconds' => (int) $this->config->get('evotrix.timeout_seconds', 15),
+                'retry_attempts' => (int) $this->config->get('evotrix.retry_attempts', 1),
                 'last' => $evotrixLast,
             ],
             'email' => [
@@ -1248,6 +1296,7 @@ final class ContractController
                 'dry_run' => (bool) $this->config->get('contracts.mkauth_ticket.dry_run', true),
                 'auto_create' => (bool) $this->config->get('contracts.mkauth_ticket.auto_create', false),
                 'endpoint' => (string) $this->config->get('contracts.mkauth_ticket.endpoint', '/api/chamado/inserir'),
+                'timeout_seconds' => (int) $this->config->get('contracts.mkauth_ticket.timeout_seconds', 15),
                 'last' => $ticketLast,
             ],
         ];
@@ -1262,6 +1311,16 @@ final class ContractController
         $user = $this->resolveUser();
 
         return (string) ($user['login'] ?? $user['name'] ?? '-');
+    }
+
+    private function resolveManualRecipient(string $override, string $fallback): string
+    {
+        $override = trim($override);
+        if ($override !== '') {
+            return $override;
+        }
+
+        return trim($fallback);
     }
 
     private function recordAudit(string $action, string $entityType, ?int $entityId, array $context, Request $request): void
@@ -1282,11 +1341,26 @@ final class ContractController
 
     private function canManageContracts(): bool
     {
-        $user = $this->resolveUser();
-        $role = strtolower(trim((string) ($user['role'] ?? '')));
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || $access['can_access_contracts'];
+    }
 
-        return in_array($role, ['manager', 'platform_admin', 'gestor', 'admin', 'administrador'], true)
-            || !empty($user['can_manage']);
+    private function canAccessContracts(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || $access['can_access_contracts'];
+    }
+
+    private function canManageFinancial(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || $access['can_manage_financial'];
+    }
+
+    private function canManageSettings(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['can_manage_settings'];
     }
 
     private function buildSimulatedAcceptanceLink(array $detail): string
@@ -1311,6 +1385,56 @@ final class ContractController
             'login' => '',
             'role' => 'Operacao',
             'source' => 'fallback',
+        ];
+    }
+
+    private function resolveViewUser(): array
+    {
+        $user = $this->resolveUser();
+        $access = $this->resolveAccessProfile();
+        $user['can_manage_settings'] = $access['can_manage_settings'];
+        $user['can_access_contracts'] = $access['can_access_contracts'];
+        $user['can_manage_financial'] = $access['can_manage_financial'];
+        $user['can_manage'] = !empty($user['can_manage']) || $access['is_manager'];
+
+        if ($access['is_admin']) {
+            $user['role'] = 'admin';
+        } elseif ($access['is_manager']) {
+            $user['role'] = 'manager';
+        }
+
+        return $user;
+    }
+
+    private function resolveAccessProfile(): array
+    {
+        $user = $this->resolveUser();
+        $login = strtolower(trim((string) ($user['login'] ?? '')));
+        $role = strtolower(trim((string) ($user['role'] ?? '')));
+
+        $managerLogins = $this->localRepository->providerSettingList('mkauth_manager_logins');
+        $singleManager = strtolower(trim($this->localRepository->providerSetting('mkauth_manager_login', '')));
+        if ($singleManager !== '') {
+            $managerLogins[] = $singleManager;
+        }
+
+        $adminLogins = $this->localRepository->providerSettingList('admin_access_logins');
+        $settingsLogins = $this->localRepository->providerSettingList('settings_access_logins');
+        $contractLogins = $this->localRepository->providerSettingList('contract_access_logins');
+        $financialLogins = $this->localRepository->providerSettingList('financial_access_logins');
+
+        $isAdminRole = in_array($role, ['platform_admin', 'admin', 'administrador'], true);
+        $isManagerRole = in_array($role, ['manager', 'gestor'], true) || !empty($user['can_manage']);
+
+        $isAdmin = $isAdminRole || ($login !== '' && in_array($login, $adminLogins, true));
+        $isManager = $isAdmin || $isManagerRole || ($login !== '' && in_array($login, $managerLogins, true));
+
+        return [
+            'is_admin' => $isAdmin,
+            'is_manager' => $isManager,
+            'can_manage_settings' => $isManager || ($login !== '' && in_array($login, $settingsLogins, true)),
+            'can_access_contracts' => $isManager || ($login !== '' && in_array($login, $contractLogins, true)),
+            'can_manage_financial' => $isManager || ($login !== '' && in_array($login, $financialLogins, true)),
         ];
     }
 }

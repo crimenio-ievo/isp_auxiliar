@@ -24,6 +24,7 @@ $draftId = (string) ($draftId ?? '');
 $checkpointToken = (string) ($checkpointToken ?? '');
 $draftKey = (string) ($draftKey ?? 'client-create');
 $commercial = is_array($contractCommercial ?? null) ? $contractCommercial : [];
+$skipDraftRestore = !empty($skipDraftRestore);
 $maxAdhesionInstallments = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
 $initialInstallType = strtolower(trim((string) ($form['tipo_instalacao'] ?? ($defaultInstallType ?? 'fibra'))));
 $initialInstallType = in_array($initialInstallType, ['fibra', 'radio'], true) ? $initialInstallType : 'fibra';
@@ -84,6 +85,7 @@ ob_start();
     enctype="multipart/form-data"
     data-autosave-form
     data-draft-key="<?= htmlspecialchars($draftKey, ENT_QUOTES, 'UTF-8'); ?>"
+    data-skip-draft-restore="<?= $skipDraftRestore ? '1' : '0'; ?>"
     data-clear-draft-keys="<?= htmlspecialchars(json_encode($clearDraftKeys, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]', ENT_QUOTES, 'UTF-8'); ?>"
     data-clear-draft-endpoint="<?= htmlspecialchars(Url::to('/clientes/rascunho/limpar'), ENT_QUOTES, 'UTF-8'); ?>"
     data-contract-commercial-config="<?= htmlspecialchars(json_encode($commercial, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}', ENT_QUOTES, 'UTF-8'); ?>"
@@ -258,7 +260,8 @@ ob_start();
 
             <label class="field">
                 <span>Número</span>
-                <input type="text" name="numero" value="<?= $fieldValue('numero', 'SN'); ?>">
+                <input type="text" name="numero" value="<?= $fieldValue('numero', 'SN'); ?>" data-address-number-input>
+                <small class="field-help">Se não houver número, deixe em branco para salvar como <strong>SN</strong>.</small>
             </label>
 
             <label class="field">

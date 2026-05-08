@@ -113,8 +113,8 @@ ob_start();
 
     <aside class="card soft-card">
         <div class="section-heading">
-            <p class="section-heading__eyebrow">Radius</p>
-            <h2><?= $online ? 'Conectado agora' : 'Ainda não conectado'; ?></h2>
+            <p class="section-heading__eyebrow">Detalhes técnicos</p>
+            <h2><?= $online ? 'Sessão Radius ativa' : 'Acompanhar autenticação'; ?></h2>
         </div>
 
         <?php if ($online): ?>
@@ -124,10 +124,10 @@ ob_start();
                 <small>NAS: <?= htmlspecialchars((string) ($session['nasipaddress'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · Início: <?= htmlspecialchars((string) ($session['acctstarttime'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></small>
             </div>
         <?php else: ?>
-            <div class="status-card status-card--warning">
+            <div class="status-card">
                 <span>Nenhuma sessão ativa em radacct</span>
-                <strong>Configure o equipamento e tente novamente</strong>
-                <small>Quando o login aparecer conectado, volte ao bloco principal e use <strong>Verificar e finalizar</strong>.</small>
+                <strong>Use o bloco principal para acompanhar o próximo passo</strong>
+                <small>Assim que o login aparecer conectado, volte ao topo e use <strong>Verificar e finalizar</strong>.</small>
             </div>
         <?php endif; ?>
 

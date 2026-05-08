@@ -96,22 +96,50 @@ final class EmailService
         }
 
         if ($enabled && !$dryRun) {
-            $response = $this->dispatchRealEmail($actualRecipient, $subject, $htmlBody, $textBody);
-            $response['original_recipient'] = $recipient;
-            $response['redirected_to_test'] = $redirectedToTest;
+            try {
+                $response = $this->dispatchRealEmail($actualRecipient, $subject, $htmlBody, $textBody);
+                $response['original_recipient'] = $recipient;
+                $response['redirected_to_test'] = $redirectedToTest;
 
-            $this->notificationLogs->create([
-                'contract_id' => $contractId,
-                'acceptance_id' => $acceptanceId,
-                'channel' => 'email',
-                'provider' => 'smtp',
-                'recipient' => $actualRecipient,
-                'message' => $subject,
-                'status' => 'enviado',
-                'provider_response' => $response,
-            ]);
+                $this->notificationLogs->create([
+                    'contract_id' => $contractId,
+                    'acceptance_id' => $acceptanceId,
+                    'channel' => 'email',
+                    'provider' => 'smtp',
+                    'recipient' => $actualRecipient,
+                    'message' => $subject,
+                    'status' => 'enviado',
+                    'provider_response' => $response,
+                ]);
 
-            return $response;
+                return $response;
+            } catch (\Throwable $exception) {
+                $failure = [
+                    'status' => 'erro',
+                    'provider' => 'smtp',
+                    'channel' => 'email',
+                    'dry_run' => false,
+                    'enabled' => true,
+                    'recipient' => $actualRecipient,
+                    'original_recipient' => $recipient,
+                    'redirected_to_test' => $redirectedToTest,
+                    'queued_at' => date('Y-m-d H:i:s'),
+                    'message' => $exception->getMessage(),
+                ];
+
+                $this->notificationLogs->create([
+                    'contract_id' => $contractId,
+                    'acceptance_id' => $acceptanceId,
+                    'channel' => 'email',
+                    'provider' => 'smtp',
+                    'recipient' => $actualRecipient,
+                    'message' => $subject,
+                    'status' => 'erro',
+                    'provider_response' => $failure,
+                ]);
+
+                throw $exception;
+            }
         }
 
         $response = [

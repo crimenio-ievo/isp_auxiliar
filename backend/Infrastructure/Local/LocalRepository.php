@@ -103,6 +103,81 @@ final class LocalRepository
         return (string) ($settings[$key] ?? $default);
     }
 
+    public function providerSettingList(string $key): array
+    {
+        $raw = $this->providerSetting($key, '');
+        if ($raw === '') {
+            return [];
+        }
+
+        $items = preg_split('/[\r\n,;]+/', $raw) ?: [];
+        $normalized = [];
+
+        foreach ($items as $item) {
+            $login = strtolower(trim((string) $item));
+            if ($login === '') {
+                continue;
+            }
+
+            $normalized[$login] = $login;
+        }
+
+        return array_values($normalized);
+    }
+
+    public function permissionMap(): array
+    {
+        $raw = $this->providerSetting('mkauth_permission_map', '');
+        if ($raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($decoded as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $login = strtolower(trim((string) ($entry['login'] ?? '')));
+            if ($login === '') {
+                continue;
+            }
+
+            $normalized[$login] = [
+                'login' => $login,
+                'gestor_admin' => !empty($entry['gestor_admin']),
+                'contratos' => !empty($entry['contratos']),
+                'financeiro' => !empty($entry['financeiro']),
+                'tecnico' => !empty($entry['tecnico']),
+                'configuracoes' => !empty($entry['configuracoes']),
+            ];
+        }
+
+        return array_values($normalized);
+    }
+
+    public function permissionProfile(string $login): array
+    {
+        $login = strtolower(trim($login));
+        if ($login === '') {
+            return [];
+        }
+
+        foreach ($this->permissionMap() as $entry) {
+            if (($entry['login'] ?? '') === $login) {
+                return $entry;
+            }
+        }
+
+        return [];
+    }
+
     public function saveProviderSettings(array $settings): void
     {
         $providerId = $this->currentProviderId();

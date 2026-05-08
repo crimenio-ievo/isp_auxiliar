@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Infrastructure\Contracts;
 
 use App\Infrastructure\Database\Database;
+use RuntimeException;
 
 /**
  * Repositorio de logs de notificacao.
@@ -19,13 +20,23 @@ final class NotificationLogRepository
 
     public function create(array $data): ?int
     {
-        $this->database->execute(
-            'INSERT INTO notification_logs
-                (contract_id, acceptance_id, channel, provider, recipient, message, status, provider_response, created_at)
-             VALUES
-                (:contract_id, :acceptance_id, :channel, :provider, :recipient, :message, :status, :provider_response, NOW())',
-            $this->normalizeData($data)
-        );
+        try {
+            $this->database->execute(
+                'INSERT INTO notification_logs
+                    (contract_id, acceptance_id, channel, provider, recipient, message, status, provider_response, created_at)
+                 VALUES
+                    (:contract_id, :acceptance_id, :channel, :provider, :recipient, :message, :status, :provider_response, NOW())',
+                $this->normalizeData($data)
+            );
+        } catch (\Throwable $exception) {
+            $message = (string) $exception->getMessage();
+
+            if (str_contains($message, "Data truncated for column 'channel'")) {
+                throw new RuntimeException('A estrutura atual de notification_logs ainda nao suporta este canal. Aplique a migration 003_notification_logs_channels.sql antes de testar este envio.', 0, $exception);
+            }
+
+            throw $exception;
+        }
 
         return $this->database->lastInsertId();
     }
@@ -82,13 +93,18 @@ final class NotificationLogRepository
 
     private function normalizeData(array $data): array
     {
+        $channel = $this->normalizeChannel((string) ($data['channel'] ?? 'whatsapp'));
+        $provider = trim((string) ($data['provider'] ?? 'evotrix'));
+        $recipient = trim((string) ($data['recipient'] ?? ''));
+        $message = trim((string) ($data['message'] ?? ''));
+
         return [
             'contract_id' => $data['contract_id'] ?? null,
             'acceptance_id' => $data['acceptance_id'] ?? null,
-            'channel' => (string) ($data['channel'] ?? 'whatsapp'),
-            'provider' => (string) ($data['provider'] ?? 'evotrix'),
-            'recipient' => (string) ($data['recipient'] ?? ''),
-            'message' => (string) ($data['message'] ?? ''),
+            'channel' => $channel,
+            'provider' => mb_substr($provider !== '' ? $provider : 'evotrix', 0, 64),
+            'recipient' => mb_substr($recipient, 0, 190),
+            'message' => $message,
             'status' => (string) ($data['status'] ?? 'simulado'),
             'provider_response' => $this->normalizeResponse($data['provider_response'] ?? null),
         ];
@@ -105,5 +121,17 @@ final class NotificationLogRepository
         }
 
         return json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: null;
+    }
+
+    private function normalizeChannel(string $channel): string
+    {
+        $normalized = strtolower(trim($channel));
+
+        return match ($normalized) {
+            'email' => 'email',
+            'mkauth_ticket', 'mkauth-ticket', 'ticket', 'financeiro' => 'mkauth_ticket',
+            'system', 'test', 'smtp_test', 'evotrix_test', 'mkauth_test' => 'system',
+            default => 'whatsapp',
+        };
     }
 }

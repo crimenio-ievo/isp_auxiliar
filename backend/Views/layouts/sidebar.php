@@ -6,15 +6,23 @@ use App\Core\Url;
 
 $currentPath = $currentPath ?? '/';
 $userRole = strtolower((string) ($user['role'] ?? ''));
-$canManageSettings = in_array($userRole, ['platform_admin', 'manager', 'admin', 'administrador'], true);
+$canManageSettings = array_key_exists('can_manage_settings', $user)
+    ? (bool) $user['can_manage_settings']
+    : in_array($userRole, ['platform_admin', 'manager', 'admin', 'administrador'], true);
+$canAccessContracts = array_key_exists('can_access_contracts', $user)
+    ? (bool) $user['can_access_contracts']
+    : in_array($userRole, ['platform_admin', 'manager', 'admin', 'administrador'], true);
 $navigationItems = [
     ['/dashboard', 'Dashboard'],
-    ['/contratos', 'Contratos & Aceites'],
     ['/clientes/novo', 'Novo Cliente'],
     ['/instalacoes', 'Instalacoes'],
     ['/usuarios', 'Usuarios'],
     ['/logs', 'Logs'],
 ];
+
+if ($canAccessContracts) {
+    array_splice($navigationItems, 1, 0, [['/contratos', 'Contratos e Aceites']]);
+}
 
 if ($canManageSettings) {
     $navigationItems[] = ['/configuracoes', 'Configuracoes'];

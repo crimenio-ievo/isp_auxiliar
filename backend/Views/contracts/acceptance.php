@@ -41,10 +41,10 @@ ob_start();
 <section class="acceptance-success-screen">
     <article class="card acceptance-success-card">
         <div class="acceptance-success-card__icon" aria-hidden="true">✓</div>
-        <p class="section-heading__eyebrow"><?= $alreadyAcceptedView ? 'Aceite já concluído' : 'Aceite concluído'; ?></p>
-        <h1><?= $alreadyAcceptedView ? 'Este aceite já foi concluído.' : 'Seu aceite foi confirmado com sucesso.'; ?></h1>
+        <p class="section-heading__eyebrow">Aceite concluído</p>
+        <h1><?= $alreadyAcceptedView ? 'Aceite concluído' : 'Seu aceite foi confirmado com sucesso.'; ?></h1>
         <p class="page-description">
-            Seu contrato já foi registrado com segurança.<br>
+            Seu contrato foi registrado com segurança.<br>
             A iEvo agradece a confiança.<br>
             Qualquer dúvida, nossa equipe estará à disposição.
         </p>
@@ -80,7 +80,7 @@ ob_start();
                 </div>
             <?php elseif ($isAccepted): ?>
                 <div class="status-card status-card--success" style="margin-top: 16px;">
-                    <strong>Este aceite já foi concluído.</strong>
+                    <strong>Aceite concluído.</strong>
                     <small>O link permanece registrado, mas não pode ser reutilizado.</small>
                 </div>
             <?php elseif ($isExpired): ?>

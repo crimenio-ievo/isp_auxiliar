@@ -12,12 +12,14 @@ $notificationLogs = is_array($detail['notificationLogs'] ?? null) ? $detail['not
 $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
 $contractId = (int) ($contract['id'] ?? 0);
 $canManageContracts = !empty($canManageContracts);
+$canManageFinancial = !empty($canManageFinancial);
+$canManageSettings = !empty($canManageSettings);
 $simulatedAcceptanceLink = (string) ($simulatedAcceptanceLink ?? '');
 $integrationStatus = is_array($integrationStatus ?? null) ? $integrationStatus : [];
 $evotrixStatus = is_array($integrationStatus['evotrix'] ?? null) ? $integrationStatus['evotrix'] : [];
 $emailStatus = is_array($integrationStatus['email'] ?? null) ? $integrationStatus['email'] : [];
 $mkAuthTicketStatus = is_array($integrationStatus['mkauth_ticket'] ?? null) ? $integrationStatus['mkauth_ticket'] : [];
-$returnTo = Url::to('/contratos/detalhe?id=' . $contractId);
+$returnTo = '/contratos/detalhe?id=' . $contractId;
 $evotrixLastLog = is_array($evotrixStatus['last'] ?? null) ? $evotrixStatus['last'] : [];
 $emailLastLog = is_array($emailStatus['last'] ?? null) ? $emailStatus['last'] : [];
 $mkAuthLastLog = is_array($mkAuthTicketStatus['last'] ?? null) ? $mkAuthTicketStatus['last'] : [];
@@ -30,7 +32,7 @@ ob_start();
 ?>
 <section class="page-header">
     <div>
-        <p class="section-heading__eyebrow">Contratos &amp; Aceites</p>
+        <p class="section-heading__eyebrow">Contratos e Aceites</p>
         <h1>Detalhe do Contrato</h1>
         <p class="page-description">Visão consolidada do contrato, aceite, pendência financeira e trilha de auditoria.</p>
     </div>
@@ -83,15 +85,28 @@ ob_start();
         <button type="button" class="button button--ghost" data-copy-text="<?= htmlspecialchars($simulatedAcceptanceLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link futuro</button>
         <a class="button button--ghost" href="#financeiro">Ver pendência financeira</a>
         <a class="button button--ghost" href="#logs">Ver logs relacionados</a>
+        <?php if ($canManageSettings): ?>
+            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=contratos'), ENT_QUOTES, 'UTF-8'); ?>">Abrir configurações</a>
+        <?php endif; ?>
         <?php if ($canManageContracts && $acceptance !== []): ?>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por WhatsApp?');">
+            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por WhatsApp?');" class="integration-send-form">
                 <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                <label class="field integration-send-form__field">
+                    <span>WhatsApp usado neste envio</span>
+                    <input type="text" name="recipient_phone_override" value="<?= htmlspecialchars((string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Somente números ou número formatado">
+                    <small class="field-help">Você pode reenviar usando um contato temporário/local sem alterar o cadastro no MkAuth.</small>
+                </label>
                 <button type="submit" class="button">Enviar aceite por WhatsApp</button>
             </form>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/email'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por e-mail?');">
+            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/email'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por e-mail?');" class="integration-send-form">
                 <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                <label class="field integration-send-form__field">
+                    <span>E-mail usado neste envio</span>
+                    <input type="email" name="recipient_email_override" value="<?= htmlspecialchars((string) ($contract['email_cliente'] ?? $contract['email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="cliente@exemplo.com">
+                    <small class="field-help">Se o contato local foi corrigido, use este campo para reenviar sem criar um novo aceite.</small>
+                </label>
                 <button type="submit" class="button button--ghost">Enviar aceite por e-mail</button>
             </form>
         <?php endif; ?>
@@ -141,6 +156,8 @@ ob_start();
             <ul class="integration-list">
                 <li><span>Modo</span><strong><?= !empty($evotrixStatus['dry_run']) ? 'Simulado' : 'Real'; ?></strong></li>
                 <li><span>Status</span><strong><?= !empty($evotrixStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong></li>
+                <li><span>Somente número teste</span><strong><?= !empty($evotrixStatus['allow_only_test_phone']) ? 'Sim' : 'Não'; ?></strong></li>
+                <li><span>Número teste</span><strong><?= htmlspecialchars((string) ($evotrixStatus['test_phone'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
                 <li><span>Telefone</span><strong><?= htmlspecialchars((string) ($evotrixLastLog['recipient'] ?? ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? '-')), ENT_QUOTES, 'UTF-8'); ?></strong></li>
                 <li><span>Última tentativa</span><strong><?= htmlspecialchars((string) ($evotrixLastLog['created_at'] ?? 'Ainda não houve tentativa'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
                 <li><span>Resultado</span><strong><?= htmlspecialchars((string) ($evotrixLastLog['status'] ?? 'pendente'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
@@ -182,6 +199,7 @@ ob_start();
                 <li><span>Endpoint</span><strong><?= htmlspecialchars((string) ($mkAuthTicketStatus['endpoint'] ?? '/api/chamado/inserir'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
                 <li><span>Última tentativa</span><strong><?= htmlspecialchars((string) ($mkAuthLastLog['created_at'] ?? 'Ainda não houve tentativa'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
                 <li><span>Resultado</span><strong><?= htmlspecialchars((string) ($mkAuthLastLog['action'] ?? 'pendente'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Timeout</span><strong><?= htmlspecialchars((string) ($mkAuthTicketStatus['timeout_seconds'] ?? 15), ENT_QUOTES, 'UTF-8'); ?>s</strong></li>
             </ul>
             <p class="page-description integration-timeline__response"><?= htmlspecialchars($mkAuthContextText !== '' ? $mkAuthContextText : 'Ainda não houve tentativa de abertura de chamado financeiro para este contrato.', ENT_QUOTES, 'UTF-8'); ?></p>
         </article>
@@ -243,7 +261,7 @@ ob_start();
                 <div class="summary-item summary-item--span-2"><span>Descrição</span><strong><?= nl2br(htmlspecialchars((string) ($financialTask['descricao'] ?? '-'), ENT_QUOTES, 'UTF-8')); ?></strong></div>
             </div>
 
-            <?php if ($canManageContracts): ?>
+            <?php if ($canManageFinancial): ?>
                 <div class="hero-actions" style="margin-top: 18px;">
                     <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/concluir'), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">

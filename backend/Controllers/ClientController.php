@@ -67,6 +67,8 @@ final class ClientController
 
         $dueDays = $this->loadDueDays();
         $draftKey = $draftId !== '' ? 'client-create-' . $draftId : 'client-create';
+        $clearDraftKeys = $this->consumeClearDraftKeys();
+        $skipDraftRestore = $draftId === '' && $checkpointToken === '' && $clearDraftKeys !== [];
 
         $html = $this->view->render('clients/create', [
             'pageTitle' => 'Novo Cliente',
@@ -81,7 +83,8 @@ final class ClientController
             'checkpointToken' => $checkpointToken,
             'draftMedia' => $draftMedia,
             'draftKey' => $draftKey,
-            'clearDraftKeys' => $this->consumeClearDraftKeys(),
+            'clearDraftKeys' => $clearDraftKeys,
+            'skipDraftRestore' => $skipDraftRestore,
             'plans' => $this->loadPlans(),
             'dueDays' => $dueDays,
             'defaultDueDay' => $this->suggestDueDay($dueDays),
@@ -650,10 +653,17 @@ final class ClientController
     private function canManageContracts(): bool
     {
         $user = $this->resolveUser();
+        $login = strtolower(trim((string) ($user['login'] ?? '')));
         $role = strtolower(trim((string) ($user['role'] ?? '')));
+        $permissionProfile = $this->localRepository->permissionProfile($login);
+        $managerLogins = $this->localRepository->providerSettingList('mkauth_manager_logins');
+        $contractLogins = $this->localRepository->providerSettingList('contract_access_logins');
 
         return in_array($role, ['manager', 'platform_admin', 'gestor', 'admin', 'administrador'], true)
-            || !empty($user['can_manage']);
+            || !empty($user['can_manage'])
+            || ($login !== '' && (in_array($login, $managerLogins, true) || in_array($login, $contractLogins, true)))
+            || !empty($permissionProfile['gestor_admin'])
+            || !empty($permissionProfile['contratos']);
     }
 
     private function collectFormData(Request $request): array
@@ -731,6 +741,11 @@ final class ClientController
 
         $defaults = $this->resolveMkAuthDefaults();
 
+        $number = strtoupper(trim((string) $request->input('numero', 'SN')));
+        if ($number === '') {
+            $number = 'SN';
+        }
+
         return [
             'pessoa' => $person,
             'nome_completo' => $request->input('nome_completo', ''),
@@ -748,7 +763,7 @@ final class ClientController
             'plano' => $request->input('plano', ''),
             'cep' => $cep,
             'endereco' => $request->input('endereco', ''),
-            'numero' => $request->input('numero', 'SN'),
+            'numero' => $number,
             'bairro' => $request->input('bairro', ''),
             'complemento' => $request->input('complemento', ''),
             'cidade' => (string) $request->input('cidade', ''),

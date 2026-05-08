@@ -16,6 +16,8 @@ if (is_file($overrideFile)) {
 }
 
 $commercialOverrides = is_array($overrides['commercial'] ?? null) ? $overrides['commercial'] : [];
+$mkauthTicketOverrides = is_array($overrides['mkauth_ticket'] ?? null) ? $overrides['mkauth_ticket'] : [];
+$systemOverrides = is_array($overrides['system'] ?? null) ? $overrides['system'] : [];
 
 $commercial = [
     'valor_adesao_padrao' => (float) Env::get('CONTRACT_VALOR_ADESAO_PADRAO', '0'),
@@ -41,7 +43,7 @@ return [
     'acceptance_ttl_hours' => max(1, (int) Env::get('CONTRACT_ACCEPTANCE_TTL_HOURS', (string) $commercial['validade_link_aceite_horas'])),
     'commercial' => $commercial,
     'financeiro_setor' => 'financeiro',
-    'mkauth_ticket' => [
+    'mkauth_ticket' => array_replace([
         'enabled' => filter_var(
             Env::get('MKAUTH_TICKET_ENABLED', '0'),
             FILTER_VALIDATE_BOOL,
@@ -60,7 +62,23 @@ return [
         'endpoint' => Env::get('MKAUTH_TICKET_ENDPOINT', '/api/chamado/inserir'),
         'subject' => Env::get('MKAUTH_TICKET_SUBJECT', 'Financeiro - Boleto / Carne'),
         'priority' => Env::get('MKAUTH_TICKET_PRIORITY', 'normal'),
-    ],
+        'timeout_seconds' => max(5, (int) Env::get('MKAUTH_TICKET_TIMEOUT_SECONDS', '15')),
+    ], array_intersect_key($mkauthTicketOverrides, [
+        'enabled' => true,
+        'dry_run' => true,
+        'auto_create' => true,
+        'endpoint' => true,
+        'subject' => true,
+        'priority' => true,
+        'timeout_seconds' => true,
+    ])),
+    'system' => array_replace([
+        'settings_saved_at' => '',
+        'settings_saved_by' => '',
+    ], array_intersect_key($systemOverrides, [
+        'settings_saved_at' => true,
+        'settings_saved_by' => true,
+    ])),
     'message_templates' => [
         'aceite_nova_instalacao' => [
             'channel' => 'whatsapp',

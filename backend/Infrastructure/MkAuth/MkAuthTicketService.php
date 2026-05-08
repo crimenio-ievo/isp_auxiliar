@@ -29,6 +29,7 @@ final class MkAuthTicketService
         $enabled = (bool) ($this->config['enabled'] ?? false);
         $dryRun = (bool) ($this->config['dry_run'] ?? true);
         $endpoint = (string) ($this->config['endpoint'] ?? '/api/chamado/inserir');
+        $timeoutSeconds = max(5, (int) ($this->config['timeout_seconds'] ?? 15));
 
         $normalizedPayload = $this->normalizePayload($payload);
 
@@ -42,6 +43,8 @@ final class MkAuthTicketService
                 'payload' => $normalizedPayload,
                 'queued_at' => date('Y-m-d H:i:s'),
                 'message' => 'Chamado financeiro preparado em modo seguro.',
+                'http_status' => null,
+                'duration_ms' => 0,
             ];
         }
 
@@ -52,17 +55,24 @@ final class MkAuthTicketService
         $headers = ['Content-Type: application/json'];
         $headers[] = 'Authorization: Bearer ' . $this->resolveJwtToken();
 
-        $response = $this->sendHttpRequest('POST', $this->baseUrl . $endpoint, $normalizedPayload, $headers);
+        $response = $this->sendHttpRequest('POST', $this->baseUrl . $endpoint, $normalizedPayload, $headers, $timeoutSeconds);
         $decoded = json_decode($response['body'], true);
 
         if (!is_array($decoded)) {
             throw new RuntimeException('Resposta invalida do MkAuth ao abrir chamado.');
         }
 
-        if ($response['status'] >= 400) {
+        if ($response['status'] < 200 || $response['status'] >= 300) {
             $message = $decoded['mensagem'] ?? $decoded['message'] ?? 'MkAuth retornou erro ao abrir chamado.';
             throw new RuntimeException((string) $message);
         }
+
+        if ($this->bodyIndicatesError($decoded)) {
+            $message = $decoded['mensagem'] ?? $decoded['message'] ?? $decoded['erro'] ?? 'MkAuth retornou erro lógico ao abrir chamado.';
+            throw new RuntimeException((string) $message);
+        }
+
+        $ticketId = $this->extractTicketId($decoded);
 
         return [
             'status' => 'enviado',
@@ -72,8 +82,57 @@ final class MkAuthTicketService
             'endpoint' => $endpoint,
             'payload' => $normalizedPayload,
             'response' => $decoded,
+            'ticket_id' => $ticketId,
             'queued_at' => date('Y-m-d H:i:s'),
-            'message' => 'Chamado financeiro aberto com sucesso no MkAuth.',
+            'message' => $ticketId !== null
+                ? 'Chamado financeiro aberto com sucesso no MkAuth. ID: ' . $ticketId
+                : 'Chamado financeiro aberto com sucesso no MkAuth.',
+            'http_status' => $response['status'],
+            'duration_ms' => $response['duration_ms'],
+        ];
+    }
+
+    public function testConnection(): array
+    {
+        $enabled = (bool) ($this->config['enabled'] ?? false);
+        $dryRun = (bool) ($this->config['dry_run'] ?? true);
+        $endpoint = (string) ($this->config['endpoint'] ?? '/api/chamado/inserir');
+        $timeoutSeconds = max(5, (int) ($this->config['timeout_seconds'] ?? 15));
+
+        if (!$enabled || $dryRun) {
+            return [
+                'status' => 'simulado',
+                'provider' => 'mkauth',
+                'dry_run' => true,
+                'enabled' => $enabled,
+                'endpoint' => $endpoint,
+                'http_status' => null,
+                'duration_ms' => 0,
+                'message' => 'Teste MkAuth validado em modo seguro. Nenhum chamado foi criado.',
+            ];
+        }
+
+        if ($this->baseUrl === '') {
+            throw new RuntimeException('MkAuth nao configurado para teste real.');
+        }
+
+        $startedAt = microtime(true);
+        $token = $this->resolveJwtToken();
+        $durationMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        if (trim($token) === '') {
+            throw new RuntimeException('Nao foi possivel obter token de autenticacao no MkAuth.');
+        }
+
+        return [
+            'status' => 'conectado',
+            'provider' => 'mkauth',
+            'dry_run' => false,
+            'enabled' => true,
+            'endpoint' => $endpoint,
+            'http_status' => 200,
+            'duration_ms' => $durationMs,
+            'message' => 'Conexao e autenticacao com MkAuth validadas sem abrir chamado.',
         ];
     }
 
@@ -104,7 +163,7 @@ final class MkAuthTicketService
             'Authorization: Basic ' . base64_encode(trim($this->clientId) . ':' . trim($this->clientSecret)),
         ];
 
-        $response = $this->sendHttpRequest('GET', $this->baseUrl . '/api/', [], $headers);
+        $response = $this->sendHttpRequest('GET', $this->baseUrl . '/api/', [], $headers, max(5, (int) ($this->config['timeout_seconds'] ?? 15)));
         $decoded = json_decode($response['body'], true);
 
         if (is_array($decoded)) {
@@ -124,7 +183,7 @@ final class MkAuthTicketService
         throw new RuntimeException('Nao foi possivel autenticar no MkAuth para abertura de chamado.');
     }
 
-    private function sendHttpRequest(string $method, string $url, array $payload, array $headers): array
+    private function sendHttpRequest(string $method, string $url, array $payload, array $headers, int $timeoutSeconds): array
     {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('Extensao cURL nao esta disponivel neste ambiente.');
@@ -136,11 +195,12 @@ final class MkAuthTicketService
             throw new RuntimeException('Falha ao iniciar requisicao HTTP para o MkAuth.');
         }
 
+        $startedAt = microtime(true);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => $timeoutSeconds,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
         ]);
@@ -158,7 +218,11 @@ final class MkAuthTicketService
             throw new RuntimeException('Erro na requisicao MkAuth: ' . $error);
         }
 
-        return ['status' => $status, 'body' => (string) $body];
+        return [
+            'status' => $status,
+            'body' => (string) $body,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+        ];
     }
 
     private function arrayGet(array $data, string $path): mixed
@@ -175,5 +239,33 @@ final class MkAuthTicketService
         }
 
         return $value;
+    }
+
+    private function bodyIndicatesError(array $decoded): bool
+    {
+        $status = strtolower(trim((string) ($decoded['status'] ?? '')));
+        if (in_array($status, ['erro', 'error', 'fail', 'failed'], true)) {
+            return true;
+        }
+
+        $success = $decoded['success'] ?? null;
+        if ($success === false || $success === 0 || $success === '0') {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function extractTicketId(array $decoded): ?string
+    {
+        foreach (['id', 'chamado_id', 'ticket_id', 'data.id', 'data.chamado_id', 'retorno.id'] as $path) {
+            $value = $this->arrayGet($decoded, $path);
+
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
     }
 }
