@@ -25,17 +25,16 @@ $checkpointToken = (string) ($checkpointToken ?? '');
 $draftKey = (string) ($draftKey ?? 'client-create');
 $commercial = is_array($contractCommercial ?? null) ? $contractCommercial : [];
 $maxAdhesionInstallments = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
-$loggedUserName = trim((string) (($user['name'] ?? $user['login'] ?? '')));
 $initialInstallType = strtolower(trim((string) ($form['tipo_instalacao'] ?? ($defaultInstallType ?? 'fibra'))));
 $initialInstallType = in_array($initialInstallType, ['fibra', 'radio'], true) ? $initialInstallType : 'fibra';
 $initialAdhesionType = strtolower(trim((string) ($form['tipo_adesao'] ?? '')));
 if (!in_array($initialAdhesionType, ['cheia', 'promocional', 'isenta'], true)) {
-    $initialAdhesionType = $initialInstallType === 'fibra' ? 'isenta' : 'cheia';
+    $initialAdhesionType = 'cheia';
 }
 $initialAdhesionInstallments = max(1, min($maxAdhesionInstallments, (int) ($form['parcelas_adesao'] ?? 1)));
 $initialAdhesionFidelity = max(1, (int) ($form['fidelidade_meses'] ?? ($commercial['fidelidade_meses_padrao'] ?? 12)));
 $initialAdhesionValue = (string) ($form['valor_adesao'] ?? '');
-$initialBenefitAuthorizer = (string) ($form['beneficio_concedido_por'] ?? ($loggedUserName !== '' ? $loggedUserName : ''));
+$initialBenefitAuthorizer = (string) ($form['beneficio_concedido_por'] ?? '');
 $baseAdhesionValue = (float) ($commercial['valor_adesao_padrao'] ?? 0);
 $promoAdhesionValue = (float) ($commercial['valor_adesao_promocional'] ?? 0);
 $promoDiscountPercent = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
@@ -300,7 +299,7 @@ ob_start();
                             <option value="promocional" <?= $fieldSelected('tipo_adesao', 'promocional', $initialAdhesionType); ?>>Promocional</option>
                             <option value="isenta" <?= $fieldSelected('tipo_adesao', 'isenta', $initialAdhesionType); ?>>Isenta</option>
                         </select>
-                        <small class="field-help">Fibra pode começar como isenta. O técnico pode ajustar antes de concluir.</small>
+                        <small class="field-help">Cheia é o padrão. Ajuste para promocional ou isenta apenas quando necessário.</small>
                     </label>
 
                     <label class="field">
@@ -335,8 +334,8 @@ ob_start();
 
                     <label class="field">
                         <span>Autorizado por</span>
-                        <input type="text" name="beneficio_concedido_por" placeholder="Quem aprovou o benefício" value="<?= htmlspecialchars($initialBenefitAuthorizer, ENT_QUOTES, 'UTF-8'); ?>" data-adhesion-authorizer-input>
-                        <small class="field-help">Informe quem aprovou a condição comercial. O valor do benefício é calculado automaticamente.</small>
+                        <input type="text" name="beneficio_concedido_por" placeholder="Quem aprovou o benefício" value="<?= htmlspecialchars($initialBenefitAuthorizer, ENT_QUOTES, 'UTF-8'); ?>" data-adhesion-authorizer-input data-skip-draft-restore>
+                        <small class="field-help">Preencha manualmente quem aprovou desconto, promoção, isenção ou condição especial.</small>
                     </label>
 
                     <input type="hidden" name="beneficio_valor" value="<?= $fieldValue('beneficio_valor', $defaultBenefitValue); ?>" data-adhesion-benefit-input>

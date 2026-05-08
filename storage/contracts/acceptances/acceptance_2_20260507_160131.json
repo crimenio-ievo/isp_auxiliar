@@ -1,0 +1,87 @@
+{
+    "displayed_data": {
+        "cliente": {
+            "nome": "Crimenio Lopes de Faria",
+            "login": "crimenio",
+            "cpf_cnpj": "***.***.***-38",
+            "telefone": "32999908856"
+        },
+        "instalacao": {
+            "cep": "36550000",
+            "endereco": "Avenida Ernesto Lopes · 457 · Coimbra · MG",
+            "coordenadas": "-20.850609,-42.803861",
+            "tipo_instalacao": "fibra",
+            "local_dici": "u",
+            "observacao": "Teste observação geral."
+        },
+        "plano": {
+            "nome": "FibraUrbano_100mbps - R$ 99,90",
+            "valor_mensal": 99.9,
+            "origem": "mkauth"
+        },
+        "contrato": {
+            "vencimento": "05",
+            "valor_mensal": 99.9,
+            "tipo_adesao": "isenta",
+            "valor_adesao": 0,
+            "parcelas_adesao": 3,
+            "valor_parcela_adesao": 0,
+            "vencimento_primeira_parcela": "2026-06-05",
+            "beneficio_valor": 1200,
+            "fidelidade_meses": 12,
+            "multa_total": 0,
+            "beneficio_concedido_por": "",
+            "tipo_aceite": "nova_instalacao",
+            "observacao_adesao": "Autorizado por: Crimenio\nObservação: Teste observação adesão.",
+            "equipamentos_comodato": "-"
+        },
+        "termo_versao": "2026.1",
+        "assinatura_path": "storage/uploads/clientes/crimenio_20260507155130/assinatura.png"
+    },
+    "contract": {
+        "id": 2,
+        "client_id": 10,
+        "mkauth_login": "crimenio",
+        "nome_cliente": "Crimenio Lopes de Faria",
+        "telefone_cliente": "32999908856",
+        "tipo_adesao": "isenta",
+        "valor_adesao": 0,
+        "parcelas_adesao": 3,
+        "valor_parcela_adesao": 0,
+        "vencimento_primeira_parcela": "2026-06-05",
+        "fidelidade_meses": 12,
+        "beneficio_valor": 1200,
+        "beneficio_concedido_por": "",
+        "multa_total": 0,
+        "tipo_aceite": "nova_instalacao",
+        "observacao_adesao": "Autorizado por: Crimenio\nObservação: Teste observação adesão.",
+        "status_financeiro": "pendente_lancamento"
+    },
+    "acceptance": {
+        "id": 2,
+        "contract_id": 2,
+        "status": "aceito",
+        "accepted_at": "2026-05-07 16:01:31",
+        "ip_address": "10.4.0.2",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0",
+        "termo_versao": "2026.1",
+        "termo_hash": "afb43de2f4324dc32007e2cfb5411cb6cc39c9c2025b8d00a65a325af99171e8"
+    },
+    "accepted_at": "2026-05-07 16:01:31",
+    "ip_address": "10.4.0.2",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0",
+    "term_hash": "afb43de2f4324dc32007e2cfb5411cb6cc39c9c2025b8d00a65a325af99171e8",
+    "term_version": "2026.1",
+    "token_reference": "757b25f50575a8f9842a77fbdad808ed1ab2b8f39b127f1be5f504f33d4e148e",
+    "validation": {
+        "required": true,
+        "available": true,
+        "digits_requested": 3,
+        "document_prefix_entered": "092",
+        "document_validation_possible": true,
+        "matched": true,
+        "result": "matched"
+    },
+    "document_full": "09277436638",
+    "signature_path": "storage/uploads/clientes/crimenio_20260507155130/assinatura.png"
+}

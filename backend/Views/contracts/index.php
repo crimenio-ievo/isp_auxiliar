@@ -8,9 +8,11 @@ $summaryCards = is_array($summaryCards ?? null) ? $summaryCards : [];
 $recentContracts = is_array($recentContracts ?? null) ? $recentContracts : [];
 $pendingAcceptances = is_array($pendingAcceptances ?? null) ? $pendingAcceptances : [];
 $commercialConfig = is_array($commercialConfig ?? null) ? $commercialConfig : [];
+$emailConfig = is_array($emailConfig ?? null) ? $emailConfig : [];
 $currentTab = (string) ($currentTab ?? 'resumo');
 $canManageContracts = !empty($canManageContracts);
 $moneyValue = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
+$emailPasswordConfigured = trim((string) ($emailConfig['smtp_password'] ?? '')) !== '';
 $tabLink = static function (string $tab) use ($currentTab): string {
     $active = $currentTab === $tab ? ' is-active' : '';
     return $active;
@@ -123,6 +125,81 @@ ob_start();
                     <label class="field">
                         <span>Quantidade de dígitos da validação</span>
                         <input type="number" name="quantidade_digitos_validacao_cpf" min="1" value="<?= htmlspecialchars((string) ($commercialConfig['quantidade_digitos_validacao_cpf'] ?? 3), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <div class="section-heading field--span-2" style="margin-top: 12px;">
+                        <p class="section-heading__eyebrow">E-mail</p>
+                        <h2>SMTP autenticado</h2>
+                    </div>
+
+                    <label class="field">
+                        <span>E-mail habilitado</span>
+                        <select name="email_enabled">
+                            <option value="0" <?= empty($emailConfig['enabled']) ? 'selected' : ''; ?>>Não</option>
+                            <option value="1" <?= !empty($emailConfig['enabled']) ? 'selected' : ''; ?>>Sim</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span>E-mail DRY_RUN</span>
+                        <select name="email_dry_run">
+                            <option value="1" <?= !empty($emailConfig['dry_run']) ? 'selected' : ''; ?>>Sim</option>
+                            <option value="0" <?= empty($emailConfig['dry_run']) ? 'selected' : ''; ?>>Não</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span>Permitir apenas e-mail de teste</span>
+                        <select name="email_allow_only_test_email">
+                            <option value="1" <?= !empty($emailConfig['allow_only_test_email']) ? 'selected' : ''; ?>>Sim</option>
+                            <option value="0" <?= empty($emailConfig['allow_only_test_email']) ? 'selected' : ''; ?>>Não</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span>E-mail de teste</span>
+                        <input type="email" name="email_test_to" value="<?= htmlspecialchars((string) ($emailConfig['test_to'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>SMTP host</span>
+                        <input type="text" name="smtp_host" value="<?= htmlspecialchars((string) ($emailConfig['smtp_host'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>SMTP porta</span>
+                        <input type="number" name="smtp_port" min="1" value="<?= htmlspecialchars((string) ($emailConfig['smtp_port'] ?? 587), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>SMTP usuário</span>
+                        <input type="text" name="smtp_username" value="<?= htmlspecialchars((string) ($emailConfig['smtp_username'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field">
+                        <span>SMTP senha</span>
+                        <input type="password" name="smtp_password" value="" placeholder="<?= $emailPasswordConfigured ? 'Senha configurada' : 'Informe a senha SMTP'; ?>">
+                        <small class="field-help"><?= $emailPasswordConfigured ? 'Senha configurada e mantida salva se este campo ficar vazio.' : 'A senha fica salva apenas na configuração local do módulo.'; ?></small>
+                    </label>
+
+                    <label class="field">
+                        <span>Criptografia</span>
+                        <select name="smtp_encryption">
+                            <?php $currentEncryption = (string) ($emailConfig['smtp_encryption'] ?? 'tls'); ?>
+                            <option value="tls" <?= $currentEncryption === 'tls' ? 'selected' : ''; ?>>TLS</option>
+                            <option value="ssl" <?= $currentEncryption === 'ssl' ? 'selected' : ''; ?>>SSL</option>
+                            <option value="none" <?= $currentEncryption === 'none' ? 'selected' : ''; ?>>Nenhuma</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span>Remetente</span>
+                        <input type="email" name="smtp_from" value="<?= htmlspecialchars((string) ($emailConfig['smtp_from'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+
+                    <label class="field field--span-2">
+                        <span>Nome do remetente</span>
+                        <input type="text" name="smtp_from_name" value="<?= htmlspecialchars((string) ($emailConfig['smtp_from_name'] ?? 'ISP Auxiliar'), ENT_QUOTES, 'UTF-8'); ?>">
                     </label>
 
                     <div class="form-actions field--span-2">

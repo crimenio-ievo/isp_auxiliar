@@ -23,7 +23,7 @@ ob_start();
     <div>
         <p class="section-heading__eyebrow">Aceite do cliente</p>
         <h1>Confirmação e evidências da instalação</h1>
-        <p class="page-description">Revise os dados abaixo, posicione o celular na horizontal se preferir e conclua a assinatura com fotos obrigatórias da instalação.</p>
+        <p class="page-description">Revise os dados abaixo, posicione o celular na horizontal se preferir e conclua a assinatura com as evidências já coletadas na instalação.</p>
     </div>
     <div class="acceptance-header__meta">
         <span class="pill">Rascunho salvo</span>
@@ -114,18 +114,18 @@ ob_start();
                 <span>A assinatura fica mais precisa e confortável nesse formato.</span>
             </div>
 
-            <label class="field field--span-2">
+            <div class="field field--span-2">
                 <span>Cliente confirma o aceite?</span>
-                <label class="choice-card" data-choice-card>
+                <label class="acceptance-check" data-acceptance-choice>
                     <input type="checkbox" name="aceite_cliente" value="sim" data-acceptance-select>
-                    <span class="choice-card__icon" aria-hidden="true">✓</span>
-                    <span class="choice-card__content">
+                    <span class="acceptance-check__box" aria-hidden="true"></span>
+                    <span class="acceptance-check__content">
                         <strong>Cliente confirma o aceite do contrato</strong>
-                        <small>Toque no card inteiro para confirmar antes de finalizar o envio.</small>
+                        <small>Marque para confirmar a concordância antes de finalizar o envio.</small>
                     </span>
                 </label>
                 <small class="field-help">Esse registro confirma a concordância com os dados, instalação e evidências anexadas.</small>
-            </label>
+            </div>
 
             <label class="field field--span-2">
                 <span>Assinatura na tela</span>
@@ -140,8 +140,8 @@ ob_start();
             </label>
 
             <label class="field field--span-2">
-                <span>Observação da instalação</span>
-                <textarea rows="4" name="observacao_aceite" placeholder="Detalhes do aceite, condição do local, pontos de observação e conferência final."></textarea>
+                <span>Observação da assinatura/finalização</span>
+                <textarea rows="4" name="observacao_aceite" placeholder="Registre algo relevante que tenha ocorrido na assinatura, conferência final ou conclusão do cadastro."></textarea>
             </label>
 
             <div class="form-actions field--span-2">

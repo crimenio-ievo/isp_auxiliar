@@ -10,10 +10,15 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Url;
 use App\Core\View;
+use App\Infrastructure\Contracts\ContractAcceptanceRepository;
+use App\Infrastructure\Contracts\MessageTemplateRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Contracts\NotificationLogRepository;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\MkAuth\MkAuthTicketService;
+use App\Infrastructure\Notifications\EmailService;
+use App\Infrastructure\Notifications\EvotrixService;
 
 /**
  * Primeira interface visual do modulo Contratos & Aceites.
@@ -37,7 +42,12 @@ final class ContractController
         private Database $database,
         private LocalRepository $localRepository,
         private FinancialTaskRepository $financialTaskRepository,
-        private NotificationLogRepository $notificationLogRepository
+        private NotificationLogRepository $notificationLogRepository,
+        private ContractAcceptanceRepository $contractAcceptanceRepository,
+        private MessageTemplateRepository $messageTemplateRepository,
+        private EvotrixService $evotrixService,
+        private MkAuthTicketService $mkAuthTicketService,
+        private EmailService $emailService
     ) {
     }
 
@@ -52,8 +62,11 @@ final class ContractController
             }
 
             try {
-                $this->saveCommercialSettings($this->normalizeCommercialSettingsFromRequest($request));
-                Flash::set('success', 'Configuracoes comerciais atualizadas com sucesso.');
+                $this->saveModuleSettings(
+                    $this->normalizeCommercialSettingsFromRequest($request),
+                    $this->normalizeEmailSettingsFromRequest($request)
+                );
+                Flash::set('success', 'Configuracoes do modulo atualizadas com sucesso.');
             } catch (\Throwable $exception) {
                 Flash::set('error', 'Nao foi possivel salvar as configuracoes agora. Verifique permissões e tente novamente.');
             }
@@ -76,6 +89,7 @@ final class ContractController
             'recentContracts' => $state['recentContracts'],
             'pendingAcceptances' => $state['pendingAcceptances'],
             'commercialConfig' => $this->config->get('contracts.commercial', []),
+            'emailConfig' => $this->config->get('email', []),
             'canManageContracts' => $this->canManageContracts(),
         ]);
 
@@ -146,6 +160,7 @@ final class ContractController
             'detail' => $detail,
             'canManageContracts' => $this->canManageContracts(),
             'simulatedAcceptanceLink' => $this->buildSimulatedAcceptanceLink($detail),
+            'integrationStatus' => $this->buildIntegrationStatus($detail),
         ]);
 
         return Response::html($html);
@@ -209,6 +224,233 @@ final class ContractController
         ], $request);
 
         Flash::set('success', 'Pendencia financeira cancelada com registro de auditoria.');
+
+        return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+    }
+
+    public function enviarAceiteWhatsapp(Request $request): Response
+    {
+        if (!$this->canManageContracts()) {
+            Flash::set('error', 'Somente o gestor pode enviar o aceite manualmente.');
+            return Response::redirect('/contratos');
+        }
+
+        $contractId = (int) $request->input('contract_id', 0);
+        $returnTo = trim((string) $request->input('return_to', '/contratos/detalhe?id=' . $contractId));
+        $detail = $contractId > 0 ? $this->loadContractDetail($contractId) : null;
+
+        if ($contractId <= 0 || $detail === null) {
+            Flash::set('error', 'Nao foi possivel localizar o contrato para envio do aceite.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : [];
+        $acceptanceId = (int) ($acceptance['id'] ?? 0);
+        $recipient = trim((string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? ''));
+        $acceptanceStatus = trim((string) ($acceptance['status'] ?? 'criado'));
+
+        if ($acceptanceId <= 0 || $recipient === '') {
+            Flash::set('error', 'O contrato ainda nao possui aceite preparado com telefone de envio.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        if ($acceptanceStatus === 'aceito') {
+            Flash::set('success', 'Este aceite ja foi confirmado pelo cliente e nao precisa de novo envio.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        try {
+            $message = $this->renderAcceptanceMessage($detail);
+            $response = $this->evotrixService->sendMessage($recipient, $message, $contractId, $acceptanceId);
+
+            if (empty($response['repeated_attempt'])) {
+                $this->contractAcceptanceRepository->markSent(
+                    $acceptanceId,
+                    isset($response['message_id']) ? (string) $response['message_id'] : null,
+                    (string) ($response['queued_at'] ?? date('Y-m-d H:i:s'))
+                );
+            }
+
+            $this->recordAudit(
+                !empty($response['repeated_attempt']) ? 'contract.acceptance.whatsapp.duplicate_attempt' : 'contract.acceptance.whatsapp.sent',
+                'contract_acceptance',
+                $acceptanceId,
+                [
+                'contract_id' => $contractId,
+                'recipient' => $recipient,
+                'result' => $response,
+                ],
+                $request
+            );
+
+            Flash::set(
+                'success',
+                !empty($response['repeated_attempt'])
+                    ? 'Este aceite ja possui um envio/manual registrado anteriormente.'
+                    : ((($response['dry_run'] ?? true) ? 'Envio simulado com sucesso. ' : 'Aceite enviado com sucesso. ')
+                    . 'O registro foi gravado no historico do contrato.')
+            );
+        } catch (\Throwable $exception) {
+            $this->recordAudit('contract.acceptance.whatsapp.failed', 'contract_acceptance', $acceptanceId, [
+                'contract_id' => $contractId,
+                'recipient' => $recipient,
+                'error' => $exception->getMessage(),
+            ], $request);
+            Flash::set('error', 'Nao foi possivel enviar o aceite agora: ' . $exception->getMessage());
+        }
+
+        return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+    }
+
+    public function enviarAceiteEmail(Request $request): Response
+    {
+        if (!$this->canManageContracts()) {
+            Flash::set('error', 'Somente o gestor pode enviar o aceite manualmente por e-mail.');
+            return Response::redirect('/contratos');
+        }
+
+        $contractId = (int) $request->input('contract_id', 0);
+        $returnTo = trim((string) $request->input('return_to', '/contratos/detalhe?id=' . $contractId));
+        $detail = $contractId > 0 ? $this->loadContractDetail($contractId) : null;
+
+        if ($contractId <= 0 || $detail === null) {
+            Flash::set('error', 'Nao foi possivel localizar o contrato para envio por e-mail.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : [];
+        $acceptanceId = (int) ($acceptance['id'] ?? 0);
+        $emailConfig = (array) $this->config->get('email', []);
+        $recipient = trim((string) ($contract['email_cliente'] ?? $contract['email'] ?? ''));
+        $testRecipient = trim((string) ($emailConfig['test_to'] ?? ''));
+        $allowOnlyTest = (bool) ($emailConfig['allow_only_test_email'] ?? true);
+        $acceptanceStatus = trim((string) ($acceptance['status'] ?? 'criado'));
+
+        if ($acceptanceId <= 0 || ($recipient === '' && !($allowOnlyTest && $testRecipient !== ''))) {
+            Flash::set('error', 'Este contrato ainda nao possui aceite preparado com e-mail disponivel para envio.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        if ($acceptanceStatus === 'aceito') {
+            Flash::set('success', 'Este aceite ja foi confirmado pelo cliente e nao precisa de novo envio.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        try {
+            [$subject, $htmlBody, $textBody] = $this->buildAcceptanceEmailMessage($detail);
+            $response = $this->emailService->sendAcceptanceEmail($recipient, $subject, $htmlBody, $textBody, $contractId, $acceptanceId);
+
+            $this->recordAudit(
+                !empty($response['repeated_attempt']) ? 'contract.acceptance.email.duplicate_attempt' : 'contract.acceptance.email.sent',
+                'contract_acceptance',
+                $acceptanceId,
+                [
+                    'contract_id' => $contractId,
+                    'recipient' => $recipient !== '' ? $recipient : $testRecipient,
+                    'result' => $response,
+                ],
+                $request
+            );
+
+            Flash::set(
+                'success',
+                !empty($response['repeated_attempt'])
+                    ? 'Este aceite ja possui um envio/manual por e-mail registrado anteriormente.'
+                    : ((($response['dry_run'] ?? true) ? 'Envio de e-mail simulado com sucesso. ' : 'Aceite enviado por e-mail com sucesso. ')
+                    . 'O registro foi gravado no historico do contrato.')
+            );
+        } catch (\Throwable $exception) {
+            $this->recordAudit('contract.acceptance.email.failed', 'contract_acceptance', $acceptanceId, [
+                'contract_id' => $contractId,
+                'recipient' => $recipient !== '' ? $recipient : $testRecipient,
+                'error' => $exception->getMessage(),
+            ], $request);
+            Flash::set('error', 'Nao foi possivel enviar o aceite por e-mail agora: ' . $exception->getMessage());
+        }
+
+        return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+    }
+
+    public function abrirChamadoFinanceiro(Request $request): Response
+    {
+        if (!$this->canManageContracts()) {
+            Flash::set('error', 'Somente o gestor pode abrir o chamado financeiro manual.');
+            return Response::redirect('/contratos');
+        }
+
+        $contractId = (int) $request->input('contract_id', 0);
+        $returnTo = trim((string) $request->input('return_to', '/contratos/detalhe?id=' . $contractId));
+        $detail = $contractId > 0 ? $this->loadContractDetail($contractId) : null;
+
+        if ($contractId <= 0 || $detail === null) {
+            Flash::set('error', 'Nao foi possivel localizar o contrato financeiro solicitado.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
+        $taskId = (int) ($financialTask['id'] ?? 0);
+        $taskStatus = trim((string) ($financialTask['status'] ?? ''));
+
+        if ($taskId <= 0) {
+            Flash::set('error', 'Nenhuma tarefa financeira vinculada foi encontrada para este contrato.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        if (in_array($taskStatus, ['concluido', 'cancelado'], true)) {
+            Flash::set('error', 'A tarefa financeira atual nao permite abrir novo chamado manual.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        if ($this->hasFinancialTicketAttempt($detail)) {
+            $this->financialTaskRepository->appendSystemNote(
+                $taskId,
+                '[' . date('Y-m-d H:i:s') . '] Nova tentativa ignorada: ja existe chamado/manual registrado anteriormente.'
+            );
+            $this->recordAudit('contract.financial_task.ticket.duplicate_attempt', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+            ], $request);
+            Flash::set('success', 'Ja existe um chamado financeiro preparado anteriormente para esta tarefa.');
+
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        try {
+            $response = $this->mkAuthTicketService->openFinancialTicket(
+                $this->buildFinancialTicketPayload($detail)
+            );
+
+            $note = sprintf(
+                '[%s] Chamado financeiro %s no MkAuth. Endpoint: %s.',
+                date('Y-m-d H:i:s'),
+                (($response['dry_run'] ?? true) ? 'simulado' : 'aberto'),
+                (string) ($response['endpoint'] ?? '/api/chamado/inserir')
+            );
+
+            $this->financialTaskRepository->appendSystemNote($taskId, $note, 'em_andamento');
+            $this->recordAudit('contract.financial_task.ticket.created', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'response' => $response,
+            ], $request);
+
+            Flash::set(
+                'success',
+                (($response['dry_run'] ?? true) ? 'Chamado simulado com sucesso. ' : 'Chamado aberto com sucesso no MkAuth. ')
+                . 'A tarefa financeira foi atualizada localmente.'
+            );
+        } catch (\Throwable $exception) {
+            $this->financialTaskRepository->appendSystemNote(
+                $taskId,
+                '[' . date('Y-m-d H:i:s') . '] Falha ao abrir chamado financeiro: ' . $exception->getMessage()
+            );
+            $this->recordAudit('contract.financial_task.ticket.failed', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'error' => $exception->getMessage(),
+            ], $request);
+            Flash::set('error', 'Nao foi possivel abrir o chamado financeiro agora: ' . $exception->getMessage());
+        }
 
         return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
     }
@@ -475,6 +717,8 @@ final class ContractController
             return null;
         }
 
+        $contract = $this->hydrateContractCommunicationData($contract);
+
         $acceptance = null;
         $financialTask = null;
 
@@ -541,6 +785,45 @@ final class ContractController
         ];
     }
 
+    private function hydrateContractCommunicationData(array $contract): array
+    {
+        $login = trim((string) ($contract['mkauth_login'] ?? ''));
+
+        if ($login === '' || !$this->tableExists('installation_checkpoints')) {
+            return $contract;
+        }
+
+        try {
+            $checkpoint = $this->database->fetchOne(
+                'SELECT payload_json
+                 FROM installation_checkpoints
+                 WHERE mkauth_login = :login
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT 1',
+                ['login' => $login]
+            );
+        } catch (\Throwable) {
+            $checkpoint = null;
+        }
+
+        if (!is_array($checkpoint) || empty($checkpoint['payload_json'])) {
+            return $contract;
+        }
+
+        $payload = json_decode((string) $checkpoint['payload_json'], true);
+        $formData = is_array($payload['form_data'] ?? null) ? $payload['form_data'] : [];
+
+        if (!isset($contract['email']) || trim((string) $contract['email']) === '') {
+            $contract['email'] = trim((string) ($formData['email'] ?? ''));
+        }
+
+        if (!isset($contract['email_cliente']) || trim((string) $contract['email_cliente']) === '') {
+            $contract['email_cliente'] = trim((string) ($formData['email'] ?? ''));
+        }
+
+        return $contract;
+    }
+
     private function normalizeTab(string $tab): string
     {
         $tab = strtolower(trim($tab));
@@ -565,7 +848,32 @@ final class ContractController
         ];
     }
 
-    private function saveCommercialSettings(array $commercial): void
+    private function normalizeEmailSettingsFromRequest(Request $request): array
+    {
+        $email = (array) $this->config->get('email', []);
+        $existing = $this->readStoredModuleSettings();
+        $existingEmail = is_array($existing['email'] ?? null) ? $existing['email'] : [];
+        $storedPassword = trim((string) ($existingEmail['smtp_password'] ?? $email['smtp_password'] ?? ''));
+        $incomingPassword = trim((string) $request->input('smtp_password', ''));
+
+        return [
+            'enabled' => $this->normalizeBooleanQuery((string) $request->input('email_enabled', !empty($email['enabled']) ? '1' : '0')),
+            'dry_run' => $this->normalizeBooleanQuery((string) $request->input('email_dry_run', !empty($email['dry_run']) ? '1' : '0')),
+            'allow_only_test_email' => $this->normalizeBooleanQuery((string) $request->input('email_allow_only_test_email', !empty($email['allow_only_test_email']) ? '1' : '0')),
+            'test_to' => trim((string) $request->input('email_test_to', (string) ($email['test_to'] ?? ''))),
+            'smtp_host' => trim((string) $request->input('smtp_host', (string) ($email['smtp_host'] ?? ''))),
+            'smtp_port' => max(1, (int) $request->input('smtp_port', (string) ($email['smtp_port'] ?? 587))),
+            'smtp_username' => trim((string) $request->input('smtp_username', (string) ($email['smtp_username'] ?? ''))),
+            'smtp_password' => $incomingPassword !== '' ? $incomingPassword : $storedPassword,
+            'smtp_encryption' => in_array((string) $request->input('smtp_encryption', (string) ($email['smtp_encryption'] ?? 'tls')), ['tls', 'ssl', 'none'], true)
+                ? (string) $request->input('smtp_encryption', (string) ($email['smtp_encryption'] ?? 'tls'))
+                : 'tls',
+            'smtp_from' => trim((string) $request->input('smtp_from', (string) ($email['smtp_from'] ?? ''))),
+            'smtp_from_name' => trim((string) $request->input('smtp_from_name', (string) ($email['smtp_from_name'] ?? 'ISP Auxiliar'))),
+        ];
+    }
+
+    private function saveModuleSettings(array $commercial, array $email): void
     {
         $path = $this->contractSettingsPath();
         $directory = dirname($path);
@@ -584,6 +892,7 @@ final class ContractController
             $path,
             json_encode([
                 'commercial' => $commercial,
+                'email' => $email,
                 'saved_at' => date('Y-m-d H:i:s'),
                 'saved_by' => (string) ($this->resolveUser()['login'] ?? ''),
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
@@ -592,6 +901,19 @@ final class ContractController
         if ($written === false) {
             throw new \RuntimeException('Nao foi possivel escrever o arquivo de configuracoes.');
         }
+    }
+
+    private function readStoredModuleSettings(): array
+    {
+        $path = $this->contractSettingsPath();
+
+        if (!is_file($path)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) file_get_contents($path), true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function contractSettingsPath(): string
@@ -766,6 +1088,196 @@ final class ContractController
         $value = trim($value);
 
         return in_array($value, $allowed, true) ? $value : '';
+    }
+
+    private function renderAcceptanceMessage(array $detail): string
+    {
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $purpose = $this->resolveAcceptanceTemplatePurpose((string) ($contract['tipo_aceite'] ?? 'nova_instalacao'));
+        $template = $this->messageTemplateRepository->findByPurpose(
+            $purpose,
+            'whatsapp'
+        );
+
+        $templateBody = trim((string) ($template['body'] ?? ''));
+        if ($templateBody === '') {
+            $defaults = (array) $this->config->get('contracts.message_templates.' . $purpose, []);
+            $templateBody = (string) ($defaults['body'] ?? '');
+        }
+
+        if ($templateBody === '') {
+            $templateBody = "Olá, {nome}.\n\nConfira seu contrato no link abaixo:\n\n{link_aceite}";
+        }
+
+        $variables = [
+            '{nome}' => (string) ($contract['nome_cliente'] ?? 'Cliente'),
+            '{link_aceite}' => $this->buildSimulatedAcceptanceLink($detail),
+            '{validade_horas}' => (string) $this->config->get('contracts.acceptance_ttl_hours', 48),
+        ];
+
+        return strtr($templateBody, $variables);
+    }
+
+    private function buildAcceptanceEmailMessage(array $detail): array
+    {
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $link = $this->buildSimulatedAcceptanceLink($detail);
+        $name = (string) ($contract['nome_cliente'] ?? 'Cliente');
+        $ttl = (string) $this->config->get('contracts.acceptance_ttl_hours', 48);
+        $subject = 'Aceite digital do contrato - ' . $name;
+        $text = "Olá, {$name}.\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{$link}\n\nEste link é pessoal e expira em {$ttl} horas.";
+        $html = '<p>Olá, <strong>' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+            . '<p>Seu cadastro foi realizado.</p>'
+            . '<p>Confira seus dados, plano, valores e contrato no link abaixo:</p>'
+            . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>'
+            . '<p>Este link é pessoal e expira em ' . htmlspecialchars($ttl, ENT_QUOTES, 'UTF-8') . ' horas.</p>';
+
+        return [$subject, $html, $text];
+    }
+
+    private function resolveAcceptanceTemplatePurpose(string $tipoAceite): string
+    {
+        $tipoAceite = trim($tipoAceite);
+
+        return match ($tipoAceite) {
+            'regularizacao_contrato' => 'aceite_regularizacao_contrato',
+            default => 'aceite_nova_instalacao',
+        };
+    }
+
+    private function hasFinancialTicketAttempt(array $detail): bool
+    {
+        $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
+
+        foreach ($auditLogs as $log) {
+            if (!is_array($log)) {
+                continue;
+            }
+
+            if ((string) ($log['action'] ?? '') === 'contract.financial_task.ticket.created') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function buildFinancialTicketPayload(array $detail): array
+    {
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
+        $settings = (array) $this->config->get('contracts.mkauth_ticket', []);
+        $tipoAdesao = strtolower(trim((string) ($contract['tipo_adesao'] ?? 'cheia')));
+        $observacaoAdesao = trim((string) ($contract['observacao_adesao'] ?? ''));
+        $autorizadoPor = trim((string) ($contract['beneficio_concedido_por'] ?? ''));
+
+        $description = implode("\n", array_filter([
+            'Cliente: ' . (string) ($contract['nome_cliente'] ?? '-'),
+            'Telefone: ' . (string) ($contract['telefone_cliente'] ?? '-'),
+            'Tipo adesao: ' . (string) ($contract['tipo_adesao'] ?? '-'),
+            'Valor adesao: R$ ' . number_format((float) ($contract['valor_adesao'] ?? 0), 2, ',', '.'),
+            'Parcelas: ' . (string) ($contract['parcelas_adesao'] ?? '1'),
+            'Vencimento: ' . (string) ($contract['vencimento_primeira_parcela'] ?? '-'),
+            'Autorizado por: ' . ($autorizadoPor !== '' ? $autorizadoPor : $this->extractAuthorizedBy($observacaoAdesao)),
+            'Observacoes da adesao: ' . ($observacaoAdesao !== '' ? $observacaoAdesao : '-'),
+            'Contrato ID: ' . (string) ($contract['id'] ?? 0),
+            'Tarefa financeira ID: ' . (string) ($financialTask['id'] ?? 0),
+        ]));
+
+        return [
+            'login' => (string) ($contract['mkauth_login'] ?? ''),
+            'nome' => (string) ($contract['nome_cliente'] ?? ''),
+            'telefone' => (string) ($contract['telefone_cliente'] ?? ''),
+            'assunto' => $tipoAdesao === 'isenta'
+                ? 'Financeiro outros'
+                : (string) ($settings['subject'] ?? 'Financeiro - Boleto / Carne'),
+            'prioridade' => (string) ($settings['priority'] ?? 'normal'),
+            'descricao' => $description,
+            'observacao' => $tipoAdesao === 'isenta'
+                ? "Adesao marcada como isenta. Favor validar internamente se a isencao procede.\n\n" . $description
+                : $description,
+        ];
+    }
+
+    private function buildIntegrationStatus(array $detail): array
+    {
+        $notificationLogs = is_array($detail['notificationLogs'] ?? null) ? $detail['notificationLogs'] : [];
+        $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
+
+        $evotrixLast = null;
+        $emailLast = null;
+        foreach ($notificationLogs as $log) {
+            if (!is_array($log)) {
+                continue;
+            }
+
+            if ((string) ($log['provider'] ?? '') === 'evotrix' && $evotrixLast === null) {
+                $evotrixLast = $log;
+            }
+
+            if ((string) ($log['provider'] ?? '') === 'smtp' && (string) ($log['channel'] ?? '') === 'email' && $emailLast === null) {
+                $emailLast = $log;
+            }
+        }
+
+        $ticketLast = null;
+        foreach ($auditLogs as $log) {
+            if (!is_array($log) || !str_starts_with((string) ($log['action'] ?? ''), 'contract.financial_task.ticket.')) {
+                continue;
+            }
+
+            $ticketLast = $log;
+            break;
+        }
+
+        return [
+            'evotrix' => [
+                'enabled' => (bool) $this->config->get('evotrix.enabled', false),
+                'dry_run' => (bool) $this->config->get('evotrix.dry_run', true),
+                'last' => $evotrixLast,
+            ],
+            'email' => [
+                'enabled' => (bool) $this->config->get('email.enabled', false),
+                'dry_run' => (bool) $this->config->get('email.dry_run', true),
+                'allow_only_test_email' => (bool) $this->config->get('email.allow_only_test_email', true),
+                'test_to' => (string) $this->config->get('email.test_to', ''),
+                'last' => $emailLast,
+            ],
+            'mkauth_ticket' => [
+                'enabled' => (bool) $this->config->get('contracts.mkauth_ticket.enabled', false),
+                'dry_run' => (bool) $this->config->get('contracts.mkauth_ticket.dry_run', true),
+                'auto_create' => (bool) $this->config->get('contracts.mkauth_ticket.auto_create', false),
+                'endpoint' => (string) $this->config->get('contracts.mkauth_ticket.endpoint', '/api/chamado/inserir'),
+                'last' => $ticketLast,
+            ],
+        ];
+    }
+
+    private function extractAuthorizedBy(string $observacao): string
+    {
+        if (preg_match('/Autorizado por:\s*(.+)$/mi', $observacao, $matches) === 1) {
+            return trim((string) ($matches[1] ?? ''));
+        }
+
+        $user = $this->resolveUser();
+
+        return (string) ($user['login'] ?? $user['name'] ?? '-');
+    }
+
+    private function recordAudit(string $action, string $entityType, ?int $entityId, array $context, Request $request): void
+    {
+        $user = $this->resolveUser();
+
+        $this->localRepository->log(
+            isset($user['id']) ? (int) $user['id'] : null,
+            (string) ($user['login'] ?? ''),
+            $action,
+            $entityType,
+            $entityId,
+            $context,
+            (string) $request->server('REMOTE_ADDR', ''),
+            (string) $request->header('User-Agent', '')
+        );
     }
 
     private function canManageContracts(): bool

@@ -41,14 +41,38 @@ return [
     'acceptance_ttl_hours' => max(1, (int) Env::get('CONTRACT_ACCEPTANCE_TTL_HOURS', (string) $commercial['validade_link_aceite_horas'])),
     'commercial' => $commercial,
     'financeiro_setor' => 'financeiro',
+    'mkauth_ticket' => [
+        'enabled' => filter_var(
+            Env::get('MKAUTH_TICKET_ENABLED', '0'),
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE
+        ) ?? false,
+        'dry_run' => filter_var(
+            Env::get('MKAUTH_TICKET_DRY_RUN', '1'),
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE
+        ) ?? true,
+        'auto_create' => filter_var(
+            Env::get('CONTRACT_AUTO_CREATE_FINANCIAL_TICKET', '0'),
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE
+        ) ?? false,
+        'endpoint' => Env::get('MKAUTH_TICKET_ENDPOINT', '/api/chamado/inserir'),
+        'subject' => Env::get('MKAUTH_TICKET_SUBJECT', 'Financeiro - Boleto / Carne'),
+        'priority' => Env::get('MKAUTH_TICKET_PRIORITY', 'normal'),
+    ],
     'message_templates' => [
         'aceite_nova_instalacao' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_nova_instalacao',
+            'body' => "Olá, {nome}.\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {validade_horas} horas.",
+            'variables_json' => ['nome', 'link_aceite', 'validade_horas'],
         ],
         'aceite_regularizacao_contrato' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_regularizacao_contrato',
+            'body' => "Olá, {nome}.\n\nSeu contrato precisa de regularização cadastral.\n\nConfira os dados e aceite digital no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {validade_horas} horas.",
+            'variables_json' => ['nome', 'link_aceite', 'validade_horas'],
         ],
     ],
 ];

@@ -10,4 +10,5 @@ return [
     'base_url' => Env::get('EVOTRIX_BASE_URL', ''),
     'token' => Env::get('EVOTRIX_TOKEN', ''),
     'sender' => Env::get('EVOTRIX_SENDER', 'ISP Auxiliar'),
+    'channel' => 'whatsapp',
 ];

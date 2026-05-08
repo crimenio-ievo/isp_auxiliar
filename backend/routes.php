@@ -30,8 +30,11 @@ return static function (Router $router): void {
     $router->get('/contratos/novos', [ContractController::class, 'novos'], 'contracts.new');
     $router->get('/contratos/aceites/pendentes', [ContractController::class, 'aceitesPendentes'], 'contracts.acceptances.pending');
     $router->get('/contratos/detalhe', [ContractController::class, 'detalhe'], 'contracts.detail');
+    $router->post('/contratos/aceite/enviar', [ContractController::class, 'enviarAceiteWhatsapp'], 'contracts.acceptance.send');
+    $router->post('/contratos/aceite/email', [ContractController::class, 'enviarAceiteEmail'], 'contracts.acceptance.email');
     $router->post('/contratos/financeiro/concluir', [ContractController::class, 'concluirFinanceiro'], 'contracts.financial.complete');
     $router->post('/contratos/financeiro/cancelar', [ContractController::class, 'cancelarFinanceiro'], 'contracts.financial.cancel');
+    $router->post('/contratos/financeiro/chamado', [ContractController::class, 'abrirChamadoFinanceiro'], 'contracts.financial.ticket');
     $router->get('/aceite/{token}', [AcceptanceController::class, 'show'], 'acceptance.show');
     $router->post('/aceite/{token}/confirmar', [AcceptanceController::class, 'confirm'], 'acceptance.confirm');
     $router->get('/clientes/novo', [ClientController::class, 'create'], 'clients.create');

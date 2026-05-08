@@ -50,6 +50,36 @@ final class NotificationLogRepository
         );
     }
 
+    public function findLatestForRecipient(
+        ?int $contractId,
+        ?int $acceptanceId,
+        string $channel,
+        string $provider,
+        string $recipient
+    ): ?array {
+        $conditions = ['channel = :channel', 'provider = :provider', 'recipient = :recipient'];
+        $params = [
+            'channel' => trim($channel),
+            'provider' => trim($provider),
+            'recipient' => trim($recipient),
+        ];
+
+        if ($contractId !== null && $contractId > 0) {
+            $conditions[] = 'contract_id = :contract_id';
+            $params['contract_id'] = $contractId;
+        }
+
+        if ($acceptanceId !== null && $acceptanceId > 0) {
+            $conditions[] = 'acceptance_id = :acceptance_id';
+            $params['acceptance_id'] = $acceptanceId;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT * FROM notification_logs WHERE ' . implode(' AND ', $conditions) . ' ORDER BY id DESC LIMIT 1',
+            $params
+        );
+    }
+
     private function normalizeData(array $data): array
     {
         return [

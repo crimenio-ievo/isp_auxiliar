@@ -80,22 +80,22 @@ ob_start();
                             };
                         ?>
                         <tr>
-                            <td><?= htmlspecialchars((string) $installation['client'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?= htmlspecialchars((string) $installation['login'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?= htmlspecialchars((string) $installation['plan'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td>
+                            <td data-label="Cliente"><?= htmlspecialchars((string) $installation['client'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td data-label="Login"><?= htmlspecialchars((string) $installation['login'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td data-label="Plano"><?= htmlspecialchars((string) $installation['plan'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td data-label="Status">
                                 <span class="pill <?= $status === 'completed' ? 'pill--success' : 'pill--muted'; ?>">
                                     <?= htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8'); ?>
                                 </span>
                             </td>
-                            <td>
+                            <td data-label="Pendência">
                                 <?php if ($missing !== ''): ?>
                                     <span class="muted"><?= htmlspecialchars($missing, ENT_QUOTES, 'UTF-8'); ?></span>
                                 <?php else: ?>
                                     <span class="muted">-</span>
                                 <?php endif; ?>
                             </td>
-                            <td>
+                            <td data-label="Conexão">
                                 <?php if ($status === 'completed'): ?>
                                     <div class="table-action-stack">
                                         <span>Conexão confirmada</span>
@@ -115,7 +115,7 @@ ob_start();
                                 <?php endif; ?>
                             </td>
                             <?php if (!empty($canManageRecords)): ?>
-                                <td>
+                                <td data-label="Ações">
                                     <?php if ($editLink !== ''): ?>
                                         <a class="button button--ghost button--small" href="<?= htmlspecialchars($editLink, ENT_QUOTES, 'UTF-8'); ?>">Editar</a>
                                     <?php endif; ?>
@@ -131,7 +131,7 @@ ob_start();
                                     <?php endif; ?>
                                 </td>
                             <?php endif; ?>
-                            <td><?= htmlspecialchars((string) $installation['date'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td data-label="Atualizado em"><?= htmlspecialchars((string) $installation['date'], ENT_QUOTES, 'UTF-8'); ?></td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($installations === []): ?>

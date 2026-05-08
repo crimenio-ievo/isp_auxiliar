@@ -13,7 +13,14 @@ $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
 $contractId = (int) ($contract['id'] ?? 0);
 $canManageContracts = !empty($canManageContracts);
 $simulatedAcceptanceLink = (string) ($simulatedAcceptanceLink ?? '');
+$integrationStatus = is_array($integrationStatus ?? null) ? $integrationStatus : [];
+$evotrixStatus = is_array($integrationStatus['evotrix'] ?? null) ? $integrationStatus['evotrix'] : [];
+$emailStatus = is_array($integrationStatus['email'] ?? null) ? $integrationStatus['email'] : [];
+$mkAuthTicketStatus = is_array($integrationStatus['mkauth_ticket'] ?? null) ? $integrationStatus['mkauth_ticket'] : [];
 $returnTo = Url::to('/contratos/detalhe?id=' . $contractId);
+$evotrixLastLog = is_array($evotrixStatus['last'] ?? null) ? $evotrixStatus['last'] : [];
+$emailLastLog = is_array($emailStatus['last'] ?? null) ? $emailStatus['last'] : [];
+$mkAuthLastLog = is_array($mkAuthTicketStatus['last'] ?? null) ? $mkAuthTicketStatus['last'] : [];
 
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
@@ -76,6 +83,108 @@ ob_start();
         <button type="button" class="button button--ghost" data-copy-text="<?= htmlspecialchars($simulatedAcceptanceLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link futuro</button>
         <a class="button button--ghost" href="#financeiro">Ver pendência financeira</a>
         <a class="button button--ghost" href="#logs">Ver logs relacionados</a>
+        <?php if ($canManageContracts && $acceptance !== []): ?>
+            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por WhatsApp?');">
+                <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                <button type="submit" class="button">Enviar aceite por WhatsApp</button>
+            </form>
+            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/email'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por e-mail?');">
+                <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                <button type="submit" class="button button--ghost">Enviar aceite por e-mail</button>
+            </form>
+        <?php endif; ?>
+    </div>
+</section>
+
+<section class="card" style="margin-top: 20px;">
+    <div class="section-heading">
+        <p class="section-heading__eyebrow">Integrações</p>
+        <h2>Histórico de integrações</h2>
+        <p class="page-description">Aqui você acompanha se a ação foi apenas simulada ou realmente disparada.</p>
+    </div>
+
+    <div class="summary-grid">
+        <div class="summary-item">
+            <span>Evotrix</span>
+            <strong><?= !empty($evotrixStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>Evotrix DRY_RUN</span>
+            <strong><?= !empty($evotrixStatus['dry_run']) ? 'Sim' : 'Não'; ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>MkAuth Ticket</span>
+            <strong><?= !empty($mkAuthTicketStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>MkAuth Ticket DRY_RUN</span>
+            <strong><?= !empty($mkAuthTicketStatus['dry_run']) ? 'Sim' : 'Não'; ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>E-mail</span>
+            <strong><?= !empty($emailStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>E-mail DRY_RUN</span>
+            <strong><?= !empty($emailStatus['dry_run']) ? 'Sim' : 'Não'; ?></strong>
+        </div>
+    </div>
+
+    <div class="integration-timeline" style="margin-top: 18px;">
+        <article class="soft-card integration-timeline__item">
+            <div class="section-heading">
+                <p class="section-heading__eyebrow">WhatsApp</p>
+                <h2>Evotrix</h2>
+            </div>
+            <ul class="integration-list">
+                <li><span>Modo</span><strong><?= !empty($evotrixStatus['dry_run']) ? 'Simulado' : 'Real'; ?></strong></li>
+                <li><span>Status</span><strong><?= !empty($evotrixStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong></li>
+                <li><span>Telefone</span><strong><?= htmlspecialchars((string) ($evotrixLastLog['recipient'] ?? ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? '-')), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Última tentativa</span><strong><?= htmlspecialchars((string) ($evotrixLastLog['created_at'] ?? 'Ainda não houve tentativa'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Resultado</span><strong><?= htmlspecialchars((string) ($evotrixLastLog['status'] ?? 'pendente'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+            </ul>
+            <p class="page-description integration-timeline__response"><?= htmlspecialchars((string) ($evotrixLastLog['provider_response'] ?? 'Ainda não houve tentativa de envio por WhatsApp para este contrato.'), ENT_QUOTES, 'UTF-8'); ?></p>
+        </article>
+
+        <article class="soft-card integration-timeline__item">
+            <div class="section-heading">
+                <p class="section-heading__eyebrow">E-mail</p>
+                <h2>SMTP autenticado</h2>
+            </div>
+            <ul class="integration-list">
+                <li><span>Modo</span><strong><?= !empty($emailStatus['dry_run']) ? 'Simulado' : 'Real'; ?></strong></li>
+                <li><span>Status</span><strong><?= !empty($emailStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong></li>
+                <li><span>Destino</span><strong><?= htmlspecialchars((string) ($emailLastLog['recipient'] ?? $contract['email_cliente'] ?? $contract['email'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Teste controlado</span><strong><?= !empty($emailStatus['allow_only_test_email']) ? 'Sim' : 'Não'; ?></strong></li>
+                <li><span>E-mail de teste</span><strong><?= htmlspecialchars((string) ($emailStatus['test_to'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Última tentativa</span><strong><?= htmlspecialchars((string) ($emailLastLog['created_at'] ?? 'Ainda não houve tentativa'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Resultado</span><strong><?= htmlspecialchars((string) ($emailLastLog['status'] ?? 'pendente'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+            </ul>
+            <p class="page-description integration-timeline__response"><?= htmlspecialchars((string) ($emailLastLog['provider_response'] ?? 'Ainda não houve tentativa de envio por e-mail para este contrato.'), ENT_QUOTES, 'UTF-8'); ?></p>
+        </article>
+
+        <article class="soft-card integration-timeline__item">
+            <div class="section-heading">
+                <p class="section-heading__eyebrow">Financeiro</p>
+                <h2>MkAuth chamado</h2>
+            </div>
+            <?php
+                $mkAuthContext = json_decode((string) ($mkAuthLastLog['context_json'] ?? ''), true);
+                $mkAuthContextText = is_array($mkAuthContext)
+                    ? json_encode($mkAuthContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : (string) ($mkAuthLastLog['context_json'] ?? '');
+            ?>
+            <ul class="integration-list">
+                <li><span>Modo</span><strong><?= !empty($mkAuthTicketStatus['dry_run']) ? 'Simulado' : 'Real'; ?></strong></li>
+                <li><span>Status</span><strong><?= !empty($mkAuthTicketStatus['enabled']) ? 'Habilitado' : 'Desabilitado'; ?></strong></li>
+                <li><span>Endpoint</span><strong><?= htmlspecialchars((string) ($mkAuthTicketStatus['endpoint'] ?? '/api/chamado/inserir'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Última tentativa</span><strong><?= htmlspecialchars((string) ($mkAuthLastLog['created_at'] ?? 'Ainda não houve tentativa'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+                <li><span>Resultado</span><strong><?= htmlspecialchars((string) ($mkAuthLastLog['action'] ?? 'pendente'), ENT_QUOTES, 'UTF-8'); ?></strong></li>
+            </ul>
+            <p class="page-description integration-timeline__response"><?= htmlspecialchars($mkAuthContextText !== '' ? $mkAuthContextText : 'Ainda não houve tentativa de abertura de chamado financeiro para este contrato.', ENT_QUOTES, 'UTF-8'); ?></p>
+        </article>
     </div>
 </section>
 
@@ -140,6 +249,11 @@ ob_start();
                         <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
                         <button type="submit" class="button">Marcar como concluído</button>
+                    </form>
+                    <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/chamado'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja abrir chamado financeiro no MkAuth?');">
+                        <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                        <button type="submit" class="button button--ghost">Abrir chamado financeiro no MkAuth</button>
                     </form>
                     <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/cancelar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Cancelar esta pendencia financeira?');">
                         <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">

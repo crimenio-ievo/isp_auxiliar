@@ -812,6 +812,11 @@ textarea {
     transition: 0.2s ease;
 }
 
+.choice-card:focus-visible {
+    outline: 3px solid rgba(15, 118, 110, 0.28);
+    outline-offset: 3px;
+}
+
 .choice-card:hover {
     border-color: rgba(15, 118, 110, 0.28);
     transform: translateY(-1px);
@@ -863,6 +868,62 @@ textarea {
 .choice-card:has(input:checked) .choice-card__icon {
     background: linear-gradient(135deg, var(--primary), #14b8a6);
     color: #ffffff;
+}
+
+.acceptance-check {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    min-height: 88px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(247, 249, 252, 0.96), rgba(255, 255, 255, 0.98));
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.acceptance-check:hover {
+    border-color: rgba(15, 118, 110, 0.28);
+    transform: translateY(-1px);
+}
+
+.acceptance-check:focus-within {
+    outline: 3px solid rgba(15, 118, 110, 0.2);
+    outline-offset: 3px;
+}
+
+.acceptance-check input {
+    width: 24px;
+    height: 24px;
+    margin: 2px 0 0;
+    accent-color: var(--primary);
+}
+
+.acceptance-check__box {
+    display: none;
+}
+
+.acceptance-check__content {
+    display: grid;
+    gap: 4px;
+}
+
+.acceptance-check__content strong {
+    font-size: 1rem;
+    line-height: 1.35;
+}
+
+.acceptance-check__content small {
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.is-readonly {
+    background: rgba(241, 245, 249, 0.92);
+    color: var(--muted);
+    cursor: not-allowed;
 }
 
 .field--span-2 {
@@ -1253,6 +1314,104 @@ body.modal-open {
     font-size: 0.9rem;
 }
 
+.connection-login--stacked {
+    display: grid;
+    gap: 14px;
+}
+
+.pppoe-secret {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    background: rgba(247, 249, 252, 0.92);
+    border: 1px solid var(--border);
+}
+
+.pppoe-secret__value {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.pppoe-secret__value input {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0;
+}
+
+.pppoe-secret__value .button {
+    white-space: nowrap;
+}
+
+.connection-status-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.connection-status-pair__item {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(15, 118, 110, 0.12);
+}
+
+.connection-status-pair__item small {
+    color: var(--muted);
+}
+
+.integration-timeline {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.integration-timeline__item {
+    display: grid;
+    gap: 14px;
+}
+
+.integration-list {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.integration-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+}
+
+.integration-list li:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.integration-list span {
+    color: var(--muted);
+}
+
+.integration-timeline__response {
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    background: rgba(247, 249, 252, 0.92);
+    border: 1px solid var(--border);
+    word-break: break-word;
+}
+
 .user-list__item,
 .log-list__meta {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1367,6 +1526,64 @@ body.modal-open {
     .choice-card {
         min-height: 96px;
         padding: 18px 16px;
+    }
+
+    .acceptance-check {
+        min-height: 96px;
+        padding: 18px 16px;
+    }
+
+    .connection-status-pair,
+    .integration-timeline {
+        grid-template-columns: 1fr;
+    }
+
+    .table-wrap {
+        overflow: visible;
+    }
+
+    .table,
+    .table thead,
+    .table tbody,
+    .table tr,
+    .table th,
+    .table td {
+        display: block;
+        width: 100%;
+    }
+
+    .table thead {
+        display: none;
+    }
+
+    .table tbody {
+        display: grid;
+        gap: 14px;
+    }
+
+    .table tr {
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.96);
+        padding: 12px 14px;
+        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.05);
+    }
+
+    .table td {
+        border-top: 0;
+        padding: 8px 0;
+    }
+
+    .table td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 4px;
+        color: var(--muted);
+        font-size: 0.82rem;
+    }
+
+    .pppoe-secret__value {
+        grid-template-columns: 1fr;
     }
 
     .acceptance-success-screen {

@@ -109,16 +109,21 @@ final class ContractRepository
             'nome_cliente' => (string) ($data['nome_cliente'] ?? ''),
             'telefone_cliente' => (string) ($data['telefone_cliente'] ?? ''),
             'tipo_adesao' => (string) ($data['tipo_adesao'] ?? 'cheia'),
-            'valor_adesao' => (string) ($data['valor_adesao'] ?? '0.00'),
+            'valor_adesao' => $this->normalizeAmount($data['valor_adesao'] ?? '0.00'),
             'parcelas_adesao' => (string) ($data['parcelas_adesao'] ?? '1'),
-            'valor_parcela_adesao' => (string) ($data['valor_parcela_adesao'] ?? '0.00'),
+            'valor_parcela_adesao' => $this->normalizeAmount($data['valor_parcela_adesao'] ?? '0.00'),
             'vencimento_primeira_parcela' => $data['vencimento_primeira_parcela'] ?? null,
             'fidelidade_meses' => (string) ($data['fidelidade_meses'] ?? '12'),
-            'beneficio_valor' => (string) ($data['beneficio_valor'] ?? '0.00'),
-            'multa_total' => (string) ($data['multa_total'] ?? '0.00'),
+            'beneficio_valor' => $this->normalizeAmount($data['beneficio_valor'] ?? '0.00'),
+            'multa_total' => $this->normalizeAmount($data['multa_total'] ?? '0.00'),
             'tipo_aceite' => (string) ($data['tipo_aceite'] ?? 'nova_instalacao'),
             'observacao_adesao' => (string) ($data['observacao_adesao'] ?? ''),
             'status_financeiro' => (string) ($data['status_financeiro'] ?? 'pendente_lancamento'),
         ];
+    }
+
+    private function normalizeAmount(mixed $value): string
+    {
+        return number_format((float) $value, 2, '.', '');
     }
 }

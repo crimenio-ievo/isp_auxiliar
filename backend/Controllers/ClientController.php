@@ -2400,7 +2400,34 @@ final class ClientController
             return 0.0;
         }
 
-        $normalized = str_replace(['.', ','], ['', '.'], $value);
+        $normalized = preg_replace('/[^\d,.\-]/', '', $value) ?? '';
+
+        if ($normalized === '' || $normalized === '-' || $normalized === ',' || $normalized === '.') {
+            return 0.0;
+        }
+
+        $lastComma = strrpos($normalized, ',');
+        $lastDot = strrpos($normalized, '.');
+
+        if ($lastComma !== false && $lastDot !== false) {
+            $decimalSeparator = $lastComma > $lastDot ? ',' : '.';
+            $thousandsSeparator = $decimalSeparator === ',' ? '.' : ',';
+            $normalized = str_replace($thousandsSeparator, '', $normalized);
+
+            if ($decimalSeparator === ',') {
+                $normalized = str_replace(',', '.', $normalized);
+            }
+        } elseif ($lastComma !== false) {
+            $normalized = str_replace('.', '', $normalized);
+            $normalized = str_replace(',', '.', $normalized);
+        } elseif ($lastDot !== false) {
+            $dotCount = substr_count($normalized, '.');
+            $decimalDigits = strlen(substr($normalized, $lastDot + 1));
+
+            if ($dotCount > 1 || $decimalDigits === 3) {
+                $normalized = str_replace('.', '', $normalized);
+            }
+        }
 
         return (float) $normalized;
     }

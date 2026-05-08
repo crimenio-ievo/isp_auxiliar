@@ -621,6 +621,10 @@ async function restoreDraftToForm(form) {
             return;
         }
 
+        if (element.hasAttribute('data-skip-draft-restore')) {
+            return;
+        }
+
         if (Object.prototype.hasOwnProperty.call(payload, element.name)) {
             applyDraftToField(element, payload[element.name]);
         }
@@ -654,6 +658,10 @@ async function restoreDraftToForm(form) {
         if (loginInput) {
             loginInput.value = payload.login;
         }
+    }
+
+    if (contractCommercialForm) {
+        updateCommercialSection(true);
     }
 }
 
@@ -1193,6 +1201,10 @@ function markCommercialManual(input) {
         return;
     }
 
+    if (input.matches('[data-adhesion-type-input]')) {
+        return;
+    }
+
     input.dataset.manualValue = '1';
 }
 
@@ -1224,35 +1236,61 @@ function updateCommercialSection(force = false) {
     const benefitInput = contractCommercialForm.querySelector('[data-adhesion-benefit-input]');
     const dueDaySelect = contractCommercialForm.querySelector('[name="vencimento"]');
 
-    const installType = String(installTypeInput?.value || 'fibra').toLowerCase() === 'radio' ? 'radio' : 'fibra';
-    const defaultAdhesionType = installType === 'fibra' ? 'isenta' : 'cheia';
+    const defaultAdhesionType = 'cheia';
     const baseValue = Number(config.valor_adesao_padrao || 0);
     const promoValue = Number(config.valor_adesao_promocional || 0);
     const discountPercent = Number(config.percentual_desconto_promocional || 0);
     const maxParcels = Math.max(1, Number(config.parcelas_maximas_adesao || 1));
     const defaultFidelity = Math.max(1, Number(config.fidelidade_meses_padrao || 12));
 
-    if (typeSelect) {
-        if (force || typeSelect.dataset.manualValue !== '1' || !typeSelect.value) {
-            typeSelect.value = defaultAdhesionType;
-            typeSelect.dataset.manualValue = '0';
-        }
+    if (typeSelect && !typeSelect.value) {
+        typeSelect.value = defaultAdhesionType;
+        typeSelect.dataset.manualValue = '0';
     }
 
     const currentType = String(typeSelect?.value || defaultAdhesionType);
+    const previousType = String(contractCommercialForm.dataset.lastAdhesionType || '');
+    const adhesionTypeChanged = previousType !== '' && previousType !== currentType;
+    contractCommercialForm.dataset.lastAdhesionType = currentType;
     let adhesionValue = parseMoneyFieldValue(valueInput?.value);
     const isTypingAdhesionValue = document.activeElement === valueInput;
+    const shouldReset = force || adhesionTypeChanged;
 
-    if (force || valueInput?.dataset.manualValue !== '1' || !valueInput?.value.trim()) {
+    if (shouldReset) {
+        if (valueInput) {
+            valueInput.dataset.manualValue = '0';
+        }
+        if (parcelsInput) {
+            parcelsInput.dataset.manualValue = '0';
+            parcelsInput.value = '1';
+        }
+        if (benefitInput) {
+            benefitInput.dataset.manualValue = '0';
+        }
+    }
+
+    const resolveConfiguredAdhesionValue = () => {
         if (currentType === 'isenta') {
-            adhesionValue = 0;
-        } else if (currentType === 'promocional') {
-            adhesionValue = promoValue > 0
+            return 0;
+        }
+
+        if (currentType === 'promocional') {
+            return promoValue > 0
                 ? promoValue
                 : Math.max(0, baseValue - (baseValue * Math.max(0, discountPercent) / 100));
-        } else {
-            adhesionValue = baseValue;
         }
+
+        return baseValue;
+    };
+
+    if (valueInput) {
+        valueInput.readOnly = currentType === 'isenta';
+        valueInput.classList.toggle('is-readonly', currentType === 'isenta');
+        valueInput.setAttribute('aria-disabled', currentType === 'isenta' ? 'true' : 'false');
+    }
+
+    if (shouldReset || valueInput?.dataset.manualValue !== '1' || !valueInput?.value.trim()) {
+        adhesionValue = resolveConfiguredAdhesionValue();
 
         if (!isTypingAdhesionValue || force) {
             setCommercialValue(valueInput, formatMoneyFieldValue(adhesionValue), true);
@@ -1260,11 +1298,10 @@ function updateCommercialSection(force = false) {
     }
 
     const parcelsValue = Number.parseInt(String(parcelsInput?.value || '1').replace(/\D+/g, ''), 10);
-    const normalizedParcels = Math.max(1, Math.min(maxParcels, Number.isFinite(parcelsValue) ? parcelsValue : 1));
     if (parcelsInput) {
         parcelsInput.max = String(maxParcels);
-        if (force || parcelsInput.dataset.manualValue !== '1' || !parcelsInput.value) {
-            parcelsInput.value = String(normalizedParcels);
+        if (shouldReset || parcelsInput.dataset.manualValue !== '1' || !parcelsInput.value) {
+            parcelsInput.value = '1';
             parcelsInput.dataset.manualValue = '0';
         } else if (parcelsValue > maxParcels) {
             parcelsInput.value = String(maxParcels);
@@ -1289,17 +1326,18 @@ function updateCommercialSection(force = false) {
             ? baseValue
             : Math.max(0, baseValue - adhesionValue);
 
-        if (force || benefitInput.dataset.manualValue !== '1' || !benefitInput.value.trim()) {
+        if (shouldReset || benefitInput.dataset.manualValue !== '1' || !benefitInput.value.trim()) {
             setCommercialValue(benefitInput, formatMoneyFieldValue(benefitValue), true);
         }
     }
 
-    if (authorizerInput && authorizerInput.dataset.manualValue !== '1' && !authorizerInput.value.trim() && !force) {
-        // Campo livre; nada a normalizar automaticamente.
+    if (authorizerInput && force && authorizerInput.value.trim() === '') {
+        authorizerInput.value = '';
+        authorizerInput.dataset.manualValue = '0';
     }
 
     if (firstDueInput && dueDaySelect) {
-        if (force || firstDueInput.dataset.manualValue !== '1' || !firstDueInput.value) {
+        if (shouldReset || firstDueInput.dataset.manualValue !== '1' || !firstDueInput.value) {
             const computedDate = calculateNextBillingDateFromDay(dueDaySelect.value);
             if (computedDate) {
                 firstDueInput.value = computedDate;
@@ -1344,10 +1382,20 @@ if (contractCommercialForm) {
     if (adhesionTypeInput) {
         adhesionTypeInput.addEventListener('change', () => {
             const valueInput = contractCommercialForm.querySelector('[data-adhesion-value-input]');
+            const parcelsInput = contractCommercialForm.querySelector('[data-adhesion-parcels-input]');
             const benefitInput = contractCommercialForm.querySelector('[data-adhesion-benefit-input]');
+            const parcelValueInput = contractCommercialForm.querySelector('[data-adhesion-parcel-value-input]');
 
             if (valueInput) {
                 valueInput.dataset.manualValue = '0';
+                valueInput.value = '';
+            }
+            if (parcelsInput) {
+                parcelsInput.dataset.manualValue = '0';
+                parcelsInput.value = '1';
+            }
+            if (parcelValueInput) {
+                parcelValueInput.value = '0,00';
             }
             if (benefitInput) {
                 benefitInput.dataset.manualValue = '0';
@@ -1612,6 +1660,7 @@ function syncChoiceCards() {
         }
 
         card.classList.toggle('is-selected', Boolean(input.checked));
+        card.setAttribute('aria-checked', input.checked ? 'true' : 'false');
     });
 }
 
@@ -2175,31 +2224,6 @@ if (acceptanceSelect) {
     updateAcceptanceVisibility();
 }
 
-document.querySelectorAll('[data-choice-card]').forEach((card) => {
-    const input = card.querySelector('input[type="checkbox"], input[type="radio"]');
-    if (!input) {
-        return;
-    }
-
-    card.addEventListener('click', (event) => {
-        if (event.target instanceof HTMLElement && event.target.closest('input, button, a')) {
-            return;
-        }
-
-        if (input.type === 'checkbox') {
-            input.checked = !input.checked;
-        } else {
-            input.checked = true;
-        }
-
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-
-    input.addEventListener('change', syncChoiceCards);
-});
-
-syncChoiceCards();
-
 setupSignaturePad();
 updatePlanOptions();
 refreshPhotoQueue();
@@ -2237,8 +2261,13 @@ if (acceptanceForm) {
                 acceptanceDocumentHelp.textContent = 'Confirme o aceite para concluir.';
                 acceptanceDocumentHelp.dataset.tone = 'warning';
             }
-            acceptanceSelect.focus({ preventScroll: true });
-            acceptanceSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const acceptanceChoice = acceptanceSelect?.closest('[data-acceptance-choice]');
+            if (acceptanceChoice instanceof HTMLElement) {
+                acceptanceChoice.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            if (typeof acceptanceSelect.focus === 'function') {
+                acceptanceSelect.focus({ preventScroll: true });
+            }
             return;
         }
 
@@ -2270,6 +2299,40 @@ document.querySelectorAll('[data-close-page]').forEach((button) => {
 
         window.location.href = buildAppUrl('/');
     });
+});
+
+document.querySelectorAll('[data-pppoe-secret-toggle]').forEach((button) => {
+    const container = button.closest('.pppoe-secret');
+    const input = container?.querySelector('[data-pppoe-secret-input]');
+    const defaultLabel = button.getAttribute('data-pppoe-secret-label') || 'Mostrar senha';
+
+    if (!(input instanceof HTMLInputElement)) {
+        return;
+    }
+
+    const showSecret = () => {
+        input.type = 'text';
+        button.textContent = 'Ocultar senha';
+    };
+
+    const hideSecret = () => {
+        input.type = 'password';
+        button.textContent = defaultLabel;
+    };
+
+    button.addEventListener('click', () => {
+        if (input.type === 'password') {
+            showSecret();
+            return;
+        }
+
+        hideSecret();
+    });
+
+    button.addEventListener('pointerdown', showSecret);
+    button.addEventListener('pointerup', hideSecret);
+    button.addEventListener('pointerleave', hideSecret);
+    button.addEventListener('pointercancel', hideSecret);
 });
 
 async function copyTextToClipboard(text) {

@@ -1,0 +1,179 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Infrastructure\MkAuth;
+
+use RuntimeException;
+
+/**
+ * Serviço isolado para abertura manual de chamados no MkAuth.
+ *
+ * Nesta fase ele nasce em modo seguro e só dispara quando o operador confirma
+ * explicitamente a ação e a configuração permitir envio real.
+ */
+final class MkAuthTicketService
+{
+    public function __construct(
+        private array $config,
+        private string $baseUrl,
+        private ?string $apiToken = null,
+        private ?string $clientId = null,
+        private ?string $clientSecret = null
+    ) {
+        $this->baseUrl = rtrim(trim($baseUrl), '/');
+    }
+
+    public function openFinancialTicket(array $payload): array
+    {
+        $enabled = (bool) ($this->config['enabled'] ?? false);
+        $dryRun = (bool) ($this->config['dry_run'] ?? true);
+        $endpoint = (string) ($this->config['endpoint'] ?? '/api/chamado/inserir');
+
+        $normalizedPayload = $this->normalizePayload($payload);
+
+        if (!$enabled || $dryRun) {
+            return [
+                'status' => 'simulado',
+                'provider' => 'mkauth',
+                'dry_run' => true,
+                'enabled' => $enabled,
+                'endpoint' => $endpoint,
+                'payload' => $normalizedPayload,
+                'queued_at' => date('Y-m-d H:i:s'),
+                'message' => 'Chamado financeiro preparado em modo seguro.',
+            ];
+        }
+
+        if ($this->baseUrl === '') {
+            throw new RuntimeException('MkAuth nao configurado para abertura de chamados.');
+        }
+
+        $headers = ['Content-Type: application/json'];
+        $headers[] = 'Authorization: Bearer ' . $this->resolveJwtToken();
+
+        $response = $this->sendHttpRequest('POST', $this->baseUrl . $endpoint, $normalizedPayload, $headers);
+        $decoded = json_decode($response['body'], true);
+
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Resposta invalida do MkAuth ao abrir chamado.');
+        }
+
+        if ($response['status'] >= 400) {
+            $message = $decoded['mensagem'] ?? $decoded['message'] ?? 'MkAuth retornou erro ao abrir chamado.';
+            throw new RuntimeException((string) $message);
+        }
+
+        return [
+            'status' => 'enviado',
+            'provider' => 'mkauth',
+            'dry_run' => false,
+            'enabled' => true,
+            'endpoint' => $endpoint,
+            'payload' => $normalizedPayload,
+            'response' => $decoded,
+            'queued_at' => date('Y-m-d H:i:s'),
+            'message' => 'Chamado financeiro aberto com sucesso no MkAuth.',
+        ];
+    }
+
+    private function normalizePayload(array $payload): array
+    {
+        return [
+            'login' => trim((string) ($payload['login'] ?? '')),
+            'nome' => trim((string) ($payload['nome'] ?? '')),
+            'telefone' => trim((string) ($payload['telefone'] ?? '')),
+            'assunto' => trim((string) ($payload['assunto'] ?? 'Financeiro - Boleto / Carne')),
+            'prioridade' => trim((string) ($payload['prioridade'] ?? 'normal')),
+            'descricao' => trim((string) ($payload['descricao'] ?? '')),
+            'observacao' => trim((string) ($payload['observacao'] ?? '')),
+        ];
+    }
+
+    private function resolveJwtToken(): string
+    {
+        if ($this->apiToken !== null && trim($this->apiToken) !== '') {
+            return trim($this->apiToken);
+        }
+
+        if ($this->clientId === null || $this->clientSecret === null || trim($this->clientId) === '' || trim($this->clientSecret) === '') {
+            throw new RuntimeException('Client_Id e Client_Secret do MkAuth precisam estar configurados para abrir chamados reais.');
+        }
+
+        $headers = [
+            'Authorization: Basic ' . base64_encode(trim($this->clientId) . ':' . trim($this->clientSecret)),
+        ];
+
+        $response = $this->sendHttpRequest('GET', $this->baseUrl . '/api/', [], $headers);
+        $decoded = json_decode($response['body'], true);
+
+        if (is_array($decoded)) {
+            foreach (['token', 'access_token', 'jwt', 'data.token'] as $key) {
+                $value = $this->arrayGet($decoded, $key);
+
+                if (is_string($value) && trim($value) !== '') {
+                    return trim($value);
+                }
+            }
+        }
+
+        if (preg_match('/[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+/', $response['body'], $matches)) {
+            return $matches[0];
+        }
+
+        throw new RuntimeException('Nao foi possivel autenticar no MkAuth para abertura de chamado.');
+    }
+
+    private function sendHttpRequest(string $method, string $url, array $payload, array $headers): array
+    {
+        if (!function_exists('curl_init')) {
+            throw new RuntimeException('Extensao cURL nao esta disponivel neste ambiente.');
+        }
+
+        $ch = curl_init($url);
+
+        if ($ch === false) {
+            throw new RuntimeException('Falha ao iniciar requisicao HTTP para o MkAuth.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+        ]);
+
+        if ($method !== 'GET') {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        }
+
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            throw new RuntimeException('Erro na requisicao MkAuth: ' . $error);
+        }
+
+        return ['status' => $status, 'body' => (string) $body];
+    }
+
+    private function arrayGet(array $data, string $path): mixed
+    {
+        $segments = explode('.', $path);
+        $value = $data;
+
+        foreach ($segments as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return null;
+            }
+
+            $value = $value[$segment];
+        }
+
+        return $value;
+    }
+}

@@ -83,6 +83,37 @@ final class FinancialTaskRepository
         );
     }
 
+    public function appendSystemNote(int $id, string $note, ?string $status = null): int
+    {
+        $note = trim($note);
+
+        if ($note === '') {
+            return 0;
+        }
+
+        $sql = 'UPDATE financial_tasks
+                SET descricao = CONCAT(
+                    COALESCE(descricao, ""),
+                    CASE WHEN descricao IS NULL OR descricao = "" THEN "" ELSE "\n\n" END,
+                    :note
+                ),
+                    updated_at = NOW()';
+
+        $params = [
+            'id' => $id,
+            'note' => $note,
+        ];
+
+        if ($status !== null && trim($status) !== '') {
+            $sql .= ', status = :status';
+            $params['status'] = trim($status);
+        }
+
+        $sql .= ' WHERE id = :id';
+
+        return $this->database->execute($sql, $params);
+    }
+
     private function normalizeData(array $data): array
     {
         return [

@@ -19,10 +19,12 @@ use App\Infrastructure\Contracts\NotificationLogRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Notifications\EvotrixService;
+use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\MkAuth\ClientPayloadMapper;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthClient;
+use App\Infrastructure\MkAuth\MkAuthTicketService;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -56,6 +58,7 @@ function bootstrapApplication(): Application
         'paths' => require __DIR__ . '/../config/paths.php',
         'contracts' => require __DIR__ . '/../config/contracts.php',
         'evotrix' => require __DIR__ . '/../config/evotrix.php',
+        'email' => require __DIR__ . '/../config/email.php',
     ]);
 
     date_default_timezone_set((string) $config->get('app.timezone', 'UTC'));
@@ -94,6 +97,10 @@ function bootstrapApplication(): Application
         (array) $config->get('evotrix', []),
         $container->get(NotificationLogRepository::class)
     ));
+    $container->set(EmailService::class, new EmailService(
+        (array) $config->get('email', []),
+        $container->get(NotificationLogRepository::class)
+    ));
     $container->set(MkAuthClient::class, new MkAuthClient(
         $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),
@@ -113,6 +120,13 @@ function bootstrapApplication(): Application
     $container->set(ClientProvisioner::class, new ClientProvisioner(
         $container->get(ClientPayloadMapper::class),
         $container->get(MkAuthClient::class)
+    ));
+    $container->set(MkAuthTicketService::class, new MkAuthTicketService(
+        (array) $config->get('contracts.mkauth_ticket', []),
+        $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
+        $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),
+        $setting('mkauth_client_id', 'MKAUTH_CLIENT_ID'),
+        $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET')
     ));
 
     $router = new Router();

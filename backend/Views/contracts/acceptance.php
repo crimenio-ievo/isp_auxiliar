@@ -33,6 +33,7 @@ $protocol = $protocol !== '' ? strtoupper(substr($protocol, 0, 12)) : ('ACEITE-'
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
 $hideFooter = $isAccepted;
+$alreadyAcceptedView = $isAccepted && empty($successMessage);
 
 ob_start();
 ?>
@@ -40,10 +41,10 @@ ob_start();
 <section class="acceptance-success-screen">
     <article class="card acceptance-success-card">
         <div class="acceptance-success-card__icon" aria-hidden="true">✓</div>
-        <p class="section-heading__eyebrow">Aceite concluído</p>
-        <h1>Seu aceite foi confirmado com sucesso.</h1>
+        <p class="section-heading__eyebrow"><?= $alreadyAcceptedView ? 'Aceite já concluído' : 'Aceite concluído'; ?></p>
+        <h1><?= $alreadyAcceptedView ? 'Este aceite já foi concluído.' : 'Seu aceite foi confirmado com sucesso.'; ?></h1>
         <p class="page-description">
-            O contrato foi registrado com segurança.<br>
+            Seu contrato já foi registrado com segurança.<br>
             A iEvo agradece a confiança.<br>
             Qualquer dúvida, nossa equipe estará à disposição.
         </p>
@@ -61,7 +62,6 @@ ob_start();
 
         <div class="hero-actions acceptance-success-card__actions">
             <button type="button" class="button" data-close-page>Fechar</button>
-            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/'), ENT_QUOTES, 'UTF-8'); ?>">Voltar</a>
         </div>
     </article>
 </section>
@@ -197,18 +197,18 @@ ob_start();
                 >
                     <p class="page-description">Ao confirmar, você concorda com os dados e condições exibidos acima.</p>
 
-                    <label class="field">
+                    <div class="field">
                         <span>Cliente confirma o aceite?</span>
-                        <label class="choice-card" data-choice-card>
+                        <label class="acceptance-check" data-acceptance-choice>
                             <input type="checkbox" name="aceite_cliente" value="sim" data-acceptance-select required>
-                            <span class="choice-card__icon" aria-hidden="true">✓</span>
-                            <span class="choice-card__content">
+                            <span class="acceptance-check__box" aria-hidden="true"></span>
+                            <span class="acceptance-check__content">
                                 <strong>Cliente confirma o aceite do contrato</strong>
-                                <small>Toque no card inteiro para confirmar a concordância com o termo acima.</small>
+                                <small>Marque para confirmar a concordância com o termo exibido acima.</small>
                             </span>
                         </label>
                         <small class="field-help">Esse registro confirma a concordância com os dados, instalação e evidências anexadas.</small>
-                    </label>
+                    </div>
 
                     <?php if ($documentValidationRequired && $documentValidationPossible): ?>
                         <label class="field">
