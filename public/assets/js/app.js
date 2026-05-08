@@ -1288,9 +1288,10 @@ function updateCommercialSection(force = false) {
     };
 
     if (valueInput) {
-        valueInput.readOnly = currentType === 'isenta';
-        valueInput.classList.toggle('is-readonly', currentType === 'isenta');
-        valueInput.setAttribute('aria-disabled', currentType === 'isenta' ? 'true' : 'false');
+        const valueLocked = currentType === 'cheia' || currentType === 'isenta';
+        valueInput.readOnly = valueLocked;
+        valueInput.classList.toggle('is-readonly', valueLocked);
+        valueInput.setAttribute('aria-disabled', valueLocked ? 'true' : 'false');
     }
 
     if (shouldReset || valueInput?.dataset.manualValue !== '1' || !valueInput?.value.trim()) {
@@ -1338,6 +1339,11 @@ function updateCommercialSection(force = false) {
     if (authorizerInput && force && authorizerInput.value.trim() === '') {
         authorizerInput.value = '';
         authorizerInput.dataset.manualValue = '0';
+    }
+
+    if (authorizerInput) {
+        authorizerInput.required = currentType === 'promocional' || currentType === 'isenta';
+        authorizerInput.closest('.field')?.classList.toggle('field--required', authorizerInput.required);
     }
 
     if (firstDueInput && dueDaySelect) {

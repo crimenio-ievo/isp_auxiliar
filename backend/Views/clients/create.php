@@ -307,8 +307,8 @@ ob_start();
 
                     <label class="field">
                         <span>Valor da adesão</span>
-                        <input type="text" name="valor_adesao" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('valor_adesao', $defaultAdhesionValue !== 0.0 ? number_format($defaultAdhesionValue, 2, ',', '.') : '0,00'); ?>" data-adhesion-value-input required>
-                        <small class="field-help">Preenchido com o padrão comercial e ajustável no atendimento.</small>
+                        <input type="text" name="valor_adesao" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('valor_adesao', $defaultAdhesionValue !== 0.0 ? number_format($defaultAdhesionValue, 2, ',', '.') : '0,00'); ?>" data-adhesion-value-input required <?= in_array($initialAdhesionType, ['cheia', 'isenta'], true) ? 'readonly' : ''; ?>>
+                        <small class="field-help" data-adhesion-value-help>Na adesão cheia o valor segue o padrão configurado. Na isenta, o valor fica zerado.</small>
                     </label>
 
                     <label class="field">

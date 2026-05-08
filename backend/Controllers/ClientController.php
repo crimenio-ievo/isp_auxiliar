@@ -329,11 +329,10 @@ final class ClientController
 
         $acceptanceStatus = $this->resolveAcceptanceStatusForLogin((string) ($record['login'] ?? ''));
         $acceptanceState = (string) ($acceptanceStatus['status'] ?? 'pendente');
-        $canBypassAcceptance = $this->canManageContracts();
 
-        if ($acceptanceState !== 'aceito' && !$canBypassAcceptance) {
+        if ($acceptanceState !== 'aceito') {
             $statusLabel = (string) ($acceptanceStatus['label'] ?? 'pendente');
-            Flash::set('error', 'Status do aceite: ' . $statusLabel . '. Aguarde a confirmação do cliente antes de finalizar.');
+            Flash::set('error', 'Cliente ainda não concluiu o aceite. Status atual: ' . $statusLabel . '.');
             return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
         }
 
@@ -353,13 +352,6 @@ final class ClientController
             'completed_at' => date('Y-m-d H:i:s'),
             'completed_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
         ]);
-        if ($acceptanceState !== 'aceito' && $canBypassAcceptance) {
-            $this->recordAudit('installation.completed_with_acceptance_override', 'installation_checkpoint', null, [
-                'token' => $token,
-                'login' => (string) ($record['login'] ?? ''),
-                'acceptance_status' => $acceptanceState,
-            ], $request);
-        }
         $this->recordAudit('installation.completed', 'installation_checkpoint', null, [
             'token' => $token,
             'login' => (string) ($record['login'] ?? ''),
@@ -676,7 +668,7 @@ final class ClientController
         $installType = in_array($installType, ['fibra', 'radio'], true) ? $installType : 'fibra';
         $adhesionType = strtolower(trim((string) $request->input('tipo_adesao', '')));
         if (!in_array($adhesionType, ['cheia', 'promocional', 'isenta'], true)) {
-            $adhesionType = $installType === 'fibra' ? 'isenta' : 'cheia';
+            $adhesionType = 'cheia';
         }
 
         $maxInstallments = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
@@ -688,24 +680,17 @@ final class ClientController
         $discountPercent = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
         $defaultValue = $this->resolveAdhesionValue($adhesionType, $baseValue, $promoValue, $discountPercent);
         $adhesionValue = $this->normalizeMoney((string) $request->input('valor_adesao', ''));
-        if ($adhesionValue <= 0) {
+        if ($adhesionType === 'cheia') {
+            $adhesionValue = $baseValue;
+        } elseif ($adhesionType === 'isenta') {
+            $adhesionValue = 0.0;
+        } elseif ($adhesionValue <= 0) {
             $adhesionValue = $defaultValue;
         }
 
-        if ($adhesionType === 'isenta') {
-            $adhesionValue = 0.0;
-        }
-
-        $benefitValue = $this->normalizeMoney((string) $request->input('beneficio_valor', ''));
-        if ($benefitValue <= 0) {
-            if ($adhesionType === 'isenta') {
-                $benefitValue = $baseValue;
-            } elseif ($adhesionType === 'promocional') {
-                $benefitValue = max(0.0, $baseValue - $adhesionValue);
-            } else {
-                $benefitValue = max(0.0, $baseValue - $adhesionValue);
-            }
-        }
+        $benefitValue = $adhesionType === 'isenta'
+            ? $baseValue
+            : max(0.0, $baseValue - $adhesionValue);
 
         $penaltyValue = $this->normalizeMoney((string) $request->input('multa_total', ''));
         if ($penaltyValue <= 0) {
@@ -847,6 +832,21 @@ final class ClientController
         $tipoAdesao = strtolower(trim((string) ($data['tipo_adesao'] ?? '')));
         if (!in_array($tipoAdesao, ['cheia', 'promocional', 'isenta'], true)) {
             $errors[] = 'Selecione um tipo de adesão válido.';
+        }
+
+        if (in_array($tipoAdesao, ['promocional', 'isenta'], true) && trim((string) ($data['beneficio_concedido_por'] ?? '')) === '') {
+            $errors[] = 'Informe quem autorizou esta condição comercial.';
+        }
+
+        $valorAdesaoPadrao = (float) ($commercial['valor_adesao_padrao'] ?? 0);
+        $valorAdesao = $this->normalizeMoney((string) ($data['valor_adesao'] ?? '0'));
+
+        if ($tipoAdesao === 'cheia' && abs($valorAdesao - $valorAdesaoPadrao) > 0.009) {
+            $errors[] = 'A adesão cheia deve usar exatamente o valor padrão configurado.';
+        }
+
+        if ($tipoAdesao === 'isenta' && abs($valorAdesao) > 0.009) {
+            $errors[] = 'A adesão isenta deve ter valor R$ 0,00.';
         }
 
         $parcelasMaximas = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
@@ -2206,7 +2206,7 @@ final class ClientController
         $tipoInstalacao = in_array($tipoInstalacao, ['fibra', 'radio'], true) ? $tipoInstalacao : 'fibra';
         $tipoAdesao = strtolower(trim((string) ($data['tipo_adesao'] ?? '')));
         if (!in_array($tipoAdesao, ['cheia', 'promocional', 'isenta'], true)) {
-            $tipoAdesao = $tipoInstalacao === 'fibra' ? 'isenta' : 'cheia';
+            $tipoAdesao = 'cheia';
         }
 
         $parcelasMaximas = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
@@ -2215,18 +2215,15 @@ final class ClientController
         $valorPromocional = (float) ($commercial['valor_adesao_promocional'] ?? 0);
         $descontoPromocional = (float) ($commercial['percentual_desconto_promocional'] ?? 0);
         $valorAdesao = $this->normalizeMoney((string) ($data['valor_adesao'] ?? '0'));
-        if ($valorAdesao <= 0) {
+        if ($tipoAdesao === 'cheia') {
+            $valorAdesao = $valorBase;
+        } elseif ($tipoAdesao === 'isenta') {
+            $valorAdesao = 0.0;
+        } elseif ($valorAdesao <= 0) {
             $valorAdesao = $this->resolveAdhesionValue($tipoAdesao, $valorBase, $valorPromocional, $descontoPromocional);
         }
 
-        if ($tipoAdesao === 'isenta') {
-            $valorAdesao = 0.0;
-        }
-
-        $valorParcela = $this->normalizeMoney((string) ($data['valor_parcela_adesao'] ?? '0'));
-        if ($valorParcela <= 0) {
-            $valorParcela = $parcelasAdesao > 0 ? round($valorAdesao / $parcelasAdesao, 2) : 0.0;
-        }
+        $valorParcela = $parcelasAdesao > 0 ? round($valorAdesao / $parcelasAdesao, 2) : 0.0;
 
         $fidelidade = (int) ($data['fidelidade_meses'] ?? 0);
         if ($fidelidade <= 0) {
@@ -2237,6 +2234,7 @@ final class ClientController
             ? $valorBase
             : max(0.0, $valorBase - $valorAdesao);
         $multaTotal = max(0.0, (float) ($commercial['multa_padrao'] ?? 0));
+        $statusFinanceiro = 'pendente_lancamento';
 
         $vencimentoPrimeiraParcela = $this->calculateFirstBillingDate((string) ($data['vencimento'] ?? ''));
         if ($vencimentoPrimeiraParcela === null) {

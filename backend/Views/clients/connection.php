@@ -18,9 +18,11 @@ $connectionHeading = $completed
     : ($online ? 'Conexão confirmada' : 'Aguardando conexão Radius');
 $connectionDescription = $completed
     ? 'O cadastro foi concluído, o aceite está registrado e o login já apareceu conectado no Radius.'
-    : ($acceptanceAccepted
+    : ($acceptanceAccepted && !$online
         ? 'O aceite do cliente já foi concluído. Falta apenas o login aparecer conectado no Radius.'
-        : 'Configure o equipamento, acompanhe o status do aceite e finalize somente quando o Radius confirmar conexão ativa.');
+        : (!$acceptanceAccepted
+            ? 'Cliente ainda não concluiu o aceite. Mesmo com Radius conectado, a instalação não pode ser finalizada.'
+            : 'Aceite concluído e Radius conectado. Você já pode finalizar a instalação.'));
 
 ob_start();
 ?>
@@ -47,7 +49,7 @@ ob_start();
 
         <div class="status-card <?= $completed ? 'status-card--success' : ($acceptanceAccepted ? 'status-card--success' : 'status-card--warning'); ?> connection-state-card">
             <span><?= $completed ? 'Fluxo concluído' : 'Próximo passo'; ?></span>
-            <strong><?= $completed ? 'Instalação e validação finalizadas.' : ($acceptanceAccepted ? 'Aceite concluído. Falta apenas o login aparecer conectado no Radius.' : 'O cliente ainda precisa concluir o aceite antes da finalização padrão.'); ?></strong>
+            <strong><?= $completed ? 'Instalação e validação finalizadas.' : ($acceptanceAccepted ? ($online ? 'Aceite concluído e Radius conectado. Você já pode finalizar.' : 'Aceite concluído. Falta apenas o login aparecer conectado no Radius.') : 'Cliente ainda não concluiu o aceite.'); ?></strong>
             <div class="connection-status-pair">
                 <div class="connection-status-pair__item">
                     <small>Status do aceite</small>
@@ -100,7 +102,7 @@ ob_start();
         <?php if (!$completed): ?>
             <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/conexao/finalizar'), ENT_QUOTES, 'UTF-8'); ?>" class="form-actions">
                 <input type="hidden" name="token" value="<?= htmlspecialchars((string) $token, ENT_QUOTES, 'UTF-8'); ?>">
-                <button class="button" type="submit">Verificar e finalizar</button>
+                <button class="button" type="submit" <?= $acceptanceAccepted ? '' : 'disabled aria-disabled="true"'; ?>>Verificar e finalizar</button>
                 <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>">Cadastrar outro cliente</a>
             </form>
         <?php else: ?>
