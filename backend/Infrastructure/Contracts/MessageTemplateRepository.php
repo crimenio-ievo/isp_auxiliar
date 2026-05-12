@@ -69,6 +69,7 @@ final class MessageTemplateRepository
             $this->database->execute(
                 'UPDATE message_templates
                  SET purpose = :purpose,
+                     channel = :channel,
                      body = :body,
                      variables_json = :variables_json,
                      active = :active,

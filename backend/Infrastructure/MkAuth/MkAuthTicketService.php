@@ -17,6 +17,7 @@ final class MkAuthTicketService
     public function __construct(
         private array $config,
         private string $baseUrl,
+        private ?MkAuthDatabase $mkauthDatabase = null,
         private ?string $apiToken = null,
         private ?string $clientId = null,
         private ?string $clientSecret = null
@@ -73,6 +74,7 @@ final class MkAuthTicketService
         }
 
         $ticketId = $this->extractTicketId($decoded);
+        $messageFallbackResult = $this->applyMessageFallback($ticketId, $normalizedPayload, $decoded);
 
         return [
             'status' => 'enviado',
@@ -83,6 +85,11 @@ final class MkAuthTicketService
             'payload' => $normalizedPayload,
             'response' => $decoded,
             'ticket_id' => $ticketId,
+            'message_fallback_used' => (bool) ($messageFallbackResult['used'] ?? false),
+            'message_fallback_status' => (string) ($messageFallbackResult['status'] ?? 'skipped'),
+            'message_fallback_error' => (string) ($messageFallbackResult['error'] ?? ''),
+            'sis_msg_id' => $messageFallbackResult['sis_msg_id'] ?? null,
+            'sis_msg_message' => $messageFallbackResult['sis_msg_message'] ?? null,
             'queued_at' => date('Y-m-d H:i:s'),
             'message' => $ticketId !== null
                 ? 'Chamado financeiro aberto com sucesso no MkAuth. ID: ' . $ticketId
@@ -138,15 +145,75 @@ final class MkAuthTicketService
 
     private function normalizePayload(array $payload): array
     {
+        $description = trim((string) ($payload['descricao'] ?? $payload['msg'] ?? $payload['mensagem'] ?? ''));
+
         return [
             'login' => trim((string) ($payload['login'] ?? '')),
             'nome' => trim((string) ($payload['nome'] ?? '')),
+            'email' => trim((string) ($payload['email'] ?? '')),
             'telefone' => trim((string) ($payload['telefone'] ?? '')),
             'assunto' => trim((string) ($payload['assunto'] ?? 'Financeiro - Boleto / Carne')),
             'prioridade' => trim((string) ($payload['prioridade'] ?? 'normal')),
-            'descricao' => trim((string) ($payload['descricao'] ?? '')),
-            'observacao' => trim((string) ($payload['observacao'] ?? '')),
+            'descricao' => $description,
+            'msg' => $description,
+            'mensagem' => $description,
+            'observacao' => trim((string) ($payload['observacao'] ?? $description)),
         ];
+    }
+
+    private function applyMessageFallback(?string $ticketId, array $normalizedPayload, array $decodedResponse): array
+    {
+        $fallbackEnabled = (bool) ($this->config['message_fallback'] ?? true);
+
+        if (!$fallbackEnabled || $ticketId === null || trim($ticketId) === '') {
+            return ['used' => false, 'status' => 'skipped'];
+        }
+
+        $message = trim((string) ($normalizedPayload['descricao'] ?? $normalizedPayload['msg'] ?? $normalizedPayload['mensagem'] ?? ''));
+        if ($message === '') {
+            return ['used' => false, 'status' => 'skipped'];
+        }
+
+        if (!$this->mkauthDatabase instanceof MkAuthDatabase) {
+            return ['used' => false, 'status' => 'unavailable'];
+        }
+
+        try {
+            $latestMessage = $this->mkauthDatabase->findLatestTicketMessage($ticketId);
+            if (is_array($latestMessage) && trim((string) ($latestMessage['msg'] ?? '')) !== '') {
+                return [
+                    'used' => false,
+                    'status' => 'already_present',
+                    'sis_msg_id' => isset($latestMessage['id']) ? (int) $latestMessage['id'] : null,
+                    'sis_msg_message' => trim((string) ($latestMessage['msg'] ?? '')),
+                ];
+            }
+
+            $msgId = $this->mkauthDatabase->insertTicketMessage(
+                $ticketId,
+                $message,
+                (string) ($normalizedPayload['login'] ?? ''),
+                'provedor',
+                'API'
+            );
+
+            if ($msgId === null) {
+                return ['used' => false, 'status' => 'not_inserted'];
+            }
+
+            return [
+                'used' => true,
+                'status' => 'inserted',
+                'sis_msg_id' => $msgId,
+                'sis_msg_message' => $message,
+            ];
+        } catch (\Throwable $exception) {
+            return [
+                'used' => false,
+                'status' => 'failed',
+                'error' => $exception->getMessage(),
+            ];
+        }
     }
 
     private function resolveJwtToken(): string
@@ -248,6 +315,10 @@ final class MkAuthTicketService
             return true;
         }
 
+        if (array_key_exists('error', $decoded) || array_key_exists('erro', $decoded)) {
+            return true;
+        }
+
         $success = $decoded['success'] ?? null;
         if ($success === false || $success === 0 || $success === '0') {
             return true;
@@ -258,7 +329,7 @@ final class MkAuthTicketService
 
     private function extractTicketId(array $decoded): ?string
     {
-        foreach (['id', 'chamado_id', 'ticket_id', 'data.id', 'data.chamado_id', 'retorno.id'] as $path) {
+        foreach (['id', 'chamado', 'chamado_id', 'ticket_id', 'data.id', 'data.chamado', 'data.chamado_id', 'retorno.id'] as $path) {
             $value = $this->arrayGet($decoded, $path);
 
             if (is_scalar($value) && trim((string) $value) !== '') {

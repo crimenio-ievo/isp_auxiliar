@@ -3,20 +3,16 @@
 declare(strict_types=1);
 
 use App\Core\Url;
+use App\Core\AccessControl;
 
 $currentPath = $currentPath ?? '/';
-$userRole = strtolower((string) ($user['role'] ?? ''));
-$canManageSettings = array_key_exists('can_manage_settings', $user)
-    ? (bool) $user['can_manage_settings']
-    : in_array($userRole, ['platform_admin', 'manager', 'admin', 'administrador'], true);
-$canAccessContracts = array_key_exists('can_access_contracts', $user)
-    ? (bool) $user['can_access_contracts']
-    : in_array($userRole, ['platform_admin', 'manager', 'admin', 'administrador'], true);
+$access = is_array($user['access'] ?? null) ? $user['access'] : [];
+$canManageSettings = AccessControl::can($access, 'configuracoes');
+$canAccessContracts = AccessControl::can($access, 'contratos');
 $navigationItems = [
     ['/dashboard', 'Dashboard'],
     ['/clientes/novo', 'Novo Cliente'],
-    ['/instalacoes', 'Instalacoes'],
-    ['/usuarios', 'Usuarios'],
+    ['/instalacoes', 'Instalações'],
     ['/logs', 'Logs'],
 ];
 
@@ -25,7 +21,7 @@ if ($canAccessContracts) {
 }
 
 if ($canManageSettings) {
-    $navigationItems[] = ['/configuracoes', 'Configuracoes'];
+    $navigationItems[] = ['/configuracoes', 'Configurações'];
 }
 ?>
 <aside class="sidebar" data-sidebar>

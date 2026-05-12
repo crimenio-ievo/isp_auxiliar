@@ -8,6 +8,7 @@ use App\Core\Config;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Url;
 use App\Core\View;
 use App\Infrastructure\Contracts\NotificationLogRepository;
 use App\Infrastructure\Database\Database;
@@ -44,6 +45,7 @@ final class SettingsController
             $providerSettings = [];
             $databaseAvailable = false;
         }
+        $operationalUrlInfo = $this->resolveOperationalUrlInfo($provider);
 
         if ($request->method() === 'POST') {
             try {
@@ -81,6 +83,7 @@ final class SettingsController
             'provider' => $provider,
             'providerSettings' => $providerSettings,
             'databaseAvailable' => $databaseAvailable,
+            'operationalUrlInfo' => $operationalUrlInfo,
             'currentTab' => $currentTab,
             'moduleConfig' => $moduleConfig,
             'storedConfig' => $storedConfig,
@@ -249,7 +252,7 @@ final class SettingsController
                 ? (string) $request->input('smtp_encryption', (string) ($config['smtp_encryption'] ?? 'tls'))
                 : 'tls',
             'smtp_from' => trim((string) $request->input('smtp_from', (string) ($config['smtp_from'] ?? ''))),
-            'smtp_from_name' => trim((string) $request->input('smtp_from_name', (string) ($config['smtp_from_name'] ?? 'ISP Auxiliar'))),
+            'smtp_from_name' => trim((string) $request->input('smtp_from_name', (string) ($config['smtp_from_name'] ?? 'nossa equipe'))),
         ];
     }
 
@@ -265,6 +268,7 @@ final class SettingsController
             'enabled' => $this->normalizeBoolean((string) $request->input('evotrix_enabled', !empty($config['enabled']) ? '1' : '0')),
             'dry_run' => $this->normalizeBoolean((string) $request->input('evotrix_dry_run', !empty($config['dry_run']) ? '1' : '0')),
             'base_url' => trim((string) $request->input('evotrix_api_base', (string) ($config['base_url'] ?? ''))),
+            'endpoint' => trim((string) $request->input('evotrix_endpoint', (string) ($config['endpoint'] ?? '/v1/services/whatsapp/notifications/text'))),
             'token' => $incomingToken !== '' ? $incomingToken : $storedToken,
             'channel_id' => trim((string) $request->input('evotrix_channel_id', (string) ($config['channel_id'] ?? ''))),
             'allow_only_test_phone' => $this->normalizeBoolean((string) $request->input('evotrix_allow_only_test_phone', !empty($config['allow_only_test_phone']) ? '1' : '0')),
@@ -281,11 +285,15 @@ final class SettingsController
         return [
             'enabled' => $this->normalizeBoolean((string) $request->input('mkauth_ticket_enabled', !empty($config['enabled']) ? '1' : '0')),
             'dry_run' => $this->normalizeBoolean((string) $request->input('mkauth_ticket_dry_run', !empty($config['dry_run']) ? '1' : '0')),
-            'auto_create' => false,
+            'auto_create' => $this->normalizeBoolean((string) $request->input('mkauth_ticket_auto_create', !empty($config['auto_create']) ? '1' : '0')),
             'endpoint' => trim((string) $request->input('mkauth_ticket_endpoint', (string) ($config['endpoint'] ?? '/api/chamado/inserir'))),
             'subject' => trim((string) $request->input('mkauth_ticket_subject', (string) ($config['subject'] ?? 'Financeiro - Boleto / Carne'))),
             'priority' => trim((string) $request->input('mkauth_ticket_priority', (string) ($config['priority'] ?? 'normal'))),
             'timeout_seconds' => max(5, (int) $request->input('mkauth_ticket_timeout_seconds', (string) ($config['timeout_seconds'] ?? 15))),
+            'message_fallback' => $this->normalizeBoolean((string) $request->input(
+                'mkauth_ticket_message_fallback',
+                isset($config['message_fallback']) ? (!empty($config['message_fallback']) ? '1' : '0') : '1'
+            )),
         ];
     }
 
@@ -446,37 +454,7 @@ final class SettingsController
 
     private function resolveAccessProfile(): array
     {
-        $user = $this->resolveUser();
-        $login = strtolower(trim((string) ($user['login'] ?? '')));
-        $role = strtolower(trim((string) ($user['role'] ?? '')));
-        $permissionProfile = $this->localRepository->permissionProfile($login);
-
-        $managerLogins = $this->localRepository->providerSettingList('mkauth_manager_logins');
-        $singleManager = strtolower(trim($this->localRepository->providerSetting('mkauth_manager_login', '')));
-        if ($singleManager !== '') {
-            $managerLogins[] = $singleManager;
-        }
-
-        $adminLogins = $this->localRepository->providerSettingList('admin_access_logins');
-        $settingsLogins = $this->localRepository->providerSettingList('settings_access_logins');
-        $contractLogins = $this->localRepository->providerSettingList('contract_access_logins');
-        $financialLogins = $this->localRepository->providerSettingList('financial_access_logins');
-
-        $isAdminRole = in_array($role, ['platform_admin', 'admin', 'administrador'], true);
-        $isManagerRole = in_array($role, ['manager', 'gestor'], true) || !empty($user['can_manage']);
-
-        $isAdmin = $isAdminRole
-            || ($login !== '' && in_array($login, $adminLogins, true))
-            || !empty($permissionProfile['gestor_admin']);
-        $isManager = $isAdmin || $isManagerRole || ($login !== '' && in_array($login, $managerLogins, true));
-
-        return [
-            'is_admin' => $isAdmin,
-            'is_manager' => $isManager,
-            'can_manage_settings' => $isManager || !empty($permissionProfile['configuracoes']) || ($login !== '' && in_array($login, $settingsLogins, true)),
-            'can_access_contracts' => $isManager || !empty($permissionProfile['contratos']) || ($login !== '' && in_array($login, $contractLogins, true)),
-            'can_manage_financial' => $isManager || !empty($permissionProfile['financeiro']) || ($login !== '' && in_array($login, $financialLogins, true)),
-        ];
+        return $this->localRepository->accessProfileForUser($this->resolveUser());
     }
 
     private function runConnectivityTest(string $action, Request $request, array $providerSettings): void
@@ -487,9 +465,9 @@ final class SettingsController
                 $database = new Database($this->config);
                 $notificationLogs = new NotificationLogRepository($database);
                 $service = new EmailService($emailConfig, $notificationLogs);
-                $subject = 'Teste SMTP - ISP Auxiliar';
-                $message = '<p>Teste manual de SMTP do ISP Auxiliar.</p>';
-                $text = "Teste manual de SMTP do ISP Auxiliar.";
+                $subject = 'Teste SMTP - nossa equipe';
+                $message = '<p>Teste manual de SMTP da nossa equipe.</p>';
+                $text = "Teste manual de SMTP da nossa equipe.";
                 $recipient = trim((string) ($emailConfig['test_to'] ?? ''));
                 if ($recipient === '') {
                     throw new \RuntimeException('Defina EMAIL_TEST_TO para executar o teste SMTP.');
@@ -516,7 +494,7 @@ final class SettingsController
                     throw new \RuntimeException('Defina EVOTRIX_TEST_PHONE para executar o teste Evotrix.');
                 }
 
-                $response = $service->sendMessage($recipient, 'Teste manual do ISP Auxiliar - Evotrix.');
+                $response = $service->sendMessage($recipient, 'Teste manual da nossa equipe - Evotrix.');
                 $this->logConnectivityTest('settings.evotrix.test', [
                     'status' => (string) ($response['status'] ?? 'simulado'),
                     'dry_run' => !empty($response['dry_run']),
@@ -534,6 +512,7 @@ final class SettingsController
                 $service = new MkAuthTicketService(
                     $ticketConfig,
                     trim((string) $request->input('mkauth_base_url', (string) ($providerSettings['mkauth_base_url'] ?? ''))),
+                    null,
                     trim((string) $request->input('mkauth_api_token', (string) ($providerSettings['mkauth_api_token'] ?? ''))),
                     trim((string) $request->input('mkauth_client_id', (string) ($providerSettings['mkauth_client_id'] ?? ''))),
                     trim((string) $request->input('mkauth_client_secret', (string) ($providerSettings['mkauth_client_secret'] ?? '')))
@@ -577,9 +556,11 @@ final class SettingsController
     private function buildViewUser(array $access): array
     {
         $user = $this->resolveUser();
+        $user['access'] = $access;
         $user['can_manage_settings'] = $access['can_manage_settings'];
         $user['can_access_contracts'] = $access['can_access_contracts'];
         $user['can_manage_financial'] = $access['can_manage_financial'];
+        $user['can_manage_users'] = $access['can_manage_users'] ?? false;
         $user['can_manage'] = !empty($user['can_manage']) || $access['is_manager'];
 
         if ($access['is_admin']) {
@@ -591,13 +572,42 @@ final class SettingsController
         return $user;
     }
 
+    private function resolveOperationalUrlInfo(?array $provider): array
+    {
+        $providerDomain = is_array($provider) ? (string) ($provider['domain'] ?? '') : '';
+        $providerBasePath = is_array($provider) ? (string) ($provider['base_path'] ?? '') : '';
+        $resolved = Url::resolveOperationalBaseUrl(
+            (string) $this->config->get('app.url', ''),
+            $providerDomain,
+            $providerBasePath
+        );
+
+        $publicAcceptanceLink = rtrim((string) ($resolved['url'] ?? ''), '/') . '/aceite/{token}';
+        $sampleAcceptanceLink = rtrim((string) ($resolved['url'] ?? ''), '/') . '/aceite/EXEMPLO-TOKEN';
+
+        return [
+            'base_url' => (string) ($resolved['url'] ?? ''),
+            'source' => (string) ($resolved['source'] ?? 'internal'),
+            'is_local' => (bool) ($resolved['is_local'] ?? true),
+            'is_ip' => (bool) ($resolved['is_ip'] ?? false),
+            'provider_domain' => $providerDomain,
+            'provider_base_path' => $providerBasePath,
+            'public_acceptance_link' => $publicAcceptanceLink,
+            'sample_acceptance_link' => $sampleAcceptanceLink,
+        ];
+    }
+
     private function resolveUser(): array
     {
-        return $_SESSION['user'] ?? [
+        $user = $_SESSION['user'] ?? [
             'name' => 'Operador',
             'login' => '',
             'role' => 'Operacao',
             'source' => 'fallback',
         ];
+
+        $user['login'] = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
+
+        return $user;
     }
 }

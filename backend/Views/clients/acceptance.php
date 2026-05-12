@@ -14,8 +14,40 @@ $clientPlan = (string) ($draft['plano'] ?? '');
 $clientAddress = trim((string) ($draft['endereco'] ?? '') . ' ' . (string) ($draft['numero'] ?? ''));
 $clientNeighborhood = (string) ($draft['bairro'] ?? '');
 $clientCep = (string) ($draft['cep'] ?? '');
+$detectedPhone = preg_replace('/\D+/', '', (string) ($draft['celular'] ?? '')) ?? '';
+$fallbackEmail = 'cliente@ievo.com.br';
+$resolveEmailContext = static function (array $source) use ($fallbackEmail): array {
+    $original = strtolower(trim((string) ($source['email_original'] ?? '')));
+    $current = strtolower(trim((string) ($source['email_cliente'] ?? $source['email'] ?? '')));
+
+    if ($current === '' && $original !== '') {
+        $current = $original;
+    }
+
+    if (($current === '' || $current === $fallbackEmail) && $original !== '' && $original !== $fallbackEmail) {
+        $current = $original;
+    }
+
+    if ($original === '' && $current !== '' && $current !== $fallbackEmail) {
+        $original = $current;
+    }
+
+    if ($current === '') {
+        $current = $fallbackEmail;
+    }
+
+    return [
+        'email_original' => $original,
+        'email_cliente' => $current,
+        'has_real_email' => $current !== '' && $current !== $fallbackEmail,
+    ];
+};
+$emailContext = $resolveEmailContext($draft);
+$detectedEmail = (string) ($emailContext['email_cliente'] ?? '');
+$hasRealEmail = (bool) ($emailContext['has_real_email'] ?? false);
 $acceptanceStamp = (string) ($acceptanceDateTime ?? date('d/m/Y H:i'));
 $checkpointToken = (string) ($checkpointToken ?? '');
+$sendRequestId = bin2hex(random_bytes(16));
 
 ob_start();
 ?>
@@ -89,12 +121,14 @@ ob_start();
         action="<?= htmlspecialchars(Url::to('/clientes/novo/aceite'), ENT_QUOTES, 'UTF-8'); ?>"
         enctype="multipart/form-data"
         data-acceptance-form
+        data-acceptance-send-form
         data-autosave-form
         data-draft-key="client-acceptance-<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>"
         data-draft-json="<?= htmlspecialchars((string) ($draftJson ?? '{}'), ENT_QUOTES, 'UTF-8'); ?>"
     >
         <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($sendRequestId, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="assinatura_cliente" data-signature-input value="">
 
         <div class="section-heading">
@@ -106,6 +140,48 @@ ob_start();
             <span>Etapa final do técnico</span>
             <strong>Confira os dados, registre a assinatura e envie para o MkAuth.</strong>
             <small>Depois disso, a próxima tela ficará dedicada apenas à validação da conexão Radius.</small>
+        </div>
+
+        <div class="card soft-card" style="margin-top: 18px;">
+            <div class="section-heading">
+                <p class="section-heading__eyebrow">Envio do aceite ao cliente</p>
+                <h2>Escolha o canal</h2>
+            </div>
+
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span>Telefone detectado</span>
+                    <strong><?= htmlspecialchars($detectedPhone !== '' ? $detectedPhone : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
+                </div>
+                <div class="summary-item">
+                    <span>E-mail detectado</span>
+                    <strong><?= htmlspecialchars($hasRealEmail ? $detectedEmail : 'Cliente não informou e-mail', ENT_QUOTES, 'UTF-8'); ?></strong>
+                </div>
+            </div>
+
+            <div class="integration-channel-choice" data-channel-choice data-has-real-email="<?= $hasRealEmail ? '1' : '0'; ?>">
+                <label class="integration-channel-choice__item">
+                    <input type="hidden" name="send_whatsapp" value="<?= $hasRealEmail ? '0' : '1'; ?>">
+                    <input type="checkbox" name="send_whatsapp" value="1" checked <?= $hasRealEmail ? '' : 'disabled' ; ?> data-channel-whatsapp>
+                    <span>
+                        <strong>Enviar por WhatsApp</strong>
+                        <small>Operação em 2 mensagens. O link é enviado separado.</small>
+                    </span>
+                </label>
+
+                <label class="integration-channel-choice__item <?= $hasRealEmail ? '' : 'integration-channel-choice__item--disabled'; ?>">
+                    <input type="hidden" name="send_email" value="0">
+                    <input type="checkbox" name="send_email" value="1" <?= $hasRealEmail ? '' : 'disabled'; ?> data-channel-email>
+                    <span>
+                        <strong>Enviar por e-mail</strong>
+                        <small><?= $hasRealEmail ? 'Uma mensagem única com texto + link.' : 'Cliente não informou e-mail. Envio por e-mail indisponível.'; ?></small>
+                    </span>
+                </label>
+            </div>
+
+            <p class="field-help" data-send-email-note>
+                <?= $hasRealEmail ? 'Você pode marcar WhatsApp, e-mail ou ambos.' : 'Sem e-mail real, o WhatsApp fica obrigatório para concluir o aceite. O e-mail fallback cliente@ievo.com.br não é usado para envio de aceite.'; ?>
+            </p>
         </div>
 
         <div class="form-grid form-grid--compact">

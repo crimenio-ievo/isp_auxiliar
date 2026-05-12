@@ -63,6 +63,11 @@ return [
         'subject' => Env::get('MKAUTH_TICKET_SUBJECT', 'Financeiro - Boleto / Carne'),
         'priority' => Env::get('MKAUTH_TICKET_PRIORITY', 'normal'),
         'timeout_seconds' => max(5, (int) Env::get('MKAUTH_TICKET_TIMEOUT_SECONDS', '15')),
+        'message_fallback' => filter_var(
+            Env::get('MKAUTH_TICKET_MESSAGE_FALLBACK', '1'),
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE
+        ) ?? true,
     ], array_intersect_key($mkauthTicketOverrides, [
         'enabled' => true,
         'dry_run' => true,
@@ -71,6 +76,7 @@ return [
         'subject' => true,
         'priority' => true,
         'timeout_seconds' => true,
+        'message_fallback' => true,
     ])),
     'system' => array_replace([
         'settings_saved_at' => '',
@@ -83,14 +89,14 @@ return [
         'aceite_nova_instalacao' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_nova_instalacao',
-            'body' => "Olá, {nome}.\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {validade_horas} horas.",
-            'variables_json' => ['nome', 'link_aceite', 'validade_horas'],
+            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link abaixo:\n\n{link_aceite}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas'],
         ],
         'aceite_regularizacao_contrato' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_regularizacao_contrato',
-            'body' => "Olá, {nome}.\n\nSeu contrato precisa de regularização cadastral.\n\nConfira os dados e aceite digital no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {validade_horas} horas.",
-            'variables_json' => ['nome', 'link_aceite', 'validade_horas'],
+            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link abaixo:\n\n{link_aceite}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas'],
         ],
     ],
 ];

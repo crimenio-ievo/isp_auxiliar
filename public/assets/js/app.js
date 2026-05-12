@@ -779,7 +779,7 @@ function normalizeLoginValue(value) {
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
-        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/[^a-z0-9_.-]+/g, '_')
         .replace(/^_+|_+$/g, '');
 }
 
@@ -1541,12 +1541,6 @@ function setupSignaturePad() {
         }
 
         if (!hasSignatureStroke) {
-            signatureInput.value = '';
-            delete signaturePad.dataset.signatureSnapshot;
-            const form = signatureInput.closest('form');
-            if (form) {
-                scheduleDraftSave(form);
-            }
             return;
         }
 
@@ -1598,7 +1592,7 @@ function setupSignaturePad() {
             }
         }
         isDrawing = true;
-        hasSignatureStroke = true;
+        hasSignatureStroke = false;
         lastPoint = getPoint(event);
     };
 
@@ -1609,6 +1603,13 @@ function setupSignaturePad() {
 
         event.preventDefault();
         const currentPoint = getPoint(event);
+        const deltaX = currentPoint.x - lastPoint.x;
+        const deltaY = currentPoint.y - lastPoint.y;
+        if (!hasSignatureStroke && Math.hypot(deltaX, deltaY) < 2) {
+            return;
+        }
+
+        hasSignatureStroke = true;
         drawLine(lastPoint, currentPoint);
         lastPoint = currentPoint;
         saveSignature();
@@ -2195,7 +2196,7 @@ applyLiveValidation(loginInput, (value) => {
         return { valid: true, message: '' };
     }
 
-    return /^[a-z0-9_-]+$/.test(normalized)
+    return /^[a-z0-9_.-]+$/.test(normalized)
         ? { valid: true, message: '' }
         : { valid: false, message: 'Login invalido.' };
 }, normalizeLoginValue);
@@ -2463,4 +2464,135 @@ document.querySelectorAll('[data-copy-text]').forEach((button) => {
             }
         }
     });
+});
+
+document.querySelectorAll('form.integration-send-form').forEach((form) => {
+    const submitControls = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
+    let locked = false;
+
+    const lockSubmitControls = () => {
+        if (locked) {
+            return;
+        }
+
+        locked = true;
+        form.dataset.submitting = '1';
+        form.setAttribute('aria-busy', 'true');
+
+        submitControls.forEach((control) => {
+            const element = control;
+            if (!(element instanceof HTMLButtonElement) && !(element instanceof HTMLInputElement)) {
+                return;
+            }
+
+            if (!element.dataset.originalLabel) {
+                element.dataset.originalLabel = element instanceof HTMLInputElement ? (element.value || 'Enviar') : (element.textContent || 'Enviar');
+            }
+
+            if (element instanceof HTMLInputElement) {
+                element.value = 'Enviando...';
+            } else {
+                element.textContent = 'Enviando...';
+            }
+
+            element.disabled = true;
+        });
+    };
+
+    form.addEventListener('submit', (event) => {
+        if (event.defaultPrevented) {
+            return;
+        }
+
+        if (locked) {
+            event.preventDefault();
+            return;
+        }
+
+        lockSubmitControls();
+    });
+});
+
+document.querySelectorAll('[data-channel-choice]').forEach((choiceBlock) => {
+    const hasRealEmail = choiceBlock.getAttribute('data-has-real-email') === '1';
+    const allowTemporaryEmail = choiceBlock.getAttribute('data-allow-temporary-email') === '1';
+    const whatsappCheckbox = choiceBlock.querySelector('[data-channel-whatsapp]');
+    const emailCheckbox = choiceBlock.querySelector('[data-channel-email]');
+    const form = choiceBlock.closest('form');
+    const emailInput = form?.querySelector('[data-send-email-editable]');
+    const emailNote = choiceBlock.querySelector('[data-send-email-note]') || form?.querySelector('[data-send-email-note]');
+
+    if (whatsappCheckbox instanceof HTMLInputElement && !hasRealEmail) {
+        whatsappCheckbox.checked = true;
+        whatsappCheckbox.disabled = true;
+    }
+
+    if (emailCheckbox instanceof HTMLInputElement) {
+        const syncEmailState = () => {
+            const emailSelected = emailCheckbox.checked;
+            if (emailInput instanceof HTMLInputElement) {
+                emailInput.disabled = hasRealEmail ? !emailSelected : !allowTemporaryEmail;
+            }
+
+            if (emailNote instanceof HTMLElement) {
+                if (!hasRealEmail) {
+                    emailNote.textContent = allowTemporaryEmail
+                        ? 'E-mail temporário usado apenas para este envio. Não altera o MkAuth.'
+                        : 'Cliente não informou e-mail. Envio por e-mail indisponível.';
+                    emailNote.dataset.tone = 'warning';
+                } else if (emailSelected) {
+                    emailNote.textContent = 'E-mail habilitado para este envio.';
+                    emailNote.dataset.tone = 'neutral';
+                } else {
+                    emailNote.textContent = 'Você pode marcar o e-mail se quiser enviar também por esse canal.';
+                    emailNote.dataset.tone = 'neutral';
+                }
+            }
+        };
+
+        syncEmailState();
+        emailCheckbox.addEventListener('change', syncEmailState);
+    }
+
+    if (form instanceof HTMLFormElement) {
+        form.addEventListener('submit', (event) => {
+            if (!hasRealEmail) {
+                if (allowTemporaryEmail) {
+                    const emailSelected = emailCheckbox instanceof HTMLInputElement ? emailCheckbox.checked : false;
+                    const emailValue = emailInput instanceof HTMLInputElement ? emailInput.value.trim() : '';
+
+                    if (emailSelected && emailValue === '') {
+                        event.preventDefault();
+                        if (emailNote instanceof HTMLElement) {
+                            emailNote.textContent = 'Informe um e-mail temporário antes de reenviar.';
+                            emailNote.dataset.tone = 'warning';
+                        }
+                        if (emailInput instanceof HTMLInputElement) {
+                            emailInput.focus({ preventScroll: true });
+                        }
+                        return;
+                    }
+                }
+
+                if (whatsappCheckbox instanceof HTMLInputElement) {
+                    whatsappCheckbox.checked = true;
+                }
+                return;
+            }
+
+            const whatsappSelected = whatsappCheckbox instanceof HTMLInputElement ? whatsappCheckbox.checked : false;
+            const emailSelected = emailCheckbox instanceof HTMLInputElement ? emailCheckbox.checked : false;
+
+            if (!whatsappSelected && !emailSelected) {
+                event.preventDefault();
+                if (emailNote instanceof HTMLElement) {
+                    emailNote.textContent = 'Selecione WhatsApp, e-mail ou ambos antes de enviar.';
+                    emailNote.dataset.tone = 'warning';
+                }
+                if (whatsappCheckbox instanceof HTMLInputElement) {
+                    whatsappCheckbox.focus({ preventScroll: true });
+                }
+            }
+        }, true);
+    }
 });

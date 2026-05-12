@@ -44,6 +44,7 @@ return static function (Router $router): void {
     $router->post('/clientes/novo/aceite', [ClientController::class, 'finalize'], 'clients.finalize');
     $router->get('/clientes/conexao', [ClientController::class, 'connection'], 'clients.connection');
     $router->post('/clientes/conexao/finalizar', [ClientController::class, 'completeConnection'], 'clients.connection.complete');
+    $router->post('/clientes/conexao/corrigir-contato', [ClientController::class, 'correctContactAndResend'], 'clients.connection.correct_contact');
     $router->get('/clientes/retomar', [ClientController::class, 'resume'], 'clients.resume');
     $router->get('/clientes/evidencias', [ClientController::class, 'evidence'], 'clients.evidence');
     $router->get('/clientes/evidencias/arquivo', [ClientController::class, 'evidenceFile'], 'clients.evidence.file');

@@ -269,6 +269,87 @@ final class MkAuthDatabase
         return $rows[0] ?? null;
     }
 
+    public function findLatestTicketMessage(string $ticket): ?array
+    {
+        $ticket = trim($ticket);
+
+        if ($ticket === '') {
+            return null;
+        }
+
+        return $this->fetchOne(
+            'SELECT id, chamado, msg, tipo, login, atendente, msg_data
+             FROM sis_msg
+             WHERE chamado = :chamado
+             ORDER BY id DESC
+             LIMIT 1',
+            ['chamado' => $ticket]
+        );
+    }
+
+    public function insertTicketMessage(
+        string $ticket,
+        string $message,
+        string $login,
+        string $tipo = 'provedor',
+        string $atendente = 'API'
+    ): ?int {
+        $ticket = trim($ticket);
+        $message = trim($message);
+        $login = trim($login);
+        $tipo = trim($tipo) !== '' ? trim($tipo) : 'provedor';
+        $atendente = trim($atendente) !== '' ? trim($atendente) : 'API';
+
+        if ($ticket === '' || $message === '') {
+            return null;
+        }
+
+        $latest = $this->findLatestTicketMessage($ticket);
+        if (is_array($latest)) {
+            $latestId = (int) ($latest['id'] ?? 0);
+            $existingMessage = trim((string) ($latest['msg'] ?? ''));
+
+            if ($latestId > 0 && $existingMessage === '') {
+                $this->connection()->prepare(
+                    'UPDATE sis_msg
+                     SET msg = :msg,
+                         tipo = :tipo,
+                         login = :login,
+                         atendente = :atendente,
+                         msg_data = COALESCE(msg_data, NOW())
+                     WHERE id = :id'
+                )->execute([
+                    'id' => $latestId,
+                    'msg' => $message,
+                    'tipo' => $tipo,
+                    'login' => $login,
+                    'atendente' => $atendente,
+                ]);
+
+                return $latestId;
+            }
+
+            if ($existingMessage !== '') {
+                return $latestId > 0 ? $latestId : null;
+            }
+        }
+
+        $this->connection()->prepare(
+            'INSERT INTO sis_msg
+                (chamado, msg, tipo, login, atendente, msg_data)
+             VALUES
+                (:chamado, :msg, :tipo, :login, :atendente, NOW())'
+        )->execute([
+            'chamado' => $ticket,
+            'msg' => $message,
+            'tipo' => $tipo,
+            'login' => $login,
+            'atendente' => $atendente,
+        ]);
+
+        return (int) $this->connection()->lastInsertId();
+    }
+
     private function connection(): PDO
     {
         if ($this->pdo instanceof PDO) {

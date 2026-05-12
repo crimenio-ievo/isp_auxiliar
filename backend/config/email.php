@@ -20,7 +20,7 @@ $emailOverrides = is_array($overrides['email'] ?? null) ? $overrides['email'] : 
 $email = [
     'enabled' => Env::bool('EMAIL_ENABLED', false),
     'dry_run' => Env::bool('EMAIL_DRY_RUN', true),
-    'allow_only_test_email' => Env::bool('EMAIL_ALLOW_ONLY_TEST_EMAIL', true),
+    'allow_only_test_email' => Env::bool('EMAIL_ALLOW_ONLY_TEST_EMAIL', false),
     'test_to' => Env::get('EMAIL_TEST_TO', ''),
     'smtp_host' => Env::get('SMTP_HOST', ''),
     'smtp_port' => (int) Env::get('SMTP_PORT', '587'),
@@ -28,7 +28,7 @@ $email = [
     'smtp_password' => Env::get('SMTP_PASSWORD', ''),
     'smtp_encryption' => Env::get('SMTP_ENCRYPTION', 'tls'),
     'smtp_from' => Env::get('SMTP_FROM', ''),
-    'smtp_from_name' => Env::get('SMTP_FROM_NAME', 'ISP Auxiliar'),
+    'smtp_from_name' => Env::get('SMTP_FROM_NAME', 'nossa equipe'),
 ];
 
 $email = array_replace($email, array_intersect_key($emailOverrides, $email));

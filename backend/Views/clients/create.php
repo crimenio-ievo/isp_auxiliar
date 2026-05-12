@@ -113,7 +113,7 @@ ob_start();
             <label class="field">
                 <span>E-mail</span>
                 <input type="email" name="email" placeholder="cliente@ievo.com.br" value="<?= $fieldValue('email', ''); ?>" data-email-input>
-                <small class="field-help" data-live-feedback="email">Opcional. Se preencher, o formato sera validado automaticamente.</small>
+                <small class="field-help" data-live-feedback="email">Opcional. Se preencher, o formato sera validado automaticamente. Se deixar em branco, o cadastro segue com cliente@ievo.com.br e Recebe E-Mails = Não.</small>
             </label>
 
             <label class="field">

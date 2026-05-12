@@ -1240,6 +1240,16 @@ body.modal-open {
     color: #0b5f59;
 }
 
+.alert--warning {
+    background: rgba(245, 158, 11, 0.14);
+    color: #92400e;
+}
+
+.alert--info {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+}
+
 .auth-panel {
     max-width: 1180px;
     margin: 0 auto;
@@ -1418,8 +1428,89 @@ body.modal-open {
     min-width: min(100%, 320px);
 }
 
+.integration-send-form.is-submitting {
+    opacity: 0.88;
+}
+
+.integration-send-form.is-submitting button[type="submit"],
+.integration-send-form.is-submitting input[type="submit"] {
+    cursor: progress;
+}
+
 .integration-send-form__field {
     min-width: min(100%, 320px);
+}
+
+.integration-send-panel {
+    display: grid;
+    gap: 14px;
+    margin-top: 16px;
+}
+
+.integration-channel-choice {
+    display: grid;
+    gap: 10px;
+}
+
+.integration-channel-choice__item {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.78);
+    cursor: pointer;
+}
+
+.integration-channel-choice__item input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    accent-color: var(--primary);
+}
+
+.integration-channel-choice__item strong {
+    display: block;
+}
+
+.integration-channel-choice__item small {
+    display: block;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.integration-channel-choice__item--disabled {
+    opacity: 0.72;
+    cursor: not-allowed;
+}
+
+.field--disabled {
+    opacity: 0.78;
+}
+
+.integration-resend-option {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    border: 1px dashed rgba(15, 118, 110, 0.2);
+    background: rgba(240, 253, 250, 0.75);
+}
+
+.integration-resend-option > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.integration-resend-option input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--primary);
 }
 
 .settings-tabs {

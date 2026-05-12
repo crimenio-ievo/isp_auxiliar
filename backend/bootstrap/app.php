@@ -9,6 +9,7 @@ use App\Core\Config;
 use App\Core\Flash;
 use App\Core\Container;
 use App\Core\Env;
+use App\Core\Url;
 use App\Core\Router;
 use App\Core\View;
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
@@ -78,6 +79,35 @@ function bootstrapApplication(): Application
         $providerSettings = [];
     }
 
+    $provider = null;
+    try {
+        $provider = $localRepository->currentProvider();
+    } catch (\Throwable) {
+        $provider = null;
+    }
+
+    $operationalBase = Url::resolveOperationalBaseUrl(
+        (string) $config->get('app.url', ''),
+        is_array($provider) ? (string) ($provider['domain'] ?? '') : '',
+        is_array($provider) ? (string) ($provider['base_path'] ?? '') : ''
+    );
+    Url::setApplicationUrl((string) ($operationalBase['url'] ?? 'http://localhost:8000'));
+
+    $providerDisplayName = 'nossa equipe';
+    if (is_array($provider) && trim((string) ($provider['name'] ?? '')) !== '') {
+        $candidate = trim((string) $provider['name']);
+        if (!in_array(strtolower($candidate), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+            $providerDisplayName = $candidate;
+        }
+    }
+
+    if ($providerDisplayName === 'nossa equipe') {
+        $candidate = trim((string) $config->get('app.name', ''));
+        if ($candidate !== '' && !in_array(strtolower($candidate), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+            $providerDisplayName = $candidate;
+        }
+    }
+
     $setting = static function (string $key, string $envKey, string $default = '') use ($providerSettings): string {
         $saved = trim((string) ($providerSettings[$key] ?? ''));
 
@@ -98,7 +128,9 @@ function bootstrapApplication(): Application
         $container->get(NotificationLogRepository::class)
     ));
     $container->set(EmailService::class, new EmailService(
-        (array) $config->get('email', []),
+        array_replace((array) $config->get('email', []), [
+            'provider_name' => $providerDisplayName,
+        ]),
         $container->get(NotificationLogRepository::class)
     ));
     $container->set(MkAuthClient::class, new MkAuthClient(
@@ -124,6 +156,7 @@ function bootstrapApplication(): Application
     $container->set(MkAuthTicketService::class, new MkAuthTicketService(
         (array) $config->get('contracts.mkauth_ticket', []),
         $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
+        $container->get(MkAuthDatabase::class),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),
         $setting('mkauth_client_id', 'MKAUTH_CLIENT_ID'),
         $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET')

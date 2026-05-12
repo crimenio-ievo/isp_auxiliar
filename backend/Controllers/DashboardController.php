@@ -8,6 +8,7 @@ use App\Core\Config;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
+use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 
 /**
@@ -18,6 +19,7 @@ final class DashboardController
     public function __construct(
         private View $view,
         private Config $config,
+        private LocalRepository $localRepository,
         private MkAuthDatabase $mkauthDatabase
     ) {
     }
@@ -29,7 +31,7 @@ final class DashboardController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'stats' => $this->dashboardStats(),
             'recentActivities' => $this->recentInstallationActivities(),
             'pipeline' => [
@@ -44,12 +46,35 @@ final class DashboardController
 
     private function resolveUser(): array
     {
-        return $_SESSION['user'] ?? [
+        $user = $_SESSION['user'] ?? [
             'name' => 'Operador',
             'login' => '',
             'role' => 'Operação',
             'source' => 'fallback',
         ];
+
+        $user['login'] = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
+
+        return $user;
+    }
+
+    private function resolveViewUser(): array
+    {
+        $user = $this->resolveUser();
+        $access = $this->localRepository->accessProfileForUser($user);
+        $user['access'] = $access;
+        $user['can_manage_settings'] = $access['can_manage_settings'];
+        $user['can_access_contracts'] = $access['can_access_contracts'];
+        $user['can_manage_financial'] = $access['can_manage_financial'];
+        $user['can_manage'] = !empty($user['can_manage']) || $access['is_manager'];
+
+        if ($access['is_admin']) {
+            $user['role'] = 'admin';
+        } elseif ($access['is_manager']) {
+            $user['role'] = 'manager';
+        }
+
+        return $user;
     }
 
     private function dashboardStats(): array

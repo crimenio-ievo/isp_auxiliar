@@ -12,6 +12,16 @@ $customerDetails = is_array($publicDetails['cliente'] ?? null) ? $publicDetails[
 $installationDetails = is_array($publicDetails['instalacao'] ?? null) ? $publicDetails['instalacao'] : [];
 $planDetails = is_array($publicDetails['plano'] ?? null) ? $publicDetails['plano'] : [];
 $contractDetails = is_array($publicDetails['contrato'] ?? null) ? $publicDetails['contrato'] : [];
+$providerName = trim((string) ($providerName ?? $appName ?? 'nossa equipe'));
+$contractTitle = $providerName === 'nossa equipe'
+    ? 'Contrato digital da nossa equipe'
+    : 'Contrato digital ' . $providerName;
+$providerThanks = $providerName === 'nossa equipe'
+    ? 'Nossa equipe agradece a confiança.'
+    : 'A equipe ' . $providerName . ' agradece a confiança.';
+$providerSupport = $providerName === 'nossa equipe'
+    ? 'nossa equipe'
+    : 'a equipe ' . $providerName;
 $signaturePath = trim((string) ($publicDetails['assinatura_path'] ?? ''));
 $signatureRef = '';
 if ($signaturePath !== '') {
@@ -45,8 +55,8 @@ ob_start();
         <h1><?= $alreadyAcceptedView ? 'Aceite concluído' : 'Seu aceite foi confirmado com sucesso.'; ?></h1>
         <p class="page-description">
             Seu contrato foi registrado com segurança.<br>
-            A iEvo agradece a confiança.<br>
-            Qualquer dúvida, nossa equipe estará à disposição.
+            <?= htmlspecialchars($providerThanks, ENT_QUOTES, 'UTF-8'); ?><br>
+            Qualquer dúvida, <?= htmlspecialchars($providerSupport, ENT_QUOTES, 'UTF-8'); ?> estará à disposição.
         </p>
 
         <div class="summary-grid acceptance-success-card__meta">
@@ -70,7 +80,7 @@ ob_start();
     <article class="acceptance-summary">
         <div class="card acceptance-header">
             <p class="section-heading__eyebrow">Aceite digital</p>
-            <h1>Termo de contrato</h1>
+            <h1><?= htmlspecialchars($contractTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
             <p class="page-description">Revise os dados abaixo e confirme o aceite eletrônico do contrato.</p>
 
             <?php if (!empty($successMessage)): ?>

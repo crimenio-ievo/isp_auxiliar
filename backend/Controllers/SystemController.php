@@ -32,7 +32,7 @@ final class SystemController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'canManageRecords' => $this->canManageRecords(),
             'installations' => $this->installationRecords(),
         ]);
@@ -160,7 +160,7 @@ final class SystemController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'users' => $users,
             'usersSource' => $this->mkauthDatabase->isConfigured() ? 'mkauth' : 'indisponivel',
             'accessUsers' => $accessUsers,
@@ -177,7 +177,7 @@ final class SystemController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'entries' => $this->logEntries(),
         ]);
 
@@ -203,7 +203,7 @@ final class SystemController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'layoutMode' => 'guest',
         ]);
 
@@ -212,12 +212,35 @@ final class SystemController
 
     private function resolveUser(): array
     {
-        return $_SESSION['user'] ?? [
+        $user = $_SESSION['user'] ?? [
             'name' => 'Operador',
             'login' => '',
             'role' => 'Operação',
             'source' => 'fallback',
         ];
+
+        $user['login'] = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
+
+        return $user;
+    }
+
+    private function resolveViewUser(): array
+    {
+        $user = $this->resolveUser();
+        $access = $this->localRepository->accessProfileForUser($user);
+        $user['access'] = $access;
+        $user['can_manage_settings'] = $access['can_manage_settings'];
+        $user['can_access_contracts'] = $access['can_access_contracts'];
+        $user['can_manage_financial'] = $access['can_manage_financial'];
+        $user['can_manage'] = !empty($user['can_manage']) || $access['is_manager'];
+
+        if ($access['is_admin']) {
+            $user['role'] = 'admin';
+        } elseif ($access['is_manager']) {
+            $user['role'] = 'manager';
+        }
+
+        return $user;
     }
 
     private function resolveUsers(): array
@@ -379,9 +402,9 @@ final class SystemController
 
     private function canManageRecords(): bool
     {
-        $role = strtolower((string) ($this->resolveUser()['role'] ?? ''));
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
 
-        return in_array($role, ['platform_admin', 'manager', 'admin', 'administrador'], true);
+        return $access['is_manager'] || $access['is_admin'];
     }
 
     private function removeEvidenceFolder(string $ref): void

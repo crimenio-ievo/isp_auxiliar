@@ -24,18 +24,19 @@ final class EvotrixService
 
     public function sendMessage(
         string $telefone,
-        string $mensagem,
+        string|array $mensagem,
         ?int $contractId = null,
-        ?int $acceptanceId = null
+        ?int $acceptanceId = null,
+        bool $forceResend = false
     ): array {
         $telefone = trim($telefone);
-        $mensagem = trim($mensagem);
+        $messageParts = $this->normalizeMessageParts($mensagem);
         $enabled = (bool) ($this->config['enabled'] ?? false);
         $dryRun = (bool) ($this->config['dry_run'] ?? true);
         $allowOnlyTestPhone = (bool) ($this->config['allow_only_test_phone'] ?? true);
         $testPhone = trim((string) ($this->config['test_phone'] ?? ''));
 
-        if ($telefone === '' || $mensagem === '') {
+        if ($telefone === '' || $messageParts === []) {
             throw new LogicException('Telefone e mensagem sao obrigatorios.');
         }
 
@@ -59,7 +60,17 @@ final class EvotrixService
             $actualPhone
         );
 
-        if (is_array($lastAttempt) && in_array((string) ($lastAttempt['status'] ?? ''), ['simulado', 'enviado'], true)) {
+        $lastAttemptStatus = (string) ($lastAttempt['status'] ?? '');
+        $duplicateShouldBlock = !$forceResend && (
+            ($dryRun && in_array($lastAttemptStatus, ['simulado', 'enviado'], true))
+            || (!$dryRun && $lastAttemptStatus === 'enviado')
+        );
+
+        $messageSummary = count($messageParts) > 1
+            ? 'WhatsApp em ' . count($messageParts) . ' mensagens'
+            : $messageParts[0];
+
+        if (is_array($lastAttempt) && $duplicateShouldBlock) {
             $response = [
                 'status' => (string) ($lastAttempt['status'] ?? 'simulado'),
                 'provider' => 'evotrix',
@@ -68,9 +79,12 @@ final class EvotrixService
                 'recipient' => $actualPhone,
                 'original_recipient' => $telefone,
                 'redirected_to_test' => $redirectedToTest,
-                'message' => $mensagem,
+                'message' => $messageSummary,
+                'message_count' => count($messageParts),
+                'messages' => $messageParts,
                 'queued_at' => date('Y-m-d H:i:s'),
                 'repeated_attempt' => true,
+                'force_resend' => $forceResend,
                 'message_id' => $lastAttempt['id'] ?? null,
                 'detail' => 'Ja existe um envio preparado anteriormente para este aceite.',
             ];
@@ -81,8 +95,8 @@ final class EvotrixService
                 'channel' => 'whatsapp',
                 'provider' => 'evotrix',
                 'recipient' => $actualPhone,
-                'message' => $mensagem,
-                'status' => $enabled && !$dryRun ? 'erro' : 'simulado',
+                'message' => $messageSummary,
+                'status' => $dryRun ? 'simulado' : 'enviado',
                 'provider_response' => $response,
             ]);
 
@@ -90,9 +104,46 @@ final class EvotrixService
         }
 
         if ($enabled && !$dryRun) {
-            $response = $this->dispatchRealMessage($actualPhone, $mensagem);
-            $response['original_recipient'] = $telefone;
-            $response['redirected_to_test'] = $redirectedToTest;
+            $partsResponses = [];
+            $status = 'enviado';
+            $errorResponse = null;
+
+            foreach ($messageParts as $index => $partMessage) {
+                $partResponse = $this->dispatchRealMessage($actualPhone, $partMessage, $forceResend);
+                $partResponse['part_number'] = $index + 1;
+                $partResponse['part_total'] = count($messageParts);
+                $partResponse['message'] = $partMessage;
+                $partsResponses[] = $partResponse;
+
+                if (($partResponse['status'] ?? 'enviado') === 'erro') {
+                    $status = 'erro';
+                    $errorResponse = $partResponse;
+                    break;
+                }
+            }
+
+            $response = [
+                'status' => $status,
+                'provider' => 'evotrix',
+                'dry_run' => false,
+                'enabled' => true,
+                'recipient' => $actualPhone,
+                'original_recipient' => $telefone,
+                'redirected_to_test' => $redirectedToTest,
+                'message' => $messageSummary,
+                'message_count' => count($messageParts),
+                'messages' => $messageParts,
+                'parts' => $partsResponses,
+                'queued_at' => date('Y-m-d H:i:s'),
+                'force_resend' => $forceResend,
+            ];
+
+            if ($errorResponse !== null) {
+                $response['detail'] = (string) ($errorResponse['detail'] ?? $errorResponse['response']['message'] ?? 'Falha ao enviar uma das mensagens.');
+                $response['http_status'] = (int) ($errorResponse['http_status'] ?? 0);
+            } else {
+                $response['http_status'] = (int) ($partsResponses[array_key_last($partsResponses)]['http_status'] ?? 0);
+            }
 
             $this->notificationLogs->create([
                 'contract_id' => $contractId,
@@ -100,8 +151,8 @@ final class EvotrixService
                 'channel' => 'whatsapp',
                 'provider' => 'evotrix',
                 'recipient' => $actualPhone,
-                'message' => $mensagem,
-                'status' => 'enviado',
+                'message' => $messageSummary,
+                'status' => $status,
                 'provider_response' => $response,
             ]);
 
@@ -116,8 +167,11 @@ final class EvotrixService
             'recipient' => $actualPhone,
             'original_recipient' => $telefone,
             'redirected_to_test' => $redirectedToTest,
-            'message' => $mensagem,
+            'message' => $messageSummary,
+            'message_count' => count($messageParts),
+            'messages' => $messageParts,
             'queued_at' => date('Y-m-d H:i:s'),
+            'force_resend' => $forceResend,
         ];
 
         $this->notificationLogs->create([
@@ -126,7 +180,7 @@ final class EvotrixService
             'channel' => 'whatsapp',
             'provider' => 'evotrix',
             'recipient' => $actualPhone,
-            'message' => $mensagem,
+            'message' => $messageSummary,
             'status' => 'simulado',
             'provider_response' => $response,
         ]);
@@ -134,9 +188,30 @@ final class EvotrixService
         return $response;
     }
 
-    private function dispatchRealMessage(string $telefone, string $mensagem): array
+    /**
+     * @return string[]
+     */
+    private function normalizeMessageParts(string|array $mensagem): array
+    {
+        $parts = is_array($mensagem) ? $mensagem : [$mensagem];
+        $normalized = [];
+
+        foreach ($parts as $part) {
+            $text = trim((string) $part);
+            if ($text === '') {
+                continue;
+            }
+
+            $normalized[] = $text;
+        }
+
+        return array_values($normalized);
+    }
+
+    private function dispatchRealMessage(string $telefone, string $mensagem, bool $forceResend = false): array
     {
         $baseUrl = rtrim(trim((string) ($this->config['base_url'] ?? '')), '/');
+        $endpoint = trim((string) ($this->config['endpoint'] ?? '/v1/services/whatsapp/notifications/text'));
         $token = trim((string) ($this->config['token'] ?? ''));
         $timeoutSeconds = max(5, (int) ($this->config['timeout_seconds'] ?? 15));
         $retryAttempts = max(0, (int) ($this->config['retry_attempts'] ?? 1));
@@ -145,17 +220,19 @@ final class EvotrixService
             throw new RuntimeException('Evotrix precisa de base_url e token para envio real.');
         }
 
+        $requestCandidates = $this->buildRequestCandidates($baseUrl, $endpoint);
+
         if (!function_exists('curl_init')) {
             throw new RuntimeException('Extensao cURL nao esta disponivel para envio Evotrix.');
         }
 
         $payload = [
-            'to' => $telefone,
-            'message' => $mensagem,
-            'sender' => (string) ($this->config['sender'] ?? 'ISP Auxiliar'),
+            'recipient' => $telefone,
+            'body' => $mensagem,
+            'campaign' => (string) ($this->config['campaign'] ?? 'nossa equipe'),
         ];
         if (trim((string) ($this->config['channel_id'] ?? '')) !== '') {
-            $payload['channel_id'] = trim((string) ($this->config['channel_id'] ?? ''));
+            $payload['channel'] = trim((string) ($this->config['channel_id'] ?? ''));
         }
 
         $attempts = 0;
@@ -166,7 +243,8 @@ final class EvotrixService
 
         do {
             $attempts += 1;
-            $ch = curl_init($baseUrl);
+            $requestUrl = $requestCandidates[min($attempts - 1, count($requestCandidates) - 1)];
+            $ch = curl_init($requestUrl);
 
             if ($ch === false) {
                 throw new RuntimeException('Falha ao iniciar envio Evotrix.');
@@ -190,10 +268,11 @@ final class EvotrixService
             $lastError = curl_error($ch);
             curl_close($ch);
 
-            if ($body !== false && $status > 0 && $status < 500) {
+            $isRouteMissing = is_string($body) && str_contains($body, 'E_ROUTE_NOT_FOUND');
+            if ($body !== false && $status > 0 && $status < 500 && !$isRouteMissing) {
                 break;
             }
-        } while ($attempts <= $retryAttempts);
+        } while ($attempts <= $retryAttempts && $attempts < count($requestCandidates));
 
         if ($body === false) {
             throw new RuntimeException('Falha ao enviar mensagem pelo Evotrix: ' . $lastError);
@@ -212,7 +291,31 @@ final class EvotrixService
             'http_status' => $status,
             'duration_ms' => $durationMs,
             'attempts' => $attempts,
+            'endpoint' => $endpoint,
+            'request_url' => $requestUrl,
             'response' => is_array($decoded) ? $decoded : (string) $body,
+            'force_resend' => $forceResend,
         ];
+    }
+
+    private function buildRequestCandidates(string $baseUrl, string $endpoint): array
+    {
+        $baseUrl = rtrim($baseUrl, '/');
+        $endpoint = '/' . ltrim($endpoint, '/');
+
+        if ($endpoint === '/') {
+            return [$baseUrl];
+        }
+
+        $candidates = [$baseUrl . $endpoint];
+        if (!str_starts_with($endpoint, '/api/')) {
+            $candidates[] = $baseUrl . '/api' . $endpoint;
+        }
+
+        if (!str_starts_with($endpoint, '/v1/services/')) {
+            $candidates[] = $baseUrl . '/v1/services' . $endpoint;
+        }
+
+        return array_values(array_unique($candidates));
     }
 }

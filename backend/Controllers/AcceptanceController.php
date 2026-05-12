@@ -37,11 +37,13 @@ final class AcceptanceController
         $token = trim((string) $request->route('token', ''));
         $context = $this->loadContextByToken($token);
         $flash = Flash::get();
+        $providerName = $this->resolveProviderDisplayName();
 
         $html = $this->view->render('contracts/acceptance', [
             'layoutMode' => 'guest',
             'pageTitle' => 'Aceite Digital',
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'providerName' => $providerName,
             'basePath' => $request->basePath(),
             'user' => [
                 'name' => 'Cliente',
@@ -81,7 +83,7 @@ final class AcceptanceController
         }
 
         if ((string) ($acceptance['status'] ?? '') === 'aceito') {
-            Flash::set('success', 'Este aceite ja foi concluido.');
+            Flash::set('success', 'Aceite concluído.');
             return Response::redirect('/aceite/' . rawurlencode($token));
         }
 
@@ -314,6 +316,28 @@ final class AcceptanceController
         ];
     }
 
+    private function resolveProviderDisplayName(): string
+    {
+        try {
+            $provider = $this->localRepository->currentProvider();
+        if (is_array($provider) && trim((string) ($provider['name'] ?? '')) !== '') {
+            $providerName = trim((string) $provider['name']);
+            if (!in_array(strtolower($providerName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+                return $providerName;
+            }
+        }
+        } catch (\Throwable) {
+            // Fallback abaixo.
+        }
+
+        $appName = trim((string) $this->config->get('app.name', ''));
+        if ($appName !== '' && !in_array(strtolower($appName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+            return $appName;
+        }
+
+        return 'nossa equipe';
+    }
+
     private function buildContractTermBody(array $contract): string
     {
         $nome = (string) ($contract['nome_cliente'] ?? '');
@@ -326,8 +350,13 @@ final class AcceptanceController
         $fidelidade = (int) ($contract['fidelidade_meses'] ?? 12);
         $observacao = (string) ($contract['observacao_adesao'] ?? '');
 
+        $providerName = $this->resolveProviderDisplayName();
+        $contractTitle = $providerName === 'nossa equipe'
+            ? 'Contrato digital da nossa equipe'
+            : 'Contrato digital ' . $providerName;
+
         return trim(implode("\n", [
-            'CONTRATO DIGITAL ISP AUXILIAR',
+            $contractTitle,
             'Cliente: ' . $nome,
             'Login: ' . $login,
             'Telefone: ' . $telefone,

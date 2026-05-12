@@ -21,6 +21,13 @@ $system = is_array($moduleConfig['system'] ?? null) ? $moduleConfig['system'] : 
 $storedEmail = is_array($storedConfig['email'] ?? null) ? $storedConfig['email'] : [];
 $storedEvotrix = is_array($storedConfig['evotrix'] ?? null) ? $storedConfig['evotrix'] : [];
 $permissionRows = is_array($permissionsConfig['rows'] ?? null) ? $permissionsConfig['rows'] : [];
+$operationalUrlInfo = is_array($operationalUrlInfo ?? null) ? $operationalUrlInfo : [];
+$operationalBaseUrl = (string) ($operationalUrlInfo['base_url'] ?? '');
+$operationalIsLocal = !empty($operationalUrlInfo['is_local']);
+$operationalIsIp = !empty($operationalUrlInfo['is_ip']);
+$operationalSource = (string) ($operationalUrlInfo['source'] ?? 'internal');
+$publicAcceptanceLink = (string) ($operationalUrlInfo['public_acceptance_link'] ?? '');
+$sampleAcceptanceLink = (string) ($operationalUrlInfo['sample_acceptance_link'] ?? '');
 if ($permissionRows === []) {
     $permissionRows[] = [
         'login' => '',
@@ -63,6 +70,22 @@ ob_start();
 <?php if (!empty($flash)): ?>
     <div class="alert alert--<?= htmlspecialchars((string) ($flash['type'] ?? 'success'), ENT_QUOTES, 'UTF-8'); ?>">
         <?= htmlspecialchars((string) ($flash['message'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($operationalIsLocal || $operationalIsIp): ?>
+    <div class="alert alert--warning" style="margin-bottom: 18px;">
+        <?php if ($operationalIsLocal): ?>
+            A URL operacional atual ainda aponta para ambiente local. Ajuste `APP_URL` ou o domínio em Geral / Provedor antes de marcar este ambiente como piloto real.
+        <?php else: ?>
+            A URL operacional atual usa endereço por IP. Para melhor compatibilidade com WhatsApp e e-mail, prefira um domínio público em vez de IP antes de marcar este ambiente como piloto real.
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
+<?php if (empty($email['allow_only_test_email']) && empty($evotrix['allow_only_test_phone']) && !empty($mkauthTicket['enabled']) && empty($mkauthTicket['dry_run'])): ?>
+    <div class="alert alert--success" style="margin-bottom: 18px;">
+        Produção real ativa: e-mail, WhatsApp/Evotrix e chamado MkAuth estão liberados para dados reais do cliente.
     </div>
 <?php endif; ?>
 
@@ -112,11 +135,12 @@ ob_start();
                     <label class="field">
                         <span>Domínio principal</span>
                         <input type="text" name="provider_domain" value="<?= htmlspecialchars((string) ($provider['domain'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="provedor.com.br">
+                        <small class="field-help">Usado como referência para links absolutos quando o ambiente tiver domínio próprio.</small>
                     </label>
                     <label class="field field--span-2">
                         <span>Caminho público do sistema</span>
                         <input type="text" name="provider_base_path" value="<?= htmlspecialchars((string) ($provider['base_path'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="/isp_auxiliar/public">
-                        <small class="field-help">Usado para links internos e evidências do provedor.</small>
+                        <small class="field-help">Se o sistema roda em subdiretório, informe o caminho público completo do ambiente.</small>
                     </label>
                 </div>
             </section>
@@ -216,6 +240,22 @@ ob_start();
                     <label class="field">
                         <span>Timeout (s)</span>
                         <input type="number" min="5" name="mkauth_ticket_timeout_seconds" value="<?= htmlspecialchars((string) ($mkauthTicket['timeout_seconds'] ?? 15), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label class="field field--span-2">
+                        <span>Fallback de mensagem em sis_msg</span>
+                        <select name="mkauth_ticket_message_fallback">
+                            <option value="1" <?= $selected(!isset($mkauthTicket['message_fallback']) || !empty($mkauthTicket['message_fallback'])); ?>>Sim</option>
+                            <option value="0" <?= $selected(!empty($mkauthTicket['message_fallback']) === false && isset($mkauthTicket['message_fallback']) && empty($mkauthTicket['message_fallback'])); ?>>Nao</option>
+                        </select>
+                        <small class="field-help">Se a API do MkAuth nao preencher a primeira mensagem do chamado, o ISP Auxiliar grava a mensagem inicial em sis_msg para exibir o chamado completo no painel.</small>
+                    </label>
+                    <label class="field field--span-2">
+                        <span>AUTO_CREATE_FINANCIAL_TICKET</span>
+                        <select name="mkauth_ticket_auto_create">
+                            <option value="0" <?= $selected(empty($mkauthTicket['auto_create'])); ?>>Nao</option>
+                            <option value="1" <?= $selected(!empty($mkauthTicket['auto_create'])); ?>>Sim</option>
+                        </select>
+                        <small class="field-help">Quando ativo, o chamado operacional do financeiro é aberto automaticamente após criar a pendência de adesão, sem gerar cobrança.</small>
                     </label>
                 </div>
                 <div class="hero-actions" style="margin-top: 18px;">
@@ -338,7 +378,7 @@ ob_start();
                     </label>
                     <label class="field">
                         <span>SMTP_FROM_NAME</span>
-                        <input type="text" name="smtp_from_name" value="<?= htmlspecialchars((string) ($email['smtp_from_name'] ?? 'ISP Auxiliar'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="text" name="smtp_from_name" value="<?= htmlspecialchars((string) ($email['smtp_from_name'] ?? 'nossa equipe'), ENT_QUOTES, 'UTF-8'); ?>">
                         <small class="field-help">Nome exibido no campo remetente.</small>
                     </label>
                 </div>
@@ -398,6 +438,11 @@ ob_start();
                         <span>EVOTRIX_API_BASE</span>
                         <input type="url" name="evotrix_api_base" value="<?= htmlspecialchars((string) ($evotrix['base_url'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         <small class="field-help">URL base da API do Evotrix usada no envio manual do aceite.</small>
+                    </label>
+                    <label class="field">
+                        <span>EVOTRIX_ENDPOINT</span>
+                        <input type="text" name="evotrix_endpoint" value="<?= htmlspecialchars((string) ($evotrix['endpoint'] ?? '/v1/services/whatsapp/notifications/text'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <small class="field-help">Normalmente /v1/services/whatsapp/notifications/text. Altere somente se o provedor exigir outro caminho.</small>
                     </label>
                     <label class="field">
                         <span>EVOTRIX_API_KEY</span>
@@ -515,6 +560,54 @@ ob_start();
                         <strong><?= htmlspecialchars((string) ($storedConfig['saved_by'] ?? $system['settings_saved_by'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
                     </div>
                 </div>
+            </section>
+            <section class="card field--span-2">
+                <div class="section-heading">
+                    <p class="section-heading__eyebrow">URL operacional</p>
+                    <h2>Base pública do aceite</h2>
+                </div>
+                <div class="summary-grid">
+                    <div class="summary-item summary-item--span-2">
+                        <span>URL base operacional</span>
+                        <strong><?= htmlspecialchars($operationalBaseUrl !== '' ? $operationalBaseUrl : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
+                    </div>
+                    <div class="summary-item summary-item--span-2">
+                        <span>URL pública do aceite</span>
+                        <strong><?= htmlspecialchars($publicAcceptanceLink !== '' ? $publicAcceptanceLink : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
+                    </div>
+                    <div class="summary-item summary-item--span-2">
+                        <span>Exemplo final do link</span>
+                        <strong><?= htmlspecialchars($sampleAcceptanceLink !== '' ? $sampleAcceptanceLink : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
+                    </div>
+                    <div class="summary-item">
+                        <span>Fonte</span>
+                        <strong><?= htmlspecialchars($operationalSource !== '' ? $operationalSource : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
+                    </div>
+                </div>
+                <p class="field-help" style="margin-top: 14px;">
+                    O link final enviado por WhatsApp, e-mail e aceite público usa esta base e o mesmo token do aceite já existente.
+                </p>
+            </section>
+            <section class="card field--span-2">
+                <div class="section-heading">
+                    <p class="section-heading__eyebrow">Piloto</p>
+                    <h2>Checklist de liberação</h2>
+                </div>
+                <ul class="checklist-list">
+                    <li>Cadastro novo</li>
+                    <li>Adesão cheia</li>
+                    <li>Adesão promocional</li>
+                    <li>Adesão isenta</li>
+                    <li>Aceite público</li>
+                    <li>Bloqueio sem aceite</li>
+                    <li>Radius</li>
+                    <li>E-mail</li>
+                    <li>WhatsApp / Evotrix</li>
+                    <li>Chamado financeiro MkAuth</li>
+                    <li>Permissões</li>
+                    <li>Logs e histórico</li>
+                    <li>Configurações sensíveis</li>
+                </ul>
             </section>
             <section class="card field--span-2">
                 <button class="button button--full" type="submit">Salvar permissões simples</button>

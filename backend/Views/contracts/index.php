@@ -23,7 +23,7 @@ ob_start();
 <section class="page-header">
     <div>
         <p class="section-heading__eyebrow">Operação</p>
-        <h1>Contratos &amp; Aceites</h1>
+        <h1>Contratos e Aceites</h1>
         <p class="page-description">Painel inicial do módulo de contratos, aceite digital e pendências vinculadas ao atendimento.</p>
     </div>
 </section>
@@ -199,7 +199,7 @@ ob_start();
 
                     <label class="field field--span-2">
                         <span>Nome do remetente</span>
-                        <input type="text" name="smtp_from_name" value="<?= htmlspecialchars((string) ($emailConfig['smtp_from_name'] ?? 'ISP Auxiliar'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="text" name="smtp_from_name" value="<?= htmlspecialchars((string) ($emailConfig['smtp_from_name'] ?? 'nossa equipe'), ENT_QUOTES, 'UTF-8'); ?>">
                     </label>
 
                     <div class="form-actions field--span-2">
@@ -277,7 +277,6 @@ ob_start();
                             <td>
                                 <div class="inline-actions">
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId), ENT_QUOTES, 'UTF-8'); ?>">Visualizar contrato</a>
-                                    <button type="button" class="button button--ghost button--small" data-copy-text="<?= htmlspecialchars($simulatedLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link</button>
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#financeiro'), ENT_QUOTES, 'UTF-8'); ?>">Ver pendência financeira</a>
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#logs'), ENT_QUOTES, 'UTF-8'); ?>">Ver logs relacionados</a>
                                 </div>
@@ -330,7 +329,6 @@ ob_start();
                             <td>
                                 <div class="inline-actions">
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId), ENT_QUOTES, 'UTF-8'); ?>">Visualizar contrato</a>
-                                    <button type="button" class="button button--ghost button--small" data-copy-text="<?= htmlspecialchars($simulatedLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link</button>
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#financeiro'), ENT_QUOTES, 'UTF-8'); ?>">Ver pendência financeira</a>
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId . '#logs'), ENT_QUOTES, 'UTF-8'); ?>">Ver logs relacionados</a>
                                 </div>

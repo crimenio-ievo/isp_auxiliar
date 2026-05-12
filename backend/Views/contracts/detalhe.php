@@ -10,6 +10,11 @@ $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : 
 $financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
 $notificationLogs = is_array($detail['notificationLogs'] ?? null) ? $detail['notificationLogs'] : [];
 $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
+$checkpoint = is_array($detail['checkpoint'] ?? null) ? $detail['checkpoint'] : [];
+$contactCorrections = array_values(array_filter(
+    is_array($detail['contactCorrections'] ?? null) ? $detail['contactCorrections'] : [],
+    static fn (mixed $item): bool => is_array($item)
+));
 $contractId = (int) ($contract['id'] ?? 0);
 $canManageContracts = !empty($canManageContracts);
 $canManageFinancial = !empty($canManageFinancial);
@@ -23,10 +28,105 @@ $returnTo = '/contratos/detalhe?id=' . $contractId;
 $evotrixLastLog = is_array($evotrixStatus['last'] ?? null) ? $evotrixStatus['last'] : [];
 $emailLastLog = is_array($emailStatus['last'] ?? null) ? $emailStatus['last'] : [];
 $mkAuthLastLog = is_array($mkAuthTicketStatus['last'] ?? null) ? $mkAuthTicketStatus['last'] : [];
+$whatsappRequestId = bin2hex(random_bytes(16));
+$emailRequestId = bin2hex(random_bytes(16));
+$financialRequestId = bin2hex(random_bytes(16));
+$fallbackEmail = 'cliente@ievo.com.br';
+$resolveEmailContext = static function (array $source) use ($fallbackEmail): array {
+    $original = strtolower(trim((string) ($source['email_original'] ?? '')));
+    $current = strtolower(trim((string) ($source['email_cliente'] ?? $source['email'] ?? '')));
+
+    if ($current === '' && $original !== '') {
+        $current = $original;
+    }
+
+    if (($current === '' || $current === $fallbackEmail) && $original !== '' && $original !== $fallbackEmail) {
+        $current = $original;
+    }
+
+    if ($original === '' && $current !== '' && $current !== $fallbackEmail) {
+        $original = $current;
+    }
+
+    if ($current === '') {
+        $current = $fallbackEmail;
+    }
+
+    return [
+        'email_original' => $original,
+        'email_cliente' => $current,
+        'has_real_email' => $current !== '' && $current !== $fallbackEmail,
+    ];
+};
+$emailContext = $resolveEmailContext($contract);
+$contractEmail = (string) ($emailContext['email_cliente'] ?? '');
+$hasRealEmail = (bool) ($emailContext['has_real_email'] ?? false);
+$displayEmail = $hasRealEmail ? $contractEmail : 'Cliente não informou e-mail';
+$displayPhone = trim((string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? ''));
+$currentPhone = trim((string) ($contract['telefone_cliente'] ?? $checkpoint['telefone_cliente'] ?? $acceptance['telefone_enviado'] ?? ''));
+$originalPhone = trim((string) ($checkpoint['telefone_original'] ?? $currentPhone));
+$contractEmailOriginal = (string) ($emailContext['email_original'] ?? '');
 
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
 $shortHash = static fn (string $value): string => $value !== '' ? substr($value, 0, 16) . '…' : '-';
+$summarizeProviderResponse = static function (mixed $value): string {
+    if (is_array($value)) {
+        $parts = [];
+
+        foreach (['status', 'message', 'detail', 'http_status', 'duration_ms', 'attempts', 'message_id', 'ticket_id'] as $key) {
+            if (!array_key_exists($key, $value) || $value[$key] === null || $value[$key] === '') {
+                continue;
+            }
+
+            $label = match ($key) {
+                'http_status' => 'HTTP ' . $value[$key],
+                'duration_ms' => $value[$key] . 'ms',
+                default => (string) $value[$key],
+            };
+            $parts[] = $label;
+        }
+
+        if (!empty($value['message_count'])) {
+            $partsCount = (int) $value['message_count'];
+            $partsLabel = $partsCount > 1 ? $partsCount . ' mensagens' : '1 mensagem';
+            $parts[] = $partsLabel;
+        }
+
+        if (!empty($value['repeated_attempt'])) {
+            $parts[] = 'tentativa repetida';
+        }
+
+        if (!empty($value['force_resend'])) {
+            $parts[] = 'reenvio autorizado';
+        }
+
+        return trim(implode(' · ', array_filter($parts, static fn (string $part): bool => trim($part) !== '')));
+    }
+
+    if (is_string($value)) {
+        $text = trim($value);
+
+        return mb_strlen($text) > 220 ? mb_substr($text, 0, 220) . '…' : $text;
+    }
+
+    return '-';
+};
+$flash = is_array($flash ?? null) ? $flash : null;
+$flashType = strtolower((string) ($flash['type'] ?? ''));
+$flashClass = match ($flashType) {
+    'error', 'danger' => 'alert--error',
+    'warning' => 'alert--warning',
+    'info', 'simulado', 'blocked', 'bloqueado' => 'alert--info',
+    default => 'alert--success',
+};
+$flashLabel = match ($flashType) {
+    'error', 'danger' => 'Erro',
+    'warning' => 'Atenção',
+    'info', 'simulado' => 'Informação',
+    'blocked', 'bloqueado' => 'Bloqueado',
+    default => 'Sucesso',
+};
 
 ob_start();
 ?>
@@ -41,6 +141,13 @@ ob_start();
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/contratos/aceites/pendentes'), ENT_QUOTES, 'UTF-8'); ?>">Ver aceites pendentes</a>
     </div>
 </section>
+
+<?php if (!empty($flash)): ?>
+    <section class="alert <?= htmlspecialchars($flashClass, ENT_QUOTES, 'UTF-8'); ?>" style="margin-bottom: 20px;">
+        <strong><?= htmlspecialchars($flashLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
+        <p><?= htmlspecialchars((string) ($flash['message'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
+    </section>
+<?php endif; ?>
 
 <?php if (!empty($moduleMessage)): ?>
     <section class="card" style="margin-bottom: 20px;">
@@ -82,33 +189,72 @@ ob_start();
     </div>
 
     <div class="hero-actions" style="margin-top: 18px;">
-        <button type="button" class="button button--ghost" data-copy-text="<?= htmlspecialchars($simulatedAcceptanceLink, ENT_QUOTES, 'UTF-8'); ?>" data-copy-label="Copiar link futuro">Copiar link futuro</button>
         <a class="button button--ghost" href="#financeiro">Ver pendência financeira</a>
         <a class="button button--ghost" href="#logs">Ver logs relacionados</a>
         <?php if ($canManageSettings): ?>
             <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=contratos'), ENT_QUOTES, 'UTF-8'); ?>">Abrir configurações</a>
         <?php endif; ?>
         <?php if ($canManageContracts && $acceptance !== []): ?>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por WhatsApp?');" class="integration-send-form">
-                <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
-                <label class="field integration-send-form__field">
-                    <span>WhatsApp usado neste envio</span>
-                    <input type="text" name="recipient_phone_override" value="<?= htmlspecialchars((string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Somente números ou número formatado">
-                    <small class="field-help">Você pode reenviar usando um contato temporário/local sem alterar o cadastro no MkAuth.</small>
-                </label>
-                <button type="submit" class="button">Enviar aceite por WhatsApp</button>
-            </form>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/email'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja realmente enviar o aceite por e-mail?');" class="integration-send-form">
-                <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
-                <label class="field integration-send-form__field">
-                    <span>E-mail usado neste envio</span>
-                    <input type="email" name="recipient_email_override" value="<?= htmlspecialchars((string) ($contract['email_cliente'] ?? $contract['email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="cliente@exemplo.com">
-                    <small class="field-help">Se o contato local foi corrigido, use este campo para reenviar sem criar um novo aceite.</small>
-                </label>
-                <button type="submit" class="button button--ghost">Enviar aceite por e-mail</button>
-            </form>
+            <section class="integration-send-panel card" style="width: 100%; margin-top: 8px;">
+                <div class="section-heading">
+                    <p class="section-heading__eyebrow">Envio do aceite ao cliente</p>
+                    <h2>Reenviar com os contatos atuais</h2>
+                </div>
+
+                <div class="summary-grid" style="margin-bottom: 0;">
+                    <div class="summary-item">
+                        <span>Contatos de envio do aceite</span>
+                        <strong>WhatsApp: <?= htmlspecialchars($currentPhone !== '' ? $currentPhone : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
+                    </div>
+                    <div class="summary-item">
+                        <span>E-mail</span>
+                        <strong><?= htmlspecialchars($hasRealEmail ? $displayEmail : 'Cliente não informou e-mail', ENT_QUOTES, 'UTF-8'); ?></strong>
+                    </div>
+                </div>
+
+                <div class="hero-actions" style="margin-top: 14px;">
+                    <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja reenviar o aceite por WhatsApp?');" class="integration-send-form" data-integration-send-form="detail-whatsapp">
+                        <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($whatsappRequestId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="force_resend" value="1">
+                        <input type="hidden" name="send_whatsapp" value="1">
+                        <input type="hidden" name="send_email" value="0">
+                        <button type="submit" class="button">Reenviar por WhatsApp</button>
+                    </form>
+
+                    <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/email'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja reenviar o aceite por e-mail?');" class="integration-send-form" data-integration-send-form="detail-email">
+                        <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($emailRequestId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="force_resend" value="1">
+                        <input type="hidden" name="send_whatsapp" value="0">
+                        <input type="hidden" name="send_email" value="1">
+                        <button type="submit" class="button button--ghost" <?= $hasRealEmail ? '' : 'disabled'; ?>>Reenviar por e-mail</button>
+                    </form>
+
+                </div>
+
+                <?php if ($contactCorrections !== []): ?>
+                    <details style="margin-top: 18px;" class="soft-card">
+                        <summary class="button button--ghost">Histórico de correções de contato</summary>
+                        <div style="padding-top: 16px;">
+                            <div class="log-list">
+                                <?php foreach (array_reverse($contactCorrections) as $correction): ?>
+                                    <article class="log-list__item">
+                                        <strong><?= htmlspecialchars(trim((string) (($correction['technician'] ?? '-') . ' · ' . implode(', ', (array) ($correction['channels'] ?? [])))), ENT_QUOTES, 'UTF-8'); ?></strong>
+                                        <p>WhatsApp: <?= htmlspecialchars((string) ($correction['original_whatsapp'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> → <?= htmlspecialchars((string) ($correction['corrected_whatsapp'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
+                                        <p>E-mail: <?= htmlspecialchars((string) ($correction['original_email'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> → <?= htmlspecialchars((string) ($correction['corrected_email'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
+                                        <p>Motivo: <?= htmlspecialchars((string) ($correction['reason'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
+                                        <p>Login: <?= htmlspecialchars((string) ($correction['login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · Contrato: <?= htmlspecialchars((string) ($correction['contract_id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · Aceite: <?= htmlspecialchars((string) ($correction['acceptance_id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
+                                        <p>IP: <?= htmlspecialchars((string) ($correction['ip_address'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($correction['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
+                                    </article>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    </details>
+                <?php endif; ?>
+            </section>
         <?php endif; ?>
     </div>
 </section>
@@ -268,9 +414,17 @@ ob_start();
                         <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
                         <button type="submit" class="button">Marcar como concluído</button>
                     </form>
-                    <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/chamado'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja abrir chamado financeiro no MkAuth?');">
+                    <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/chamado'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja abrir chamado financeiro no MkAuth?');" class="integration-send-form" data-integration-send-form="mkauth_ticket">
                         <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($financialRequestId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <label class="field integration-send-form__field integration-resend-option">
+                            <span>
+                                <input type="checkbox" name="force_resend" value="1">
+                                <strong>Abrir mesmo assim</strong>
+                            </span>
+                            <small class="field-help">Use quando já existir um chamado preparado e você quiser reabrir manualmente.</small>
+                        </label>
                         <button type="submit" class="button button--ghost">Abrir chamado financeiro no MkAuth</button>
                     </form>
                     <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/cancelar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Cancelar esta pendencia financeira?');">
@@ -305,13 +459,24 @@ ob_start();
         <div class="log-list">
             <?php if ($notificationLogs !== []): ?>
                 <?php foreach ($notificationLogs as $log): ?>
+                    <?php
+                        $providerResponse = $log['provider_response'] ?? '';
+                        $providerResponseData = is_string($providerResponse) ? json_decode($providerResponse, true) : (is_array($providerResponse) ? $providerResponse : null);
+                        $providerMode = is_array($providerResponseData) && array_key_exists('dry_run', $providerResponseData)
+                            ? ((bool) $providerResponseData['dry_run'] ? 'Simulado' : 'Real')
+                            : ($log['status'] === 'simulado' ? 'Simulado' : 'Real');
+                        $providerStatus = trim((string) ($log['status'] ?? ''));
+                        $providerResponseSummary = $summarizeProviderResponse($providerResponseData ?? $providerResponse);
+                    ?>
                     <article class="log-list__item">
-                        <strong><?= htmlspecialchars((string) ($log['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                        <p><?= htmlspecialchars((string) ($log['channel'] ?? 'whatsapp'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['provider'] ?? 'evotrix'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['recipient'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <strong><?= htmlspecialchars((string) ($log['channel'] ?? 'whatsapp'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['provider'] ?? 'evotrix'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <p>
+                            <span class="pill"><?= htmlspecialchars($providerMode, ENT_QUOTES, 'UTF-8'); ?></span>
+                            <span class="pill pill--muted" style="margin-left: 8px;"><?= htmlspecialchars($providerStatus !== '' ? $providerStatus : '-', ENT_QUOTES, 'UTF-8'); ?></span>
+                        </p>
+                        <p><?= htmlspecialchars((string) ($log['recipient'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
                         <p><?= htmlspecialchars((string) ($log['message'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
-                        <?php if (!empty($log['provider_response'])): ?>
-                            <p><strong>Resposta:</strong> <?= htmlspecialchars((string) ($log['provider_response'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
-                        <?php endif; ?>
+                        <p class="page-description integration-timeline__response"><?= htmlspecialchars($providerResponseSummary !== '' ? $providerResponseSummary : '-', ENT_QUOTES, 'UTF-8'); ?></p>
                     </article>
                 <?php endforeach; ?>
             <?php else: ?>

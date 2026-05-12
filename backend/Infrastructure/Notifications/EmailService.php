@@ -27,7 +27,8 @@ final class EmailService
         string $htmlBody,
         string $textBody,
         ?int $contractId = null,
-        ?int $acceptanceId = null
+        ?int $acceptanceId = null,
+        bool $forceResend = false
     ): array {
         $recipient = trim($recipient);
         $subject = trim($subject);
@@ -66,7 +67,13 @@ final class EmailService
             $actualRecipient
         );
 
-        if (is_array($lastAttempt) && in_array((string) ($lastAttempt['status'] ?? ''), ['simulado', 'enviado'], true)) {
+        $lastAttemptStatus = (string) ($lastAttempt['status'] ?? '');
+        $duplicateShouldBlock = !$forceResend && (
+            ($dryRun && in_array($lastAttemptStatus, ['simulado', 'enviado'], true))
+            || (!$dryRun && $lastAttemptStatus === 'enviado')
+        );
+
+        if (is_array($lastAttempt) && $duplicateShouldBlock) {
             $response = [
                 'status' => (string) ($lastAttempt['status'] ?? 'simulado'),
                 'provider' => 'smtp',
@@ -78,6 +85,7 @@ final class EmailService
                 'redirected_to_test' => $redirectedToTest,
                 'queued_at' => date('Y-m-d H:i:s'),
                 'repeated_attempt' => true,
+                'force_resend' => $forceResend,
                 'detail' => 'Ja existe um envio preparado anteriormente para este aceite.',
             ];
 
@@ -88,7 +96,7 @@ final class EmailService
                 'provider' => 'smtp',
                 'recipient' => $actualRecipient,
                 'message' => $subject,
-                'status' => (string) ($lastAttempt['status'] ?? 'simulado'),
+                'status' => $dryRun ? 'simulado' : 'enviado',
                 'provider_response' => $response,
             ]);
 
@@ -97,7 +105,7 @@ final class EmailService
 
         if ($enabled && !$dryRun) {
             try {
-                $response = $this->dispatchRealEmail($actualRecipient, $subject, $htmlBody, $textBody);
+                $response = $this->dispatchRealEmail($actualRecipient, $subject, $htmlBody, $textBody, $forceResend);
                 $response['original_recipient'] = $recipient;
                 $response['redirected_to_test'] = $redirectedToTest;
 
@@ -153,6 +161,7 @@ final class EmailService
             'redirected_to_test' => $redirectedToTest,
             'queued_at' => date('Y-m-d H:i:s'),
             'message' => 'Envio de e-mail preparado em modo seguro.',
+            'force_resend' => $forceResend,
         ];
 
         $this->notificationLogs->create([
@@ -169,7 +178,7 @@ final class EmailService
         return $response;
     }
 
-    private function dispatchRealEmail(string $recipient, string $subject, string $htmlBody, string $textBody): array
+    private function dispatchRealEmail(string $recipient, string $subject, string $htmlBody, string $textBody, bool $forceResend = false): array
     {
         $host = trim((string) ($this->config['smtp_host'] ?? ''));
         $port = (int) ($this->config['smtp_port'] ?? 587);
@@ -177,7 +186,7 @@ final class EmailService
         $password = (string) ($this->config['smtp_password'] ?? '');
         $encryption = strtolower(trim((string) ($this->config['smtp_encryption'] ?? 'tls')));
         $from = trim((string) ($this->config['smtp_from'] ?? ''));
-        $fromName = trim((string) ($this->config['smtp_from_name'] ?? 'ISP Auxiliar'));
+        $fromName = trim((string) ($this->config['provider_name'] ?? $this->config['smtp_from_name'] ?? 'nossa equipe'));
 
         if ($host === '' || $username === '' || $password === '' || $from === '') {
             throw new RuntimeException('SMTP precisa de host, usuario, senha e remetente configurados.');
@@ -257,6 +266,7 @@ final class EmailService
             'recipient' => $recipient,
             'queued_at' => date('Y-m-d H:i:s'),
             'message' => 'E-mail enviado com sucesso por SMTP autenticado.',
+            'force_resend' => $forceResend,
         ];
     }
 

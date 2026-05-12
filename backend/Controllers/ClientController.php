@@ -8,14 +8,19 @@ use App\Core\Config;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Url;
 use App\Core\View;
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
 use App\Infrastructure\Contracts\ContractRepository;
 use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Contracts\MessageTemplateRepository;
+use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
+use App\Infrastructure\MkAuth\MkAuthTicketService;
+use App\Infrastructure\Notifications\EmailService;
+use App\Infrastructure\Notifications\EvotrixService;
 
 /**
  * Fluxo de cadastro de novo cliente.
@@ -28,13 +33,17 @@ final class ClientController
     public function __construct(
         private View $view,
         private Config $config,
+        private Database $database,
         private ClientProvisioner $provisioner,
         private MkAuthDatabase $mkauthDatabase,
         private LocalRepository $localRepository,
         private ContractRepository $contractRepository,
         private ContractAcceptanceRepository $contractAcceptanceRepository,
         private FinancialTaskRepository $financialTaskRepository,
-        private MessageTemplateRepository $messageTemplateRepository
+        private MessageTemplateRepository $messageTemplateRepository,
+        private EmailService $emailService,
+        private EvotrixService $evotrixService,
+        private MkAuthTicketService $mkAuthTicketService
     ) {
     }
 
@@ -75,7 +84,7 @@ final class ClientController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'flash' => Flash::get(),
             'cities' => $cities,
             'form' => $formData,
@@ -130,7 +139,12 @@ final class ClientController
         }
 
         $draftId = $this->saveDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
-        $this->storeDraftPhotos($draftId, $request, $uploadedPhotoCount > 0 && ($existingDraftPhotos > 0 || $editingCheckpoint));
+        try {
+            $this->storeDraftPhotos($draftId, $request, $uploadedPhotoCount > 0 && ($existingDraftPhotos > 0 || $editingCheckpoint));
+        } catch (\Throwable $exception) {
+            Flash::set('error', 'Nao foi possivel salvar as fotos agora: ' . $exception->getMessage());
+            return Response::redirect('/clientes/novo?draft=' . rawurlencode($draftId));
+        }
 
         Flash::set('success', 'Dados iniciais e fotos salvos. Agora confirme o aceite e registre a assinatura.');
 
@@ -162,6 +176,9 @@ final class ClientController
         $draftRecord = $this->loadDraftRecord($draftId);
         $draft = $this->loadDraft($draftId);
         $checkpointToken = '';
+        $detectedEmail = strtolower(trim((string) ($draft['email_original'] ?? $draft['email'] ?? '')));
+        $hasRealEmail = $detectedEmail !== '' && $detectedEmail !== 'cliente@ievo.com.br';
+        $detectedPhone = preg_replace('/\D+/', '', (string) ($draft['celular'] ?? '')) ?? '';
 
         if (is_array($draftRecord)) {
             $checkpointToken = trim((string) ($draftRecord['checkpoint_token'] ?? ''));
@@ -177,7 +194,7 @@ final class ClientController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'flash' => Flash::get(),
             'draftId' => $draftId,
             'draft' => $draft,
@@ -185,6 +202,10 @@ final class ClientController
             'checkpointToken' => $checkpointToken,
             'acceptanceDateTime' => date('d/m/Y H:i'),
             'acceptanceDateIso' => date('Y-m-d H:i:s'),
+            'detectedEmail' => $detectedEmail,
+            'hasRealEmail' => $hasRealEmail,
+            'detectedPhone' => $detectedPhone,
+            'providerName' => $this->resolveProviderDisplayName(),
         ]);
 
         return Response::html($html);
@@ -206,7 +227,12 @@ final class ClientController
 
         $acceptanceData = $this->collectAcceptanceData($request);
         $data = array_merge($draft, $acceptanceData);
+        $emailContext = $this->resolveEmailContext($draft);
+        $data = array_merge($data, $emailContext);
         $errors = $this->validateAcceptance($data, $request);
+        $sendWhatsapp = $this->normalizeBoolean((string) $request->input('send_whatsapp', '1'));
+        $sendEmail = $this->normalizeBoolean((string) $request->input('send_email', '0'));
+        $sendRequestId = trim((string) $request->input('send_request_id', ''));
 
         if ($errors !== []) {
             Flash::set('error', implode(' ', $errors));
@@ -216,6 +242,29 @@ final class ClientController
             }
 
             return Response::redirect($redirect);
+        }
+
+        $hasRealEmail = (bool) ($data['has_real_email'] ?? false);
+        if (!$hasRealEmail) {
+            $sendEmail = false;
+            $sendWhatsapp = true;
+        }
+
+        if (!$sendWhatsapp && !$sendEmail) {
+            Flash::set('error', $hasRealEmail
+                ? 'Selecione pelo menos um canal de envio.'
+                : 'Sem e-mail real, o WhatsApp precisa ficar marcado para envio.');
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+        }
+
+        if ($sendEmail && !$hasRealEmail) {
+            Flash::set('error', 'Cliente nao informou e-mail real. O envio por e-mail nao esta disponivel para este aceite.');
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+        }
+
+        if ($sendRequestId !== '' && $this->isDuplicateManualSend('client:' . $draftId . ':acceptance', $sendRequestId)) {
+            Flash::set('warning', 'Este clique ja foi processado. Recarregue a pagina para reenviar mesmo assim.');
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
         }
 
         try {
@@ -228,16 +277,50 @@ final class ClientController
             $payload = $provisionResult['payload'];
             $action = (string) ($provisionResult['action'] ?? 'create');
         } catch (\Throwable $exception) {
-            $this->recordAudit('client.provision_failed', 'client_registration', null, [
-                'login' => (string) ($data['login'] ?? ''),
+            $loginValue = (string) ($data['login'] ?? '');
+            $cpfValue = (string) ($data['cpf_cnpj'] ?? '');
+            $clientAlreadyExists = false;
+
+            try {
+                $clientAlreadyExists = $this->hasClientMatchByApi('login', $loginValue) || ($cpfValue !== '' && $this->hasClientMatchByApi('cpf_cnpj', $cpfValue));
+            } catch (\Throwable) {
+                $clientAlreadyExists = false;
+            }
+
+            if (!$clientAlreadyExists) {
+                $this->recordAudit('client.provision_failed', 'client_registration', null, [
+                    'login' => $loginValue,
+                    'error' => $exception->getMessage(),
+                ], $request);
+                Flash::set(
+                    'error',
+                    'Nao foi possivel concluir o envio ao MkAuth agora: ' . $exception->getMessage() . ' Seus dados foram mantidos para nova tentativa.'
+                );
+
+                return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+            }
+
+            $data['evidence_ref'] = $data['evidence_ref'] ?? $existingEvidenceRef;
+            $data['evidence_url'] = $data['evidence_url'] ?? ($existingEvidenceRef !== ''
+                ? $this->absoluteUrl($request, '/clientes/evidencias?ref=' . rawurlencode($existingEvidenceRef))
+                : '');
+            $data['cadastro'] = date('Y-m-d');
+            $response = [
+                'status' => 'sucesso',
+                'mensagem' => 'Cliente já localizado no MkAuth. O fluxo local foi retomado após o aviso remoto.',
+            ];
+            $payload = [
+                'login' => $loginValue,
+                'nome' => (string) ($data['nome_completo'] ?? ''),
+                'cpf_cnpj' => $cpfValue,
+                'plano' => (string) ($data['plano'] ?? ''),
+            ];
+            $action = 'create';
+            $postProvisionWarnings[] = 'MkAuth retornou aviso, mas o cliente já existe no remoto e o fluxo foi retomado.';
+            $this->recordAudit('client.provision_recovered', 'client_registration', null, [
+                'login' => $loginValue,
                 'error' => $exception->getMessage(),
             ], $request);
-            Flash::set(
-                'error',
-                'Nao foi possivel concluir o envio ao MkAuth agora: ' . $exception->getMessage() . ' Seus dados foram mantidos para nova tentativa.'
-            );
-
-            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
         }
 
         $this->deleteDraftMedia($draftId);
@@ -252,26 +335,94 @@ final class ClientController
         $registrationId = $this->recordClientRegistration($data, $payload, $connectionToken);
         $this->recordEvidenceFiles($registrationId, (string) ($data['evidence_ref'] ?? ''), (string) ($evidence['folder'] ?? ''));
         $this->syncContractArtifacts($data, $payload, $registrationId, $request);
-        $connectionToken = $this->saveInstallationCheckpoint([
-            'status' => 'awaiting_connection',
-            'login' => (string) ($payload['login'] ?? ''),
-            'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
-            'plan' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
-            'form_data' => $draft,
-            'created_at' => date('Y-m-d H:i:s'),
-            'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
-            'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
-            'mkauth_message' => (string) $message,
-        ], $registrationId, $connectionToken);
+        $contractRecord = $registrationId !== null ? $this->contractRepository->findByClientId($registrationId) : null;
+        $acceptanceRecord = is_array($contractRecord) && isset($contractRecord['id'])
+            ? $this->contractAcceptanceRepository->findLatestByContractId((int) $contractRecord['id'])
+            : null;
+        $integrationResults = [];
+        $postProvisionWarnings = [];
+
+        if ($contractRecord !== null && $acceptanceRecord !== null) {
+            try {
+                $integrationResults = $this->dispatchAcceptanceChannels(
+                    $contractRecord,
+                    $acceptanceRecord,
+                    $data,
+                    $sendWhatsapp,
+                    $sendEmail,
+                    false,
+                    $request
+                );
+            } catch (\Throwable $exception) {
+                $integrationResults = [];
+                $postProvisionWarnings[] = 'Falha ao registrar o envio do aceite: ' . $exception->getMessage();
+                $this->recordAudit('client.acceptance.dispatch_failed', 'client_acceptance', (int) ($acceptanceRecord['id'] ?? null), [
+                    'contract_id' => (int) ($contractRecord['id'] ?? 0),
+                    'error' => $exception->getMessage(),
+                ], $request);
+            }
+        }
+
+        $acceptanceSendSummary = '';
+        $acceptanceSendHasError = false;
+        if ($integrationResults !== []) {
+            $summaryParts = [];
+            foreach ($integrationResults as $channel => $result) {
+                $label = match ($channel) {
+                    'whatsapp' => 'WhatsApp',
+                    'email' => 'E-mail',
+                    default => ucfirst((string) $channel),
+                };
+                $status = !empty($result['repeated_attempt']) ? 'duplicado bloqueado' : (string) ($result['status'] ?? 'simulado');
+                if ($status === 'erro') {
+                    $acceptanceSendHasError = true;
+                }
+                $summaryParts[] = $label . ': ' . $status;
+            }
+
+            $acceptanceSendSummary = ' Envios do aceite: ' . implode(' · ', $summaryParts);
+        }
+
+        try {
+            $connectionToken = $this->saveInstallationCheckpoint([
+                'status' => 'awaiting_connection',
+                'login' => (string) ($payload['login'] ?? ''),
+                'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
+                'plan' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
+                'form_data' => $draft,
+                'telefone_original' => (string) ($data['telefone_original'] ?? $data['celular'] ?? ''),
+                'telefone_cliente' => (string) ($data['telefone_cliente'] ?? $data['celular'] ?? ''),
+                'email_original' => (string) ($data['email_original'] ?? ''),
+                'email_cliente' => (string) ($data['email_cliente'] ?? $data['email'] ?? ''),
+                'has_real_email' => (bool) ($data['has_real_email'] ?? false),
+                'contact_corrections' => [],
+                'created_at' => date('Y-m-d H:i:s'),
+                'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
+                'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
+                'mkauth_message' => (string) $message,
+            ], $registrationId, $connectionToken);
+        } catch (\Throwable $exception) {
+            $postProvisionWarnings[] = 'Nao foi possivel salvar o checkpoint local agora: ' . $exception->getMessage();
+            $this->recordAudit('client.checkpoint.save_failed', 'installation_checkpoint', null, [
+                'login' => (string) ($payload['login'] ?? ''),
+                'error' => $exception->getMessage(),
+            ], $request);
+        }
         $this->recordAudit('client.provisioned', 'client_registration', $registrationId, [
             'login' => (string) ($payload['login'] ?? ''),
             'action' => $action,
             'mkauth_status' => (string) ($response['status'] ?? ''),
+            'acceptance_send' => $integrationResults,
         ], $request);
 
+        $flashType = ($response['status'] ?? 'sucesso') === 'sucesso' || ($response['status'] ?? '') === 'simulado' ? 'success' : 'error';
+        if ($acceptanceSendHasError && $flashType === 'success') {
+            $flashType = 'warning';
+        }
+
         Flash::set(
-            ($response['status'] ?? 'sucesso') === 'sucesso' || ($response['status'] ?? '') === 'simulado' ? 'success' : 'error',
-            $successLabel . ' ' . $message . ' Login: ' . ($payload['login'] ?? '-') . ' Agora valide a conexão do equipamento.' . ($evidence['summary'] !== '' ? ' ' . $evidence['summary'] : '')
+            $flashType,
+            $successLabel . ' ' . $message . ' Login: ' . ($payload['login'] ?? '-') . ' Agora valide a conexão do equipamento.' . ($evidence['summary'] !== '' ? ' ' . $evidence['summary'] : '') . $acceptanceSendSummary . (empty($postProvisionWarnings) ? '' : ' ' . implode(' ', $postProvisionWarnings))
         );
 
         return Response::redirect('/clientes/conexao?token=' . rawurlencode($connectionToken));
@@ -306,7 +457,7 @@ final class ClientController
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'flash' => $flash,
             'token' => $token,
             'record' => $record,
@@ -358,6 +509,279 @@ final class ClientController
         ], $request);
 
         Flash::set('success', 'Instalação finalizada. O login está conectado no Radius.');
+
+        return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+    }
+
+    public function correctContactAndResend(Request $request): Response
+    {
+        $token = trim((string) $request->input('token', $request->query('token', '')));
+        $record = $this->loadInstallationCheckpoint($token);
+
+        if ($record === null) {
+            Flash::set('error', 'Nao foi possivel localizar a instalação para corrigir o contato.');
+            return Response::redirect('/clientes/novo');
+        }
+
+        $login = trim((string) ($record['login'] ?? ''));
+        $acceptanceStatus = $this->resolveAcceptanceStatusForLogin($login);
+        $acceptanceState = (string) ($acceptanceStatus['status'] ?? 'pendente');
+        $acceptance = is_array($acceptanceStatus['acceptance'] ?? null) ? $acceptanceStatus['acceptance'] : null;
+        $contract = is_array($acceptanceStatus['contract'] ?? null) ? $acceptanceStatus['contract'] : null;
+
+        if ($acceptanceState === 'aceito') {
+            Flash::set('error', 'O aceite já foi concluído. A correção de contato fica bloqueada após a assinatura.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        if (!is_array($acceptance) || !isset($acceptance['id']) || !is_array($contract) || !isset($contract['id'])) {
+            Flash::set('error', 'Nao foi possivel localizar o contrato ou o aceite para essa instalação.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        $contactCorrections = $this->extractContactCorrections($record);
+        $user = $this->resolveViewUser();
+
+        if (count($contactCorrections) >= 2) {
+            Flash::set('error', 'Limite de correções atingido. Solicite apoio de um gestor.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        $currentDraft = is_array($record['form_data'] ?? null) ? $record['form_data'] : [];
+        $currentPhone = preg_replace('/\D+/', '', (string) ($record['telefone_cliente'] ?? $currentDraft['telefone_cliente'] ?? $currentDraft['celular'] ?? $contract['telefone_cliente'] ?? '')) ?? '';
+        $currentEmailContext = $this->resolveEmailContext(array_merge($contract, $currentDraft, $record));
+        $currentEmail = (string) ($currentEmailContext['email_cliente'] ?? '');
+        $currentEmailOriginal = (string) ($currentEmailContext['email_original'] ?? '');
+
+        $newPhoneInput = trim((string) $request->input('new_whatsapp', ''));
+        $newEmailInput = strtolower(trim((string) $request->input('new_email', '')));
+        $reason = trim((string) $request->input('correction_reason', ''));
+        $sendWhatsapp = $this->normalizeBoolean((string) $request->input('send_whatsapp', '0'));
+        $sendEmail = $this->normalizeBoolean((string) $request->input('send_email', '0'));
+
+        if ($reason === '') {
+            Flash::set('error', 'Informe o motivo da correção antes de reenviar.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        if (!$sendWhatsapp && !$sendEmail) {
+            Flash::set('error', 'Selecione WhatsApp, e-mail ou ambos antes de corrigir o contato.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        $updatedPhone = $currentPhone;
+        $updatedEmail = $currentEmail !== '' ? $currentEmail : 'cliente@ievo.com.br';
+        $phoneWillChange = false;
+        $emailWillChange = false;
+
+        if ($newPhoneInput !== '') {
+            $phoneDigits = preg_replace('/\D+/', '', $newPhoneInput) ?? '';
+            if (!$this->isValidPhone($phoneDigits)) {
+                Flash::set('error', 'Informe um novo WhatsApp válido com DDD.');
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+            }
+
+            if ($phoneDigits === $currentPhone) {
+                Flash::set('error', 'O novo WhatsApp precisa ser diferente do contato atual.');
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+            }
+
+            $updatedPhone = $phoneDigits;
+            $phoneWillChange = true;
+        } elseif ($sendWhatsapp) {
+            Flash::set('error', 'Informe um novo WhatsApp válido para reenviar o aceite.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        if ($newEmailInput !== '') {
+            if (!$this->isValidEmail($newEmailInput) || $newEmailInput === 'cliente@ievo.com.br') {
+                Flash::set('error', 'Informe um novo e-mail válido para o aceite.');
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+            }
+
+            if ($newEmailInput === $currentEmail) {
+                Flash::set('error', 'O novo e-mail precisa ser diferente do contato atual.');
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+            }
+
+            $updatedEmail = $newEmailInput;
+            $emailWillChange = true;
+        } elseif ($sendEmail) {
+            Flash::set('error', 'Informe um novo e-mail válido para reenviar o aceite.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        if ($updatedEmail === '' || $updatedEmail === 'cliente@ievo.com.br') {
+            if (!$sendWhatsapp) {
+                Flash::set('error', 'Sem e-mail real, o WhatsApp precisa ficar marcado para envio.');
+                return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+            }
+        }
+
+        if (!$phoneWillChange && !$emailWillChange) {
+            Flash::set('error', 'Altere ao menos um contato para registrar a correção.');
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        $correctedDraft = $currentDraft;
+        $correctedDraft['telefone_original'] = (string) ($record['telefone_original'] ?? $currentPhone);
+        $correctedDraft['telefone_cliente'] = $updatedPhone;
+        $correctedDraft['celular'] = $updatedPhone;
+        $correctedDraft['email_original'] = (string) ($record['email_original'] ?? $currentEmailOriginal);
+        $correctedDraft['email_cliente'] = $updatedEmail;
+        $correctedDraft['email'] = $updatedEmail;
+        $correctedDraft['has_real_email'] = $updatedEmail !== '' && $updatedEmail !== 'cliente@ievo.com.br';
+
+        $correctionEntry = [
+            'original_whatsapp' => $currentPhone,
+            'corrected_whatsapp' => $updatedPhone,
+            'original_email' => $currentEmail,
+            'corrected_email' => $updatedEmail,
+            'channels' => array_values(array_filter([
+                $sendWhatsapp ? 'whatsapp' : null,
+                $sendEmail ? 'email' : null,
+            ])),
+            'reason' => $reason,
+            'technician' => (string) ($user['name'] ?? $user['login'] ?? 'Operador'),
+            'technician_login' => (string) ($user['login'] ?? ''),
+            'login' => $login,
+            'contract_id' => (int) $contract['id'],
+            'acceptance_id' => (int) $acceptance['id'],
+            'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
+            'created_at' => date('Y-m-d H:i:s'),
+        ];
+
+        $contactCorrections[] = $correctionEntry;
+
+        $record = array_replace($record, [
+            'telefone_original' => (string) ($record['telefone_original'] ?? $currentPhone),
+            'telefone_cliente' => $updatedPhone,
+            'email_original' => (string) ($record['email_original'] ?? $currentEmailOriginal),
+            'email_cliente' => $updatedEmail,
+            'has_real_email' => $updatedEmail !== '' && $updatedEmail !== 'cliente@ievo.com.br',
+            'form_data' => $correctedDraft,
+            'contact_corrections' => $contactCorrections,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        try {
+            $this->saveInstallationCheckpoint(
+                $record,
+                isset($record['registration_id']) ? (int) $record['registration_id'] : null,
+                $token
+            );
+        } catch (\Throwable $exception) {
+            Flash::set('error', 'Nao foi possivel salvar a correção local agora: ' . $exception->getMessage());
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        $this->recordAudit('client.contact.corrected', 'installation_checkpoint', null, [
+            'token' => $token,
+            'login' => $login,
+            'contract_id' => (int) $contract['id'],
+            'acceptance_id' => (int) $acceptance['id'],
+            'original_whatsapp' => $currentPhone,
+            'corrected_whatsapp' => $updatedPhone,
+            'original_email' => $currentEmail,
+            'corrected_email' => $updatedEmail,
+            'channels' => $correctionEntry['channels'],
+            'reason' => $reason,
+            'technician' => $correctionEntry['technician'],
+            'ip_address' => $correctionEntry['ip_address'],
+        ], $request);
+
+        $correctionTicketSummary = null;
+        try {
+            $ticketResponse = $this->mkAuthTicketService->openFinancialTicket(
+                $this->buildCorrectionTicketPayload($correctedDraft, $contract, $correctionEntry)
+            );
+            $correctionTicketSummary = sprintf(
+                'HTTP %s · %sms%s',
+                (string) ($ticketResponse['http_status'] ?? '-'),
+                (string) ($ticketResponse['duration_ms'] ?? 0),
+                $this->resolveTicketId($ticketResponse) !== null ? ' · ID ' . $this->resolveTicketId($ticketResponse) : ''
+            );
+            $this->recordAudit('client.contact.correction.ticket.created', 'installation_checkpoint', null, [
+                'token' => $token,
+                'login' => $login,
+                'contract_id' => (int) $contract['id'],
+                'acceptance_id' => (int) $acceptance['id'],
+                'response' => $ticketResponse,
+            ], $request);
+
+            if (!empty($ticketResponse['message_fallback_used']) && !empty($ticketResponse['sis_msg_id'])) {
+                $this->recordAudit('client.contact.correction.ticket.message_inserted', 'installation_checkpoint', null, [
+                    'token' => $token,
+                    'login' => $login,
+                    'contract_id' => (int) $contract['id'],
+                    'acceptance_id' => (int) $acceptance['id'],
+                    'ticket_id' => $this->resolveTicketId($ticketResponse),
+                    'sis_msg_id' => (int) $ticketResponse['sis_msg_id'],
+                    'fallback_status' => (string) ($ticketResponse['message_fallback_status'] ?? ''),
+                ], $request);
+            } elseif (($ticketResponse['message_fallback_status'] ?? '') === 'failed') {
+                $this->recordAudit('client.contact.correction.ticket.message_failed', 'installation_checkpoint', null, [
+                    'token' => $token,
+                    'login' => $login,
+                    'contract_id' => (int) $contract['id'],
+                    'acceptance_id' => (int) $acceptance['id'],
+                    'ticket_id' => $this->resolveTicketId($ticketResponse),
+                    'error' => (string) ($ticketResponse['message_fallback_error'] ?? ''),
+                ], $request);
+            }
+        } catch (\Throwable $exception) {
+            $this->recordAudit('client.contact.correction.ticket.failed', 'installation_checkpoint', null, [
+                'token' => $token,
+                'login' => $login,
+                'contract_id' => (int) $contract['id'],
+                'acceptance_id' => (int) $acceptance['id'],
+                'error' => $exception->getMessage(),
+            ], $request);
+        }
+
+        $integrationResults = [];
+        try {
+            $integrationResults = $this->dispatchAcceptanceChannels(
+                $contract,
+                $acceptance,
+                $correctedDraft,
+                $sendWhatsapp,
+                $sendEmail,
+                true,
+                $request
+            );
+        } catch (\Throwable $exception) {
+            $this->recordAudit('client.contact.correction.dispatch_failed', 'installation_checkpoint', null, [
+                'token' => $token,
+                'login' => $login,
+                'contract_id' => (int) $contract['id'],
+                'acceptance_id' => (int) $acceptance['id'],
+                'error' => $exception->getMessage(),
+            ], $request);
+            Flash::set('warning', 'A correção foi salva, mas o reenvio apresentou um aviso: ' . $exception->getMessage());
+            return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
+        }
+
+        $summaryParts = [];
+        foreach ($integrationResults as $channel => $result) {
+            $label = match ($channel) {
+                'whatsapp' => 'WhatsApp',
+                'email' => 'E-mail',
+                default => ucfirst((string) $channel),
+            };
+            $status = !empty($result['repeated_attempt']) ? 'duplicado bloqueado' : (string) ($result['status'] ?? 'simulado');
+            $summaryParts[] = $label . ': ' . $status;
+        }
+
+        $statusMessage = 'Correção registrada com sucesso.';
+        if ($correctionTicketSummary !== null) {
+            $statusMessage .= ' Chamado MkAuth: ' . $correctionTicketSummary . '.';
+        }
+        if ($summaryParts !== []) {
+            $statusMessage .= ' Reenvio: ' . implode(' · ', $summaryParts) . '.';
+        }
+
+        Flash::set('success', $statusMessage);
 
         return Response::redirect('/clientes/conexao?token=' . rawurlencode($token));
     }
@@ -517,7 +941,7 @@ final class ClientController
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'layoutMode' => 'guest',
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
             'ref' => $ref,
             'metadata' => $metadata,
             'files' => $files,
@@ -634,28 +1058,42 @@ final class ClientController
 
     private function resolveUser(): array
     {
-        return $_SESSION['user'] ?? [
+        $user = $_SESSION['user'] ?? [
             'name' => 'Operador',
             'login' => '',
             'role' => 'Operação',
             'source' => 'fallback',
         ];
+
+        $user['login'] = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
+
+        return $user;
+    }
+
+    private function resolveViewUser(): array
+    {
+        $user = $this->resolveUser();
+        $access = $this->localRepository->accessProfileForUser($user);
+        $user['access'] = $access;
+        $user['can_manage_settings'] = $access['can_manage_settings'];
+        $user['can_access_contracts'] = $access['can_access_contracts'];
+        $user['can_manage_financial'] = $access['can_manage_financial'];
+        $user['can_manage'] = !empty($user['can_manage']) || $access['is_manager'];
+
+        if ($access['is_admin']) {
+            $user['role'] = 'admin';
+        } elseif ($access['is_manager']) {
+            $user['role'] = 'manager';
+        }
+
+        return $user;
     }
 
     private function canManageContracts(): bool
     {
-        $user = $this->resolveUser();
-        $login = strtolower(trim((string) ($user['login'] ?? '')));
-        $role = strtolower(trim((string) ($user['role'] ?? '')));
-        $permissionProfile = $this->localRepository->permissionProfile($login);
-        $managerLogins = $this->localRepository->providerSettingList('mkauth_manager_logins');
-        $contractLogins = $this->localRepository->providerSettingList('contract_access_logins');
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
 
-        return in_array($role, ['manager', 'platform_admin', 'gestor', 'admin', 'administrador'], true)
-            || !empty($user['can_manage'])
-            || ($login !== '' && (in_array($login, $managerLogins, true) || in_array($login, $contractLogins, true)))
-            || !empty($permissionProfile['gestor_admin'])
-            || !empty($permissionProfile['contratos']);
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_access_contracts']);
     }
 
     private function collectFormData(Request $request): array
@@ -707,10 +1145,9 @@ final class ClientController
             (string) $request->input('estado', ''),
             (string) $request->input('codigo_ibge', '')
         );
-        $email = strtolower(trim((string) $request->input('email', '')));
-        if ($email === '') {
-            $email = 'cliente@ievo.com.br';
-        }
+        $emailOriginal = strtolower(trim((string) $request->input('email', '')));
+        $hasRealEmail = $emailOriginal !== '' && $emailOriginal !== 'cliente@ievo.com.br';
+        $email = $hasRealEmail ? $emailOriginal : 'cliente@ievo.com.br';
         $phone = preg_replace('/\D+/', '', (string) $request->input('celular', '')) ?? '';
         $cep = preg_replace('/\D+/', '', (string) $request->input('cep', '')) ?? '';
         $operator = $this->resolveUser();
@@ -736,6 +1173,11 @@ final class ClientController
             'nome_completo' => $request->input('nome_completo', ''),
             'nome_resumido' => $request->input('nome_resumido', ''),
             'email' => $email,
+            'email_original' => $emailOriginal,
+            'email_cliente' => $email,
+            'has_real_email' => $hasRealEmail,
+            'telefone_original' => $phone,
+            'telefone_cliente' => $phone,
             'cadastro' => date('Y-m-d'),
             'cpf_cnpj' => $document,
             'celular' => $phone,
@@ -774,7 +1216,7 @@ final class ClientController
             'vencimento' => $request->input('vencimento', '05'),
             'conta_boleto' => $defaults['billing_account_id'],
             'contrato' => $defaults['contract_code'],
-            'recebe_emails' => 'sim',
+            'recebe_emails' => $hasRealEmail ? 'sim' : 'nao',
             'recebe_sms' => 'sim',
             'recebe_whatsapp' => 'sim',
             'pgcorte' => 'sim',
@@ -1216,7 +1658,7 @@ final class ClientController
             'checkpoint_token' => trim((string) ($checkpointToken ?? ($record['checkpoint_token'] ?? ''))),
             'created_at' => (string) ($record['created_at'] ?? date('Y-m-d H:i:s')),
             'updated_at' => date('Y-m-d H:i:s'),
-            'user' => $this->resolveUser(),
+            'user' => $this->resolveViewUser(),
         ]);
         $_SESSION['client_drafts'][$draftId] = $record;
         $this->persistDraftRecord($draftId, $record);
@@ -1248,7 +1690,15 @@ final class ClientController
             $uploadError = (int) ($errors[$index] ?? UPLOAD_ERR_NO_FILE);
             $tmpName = (string) ($tmpNames[$index] ?? '');
 
-            if ($uploadError !== UPLOAD_ERR_OK || !is_uploaded_file($tmpName)) {
+            if ($uploadError !== UPLOAD_ERR_OK) {
+                if ($uploadError !== UPLOAD_ERR_NO_FILE) {
+                    throw new \RuntimeException($this->describeUploadError($uploadError));
+                }
+
+                continue;
+            }
+
+            if (!is_uploaded_file($tmpName)) {
                 continue;
             }
 
@@ -1597,7 +2047,15 @@ final class ClientController
             $uploadError = (int) ($errors[$index] ?? UPLOAD_ERR_NO_FILE);
             $tmpName = (string) ($tmpNames[$index] ?? '');
 
-            if ($uploadError !== UPLOAD_ERR_OK || !is_uploaded_file($tmpName)) {
+            if ($uploadError !== UPLOAD_ERR_OK) {
+                if ($uploadError !== UPLOAD_ERR_NO_FILE) {
+                    throw new \RuntimeException($this->describeUploadError($uploadError));
+                }
+
+                continue;
+            }
+
+            if (!is_uploaded_file($tmpName)) {
                 continue;
             }
 
@@ -1760,7 +2218,7 @@ final class ClientController
 
     private function isValidLogin(string $login): bool
     {
-        return (bool) preg_match('/^[a-z0-9_-]+$/', $login);
+        return (bool) preg_match('/^[a-z0-9_.-]+$/', $login);
     }
 
     private function sanitizeLogin(string $login): string
@@ -1768,7 +2226,7 @@ final class ClientController
         $login = trim($login);
         $login = $this->removeAccents($login);
         $login = strtolower($login);
-        $login = preg_replace('/[^a-z0-9_-]+/', '_', $login) ?? '';
+        $login = preg_replace('/[^a-z0-9_.-]+/', '_', $login) ?? '';
         $login = preg_replace('/_+/', '_', $login) ?? $login;
 
         return trim($login, '_');
@@ -1779,6 +2237,20 @@ final class ClientController
         $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
 
         return $converted === false ? $value : $converted;
+    }
+
+    private function describeUploadError(int $error): string
+    {
+        return match ($error) {
+            UPLOAD_ERR_INI_SIZE => 'A foto excede o limite permitido pelo servidor.',
+            UPLOAD_ERR_FORM_SIZE => 'A foto excede o limite permitido pelo formulario.',
+            UPLOAD_ERR_PARTIAL => 'A foto foi enviada parcialmente. Tente novamente.',
+            UPLOAD_ERR_NO_FILE => 'Nenhuma foto foi enviada.',
+            UPLOAD_ERR_NO_TMP_DIR => 'O servidor nao encontrou a pasta temporaria de upload.',
+            UPLOAD_ERR_CANT_WRITE => 'O servidor nao conseguiu salvar a foto recebida.',
+            UPLOAD_ERR_EXTENSION => 'Um recurso do servidor bloqueou o upload da foto.',
+            default => 'Nao foi possivel processar a foto enviada.',
+        };
     }
 
     private function decodeDataUrl(string $dataUrl): ?string
@@ -2014,6 +2486,8 @@ final class ClientController
             ];
         }
 
+        $contract = $this->hydrateContractCommunicationDataByLogin($contract);
+
         $acceptance = null;
 
         try {
@@ -2038,6 +2512,72 @@ final class ClientController
             'acceptance' => $acceptance,
             'contract' => $contract,
         ];
+    }
+
+    private function hydrateContractCommunicationDataByLogin(array $contract): array
+    {
+        $login = trim((string) ($contract['mkauth_login'] ?? ''));
+
+        if ($login === '' || !$this->tableExists('installation_checkpoints')) {
+            return $contract;
+        }
+
+        try {
+            $checkpoint = $this->database->fetchOne(
+                'SELECT payload_json
+                 FROM installation_checkpoints
+                 WHERE mkauth_login = :login
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT 1',
+                ['login' => $login]
+            );
+        } catch (\Throwable) {
+            $checkpoint = null;
+        }
+
+        if (!is_array($checkpoint) || empty($checkpoint['payload_json'])) {
+            return $contract;
+        }
+
+        $payload = json_decode((string) $checkpoint['payload_json'], true);
+        $payload = is_array($payload) ? $payload : [];
+        $formData = is_array($payload['form_data'] ?? null) ? $payload['form_data'] : [];
+        $emailContext = $this->resolveEmailContext(array_merge($payload, $formData));
+        $phoneCurrent = preg_replace('/\D+/', '', (string) ($formData['telefone_cliente'] ?? $formData['celular'] ?? $contract['telefone_cliente'] ?? '')) ?? '';
+        $phoneOriginal = preg_replace('/\D+/', '', (string) ($formData['telefone_original'] ?? $contract['telefone_cliente'] ?? $phoneCurrent)) ?? '';
+
+        if ($phoneCurrent === '' && $phoneOriginal !== '') {
+            $phoneCurrent = $phoneOriginal;
+        }
+
+        if ($phoneOriginal === '' && $phoneCurrent !== '') {
+            $phoneOriginal = $phoneCurrent;
+        }
+
+        if (!isset($contract['email']) || trim((string) $contract['email']) === '') {
+            $contract['email'] = trim((string) ($formData['email'] ?? ''));
+        }
+
+        if (!isset($contract['email_cliente']) || trim((string) $contract['email_cliente']) === '') {
+            $contract['email_cliente'] = (string) ($emailContext['email_cliente'] ?? 'cliente@ievo.com.br');
+        }
+
+        if (!isset($contract['email_original']) || trim((string) $contract['email_original']) === '') {
+            $contract['email_original'] = (string) ($emailContext['email_original'] ?? '');
+        }
+
+        if ($phoneCurrent !== '') {
+            $contract['telefone_cliente'] = $phoneCurrent;
+        }
+
+        if ($phoneOriginal !== '') {
+            $contract['telefone_original'] = $phoneOriginal;
+        }
+
+        $contract['has_real_email'] = (bool) ($emailContext['has_real_email'] ?? false);
+        $contract['email_cliente'] = (string) ($emailContext['email_cliente'] ?? '');
+
+        return $contract;
     }
 
     private function recordClientRegistration(array $data, array $payload, string $connectionToken): ?int
@@ -2112,18 +2652,22 @@ final class ClientController
                 throw new \RuntimeException('Contrato não pôde ser identificado após a gravação.');
             }
 
+            $contractData['contract_id'] = $contractId;
+
             $termBody = $this->buildContractTermBody($contractData);
             $termHash = hash('sha256', $termBody);
             $acceptanceData = $this->buildAcceptanceData($contractId, $data, $contractData, $termHash, $request);
 
             $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+            $acceptanceId = 0;
             if (is_array($acceptance) && isset($acceptance['id'])) {
+                $acceptanceId = (int) $acceptance['id'];
                 $existingTokenHash = trim((string) ($acceptance['token_hash'] ?? ''));
                 if ($existingTokenHash !== '') {
                     $acceptanceData['token_hash'] = $existingTokenHash;
                 }
-                $this->contractAcceptanceRepository->updateById((int) $acceptance['id'], $acceptanceData);
-                $this->recordAudit('contract.acceptance.updated', 'contract_acceptance', (int) $acceptance['id'], [
+                $this->contractAcceptanceRepository->updateById($acceptanceId, $acceptanceData);
+                $this->recordAudit('contract.acceptance.updated', 'contract_acceptance', $acceptanceId, [
                     'login' => (string) $contractData['mkauth_login'],
                     'contract_id' => $contractId,
                     'status' => (string) $acceptanceData['status'],
@@ -2139,13 +2683,36 @@ final class ClientController
                 }
             }
 
+            if ($acceptanceId > 0) {
+                $contractData['acceptance_id'] = $acceptanceId;
+            }
+
+            $financialTaskCreated = false;
+            $financialTaskId = null;
+
             if (($contractData['status_financeiro'] ?? 'pendente_lancamento') === 'pendente_lancamento') {
                 $financialTaskData = $this->buildFinancialTaskData($contractId, $contractData);
                 $financialTask = $this->financialTaskRepository->findByContractId($contractId);
 
                 if (is_array($financialTask) && isset($financialTask['id'])) {
-                    $this->financialTaskRepository->updateById((int) $financialTask['id'], $financialTaskData);
-                    $this->recordAudit('contract.financial_task.updated', 'financial_task', (int) $financialTask['id'], [
+                    $financialTaskId = (int) $financialTask['id'];
+                    if ($this->hasAutomaticFinancialTicket($contractId, $financialTaskId)) {
+                        $existingDescription = trim((string) ($financialTask['descricao'] ?? ''));
+                        $existingStatus = trim((string) ($financialTask['status'] ?? ''));
+
+                        if ($existingStatus !== '') {
+                            $financialTaskData['status'] = $existingStatus;
+                        }
+
+                        if ($existingDescription !== '' && str_contains($existingDescription, 'Chamado financeiro automatizado')) {
+                            $baseDescription = trim((string) ($financialTaskData['descricao'] ?? ''));
+                            $financialTaskData['descricao'] = $baseDescription === ''
+                                ? $existingDescription
+                                : $baseDescription . "\n\n" . $existingDescription;
+                        }
+                    }
+                    $this->financialTaskRepository->updateById($financialTaskId, $financialTaskData);
+                    $this->recordAudit('contract.financial_task.updated', 'financial_task', $financialTaskId, [
                         'login' => (string) $contractData['mkauth_login'],
                         'contract_id' => $contractId,
                         'status' => (string) $financialTaskData['status'],
@@ -2153,12 +2720,24 @@ final class ClientController
                 } else {
                     $taskId = $this->financialTaskRepository->create($financialTaskData) ?? 0;
                     if ($taskId > 0) {
+                        $financialTaskCreated = true;
+                        $financialTaskId = $taskId;
                         $this->recordAudit('contract.financial_task.created', 'financial_task', $taskId, [
                             'login' => (string) $contractData['mkauth_login'],
                             'contract_id' => $contractId,
                             'status' => (string) $financialTaskData['status'],
                         ], $request);
                     }
+                }
+            }
+
+            if ($registrationId !== null && $this->normalizeBoolean((string) $this->config->get('contracts.mkauth_ticket.auto_create', '0'))) {
+                $financialTask = $financialTaskId !== null
+                    ? $this->financialTaskRepository->findById($financialTaskId)
+                    : $this->financialTaskRepository->findByContractId($contractId);
+
+                if (is_array($financialTask) && isset($financialTask['id']) && !$this->hasAutomaticFinancialTicket($contractId, (int) $financialTask['id'])) {
+                    $this->dispatchAutomaticFinancialTicket($contractId, $contractData, (int) $financialTask['id'], $request);
                 }
             }
         } catch (\Throwable $exception) {
@@ -2258,6 +2837,8 @@ final class ClientController
             'client_id' => $registrationId,
             'mkauth_login' => $login,
             'nome_cliente' => $nome,
+            'email_cliente' => (string) ($data['email_original'] ?? $data['email'] ?? ''),
+            'has_real_email' => (bool) ($data['has_real_email'] ?? false),
             'telefone_cliente' => $telefone,
             'tipo_adesao' => $tipoAdesao,
             'valor_adesao' => $valorAdesao,
@@ -2322,6 +2903,395 @@ final class ClientController
         ];
     }
 
+    private function buildCorrectionTicketPayload(array $draft, array $contract, array $correction): array
+    {
+        $login = trim((string) ($contract['mkauth_login'] ?? $draft['login'] ?? ''));
+        $clientName = trim((string) ($contract['nome_cliente'] ?? $draft['nome_completo'] ?? 'Cliente'));
+        $phoneOld = trim((string) ($correction['original_whatsapp'] ?? ''));
+        $phoneNew = trim((string) ($correction['corrected_whatsapp'] ?? ''));
+        $emailOld = trim((string) ($correction['original_email'] ?? ''));
+        $emailNew = trim((string) ($correction['corrected_email'] ?? ''));
+        $reason = trim((string) ($correction['reason'] ?? ''));
+        $channels = is_array($correction['channels'] ?? null) ? $correction['channels'] : [];
+        $channelLabel = $channels !== []
+            ? implode(', ', array_map(static fn (string $channel): string => ucfirst($channel), $channels))
+            : '-';
+
+        $providerName = $this->resolveProviderDisplayName();
+        $description = implode("\n", array_filter([
+            'Solicitação automática de ' . $providerName . '.',
+            '',
+            'O técnico corrigiu o contato durante a etapa de aceite.',
+            '',
+            'Login: ' . $login,
+            'Cliente: ' . $clientName,
+            '',
+            'WhatsApp anterior: ' . ($phoneOld !== '' ? $phoneOld : '-'),
+            'WhatsApp corrigido: ' . ($phoneNew !== '' ? $phoneNew : '-'),
+            '',
+            'E-mail anterior: ' . ($emailOld !== '' ? $emailOld : '-'),
+            'E-mail corrigido: ' . ($emailNew !== '' ? $emailNew : '-'),
+            '',
+            'Canal de reenvio: ' . $channelLabel,
+            'Motivo informado pelo técnico:',
+            $reason !== '' ? $reason : '-',
+            '',
+            'Ação solicitada:',
+            'Conferir e atualizar o cadastro no MkAuth, se proceder.',
+            '',
+            'Importante:',
+            'O aceite foi reenviado para o contato corrigido, mantendo o mesmo token e evidência da alteração.',
+        ]));
+
+        return [
+            'login' => $login,
+            'nome' => $clientName,
+            'email' => (string) ($emailNew !== '' ? $emailNew : ($contract['email_cliente'] ?? $contract['email'] ?? $this->config->get('email.smtp_from', ''))),
+            'telefone' => $phoneNew !== '' ? $phoneNew : (string) ($contract['telefone_cliente'] ?? ''),
+            'assunto' => 'Cadastro - Corrigir Dados',
+            'prioridade' => (string) $this->config->get('contracts.mkauth_ticket.priority', 'normal'),
+            'descricao' => $description,
+            'observacao' => $description,
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractContactCorrections(array $record): array
+    {
+        $corrections = is_array($record['contact_corrections'] ?? null) ? $record['contact_corrections'] : [];
+
+        return array_values(array_filter($corrections, static fn (mixed $item): bool => is_array($item)));
+    }
+
+    private function countContactCorrections(array $record): int
+    {
+        return count($this->extractContactCorrections($record));
+    }
+
+    private function dispatchAcceptanceChannels(
+        array $contract,
+        array $acceptance,
+        array $draft,
+        bool $sendWhatsapp,
+        bool $sendEmail,
+        bool $forceResend,
+        Request $request
+    ): array {
+        $results = [];
+        $contractId = (int) ($contract['id'] ?? 0);
+        $acceptanceId = (int) ($acceptance['id'] ?? 0);
+        $phone = preg_replace('/\D+/', '', (string) ($draft['telefone_cliente'] ?? $draft['celular'] ?? $contract['telefone_cliente'] ?? '')) ?? '';
+        $emailContext = $this->resolveEmailContext(array_merge($contract, $draft));
+        $emailRecipient = strtolower(trim((string) ($emailContext['email_cliente'] ?? '')));
+        $hasRealEmail = (bool) ($emailContext['has_real_email'] ?? false);
+
+        if ($sendWhatsapp && $phone !== '') {
+            $messages = $this->buildAcceptanceWhatsappMessages($draft, $contract, $acceptance);
+            $response = $this->evotrixService->sendMessage($phone, $messages, $contractId, $acceptanceId, $forceResend);
+            $results['whatsapp'] = $response;
+            $this->recordAudit(
+                !empty($response['repeated_attempt']) ? 'client.acceptance.whatsapp.duplicate_attempt' : ((string) ($response['status'] ?? '') === 'erro' ? 'client.acceptance.whatsapp.failed' : 'client.acceptance.whatsapp.sent'),
+                'client_acceptance',
+                $acceptanceId,
+                [
+                    'contract_id' => $contractId,
+                    'recipient' => $phone,
+                    'result' => $response,
+                ],
+                $request
+            );
+        }
+
+        if ($sendEmail && $hasRealEmail) {
+            [$subject, $htmlBody, $textBody] = $this->buildAcceptanceEmailMessage($draft, $contract, $acceptance);
+            $response = $this->emailService->sendAcceptanceEmail($emailRecipient, $subject, $htmlBody, $textBody, $contractId, $acceptanceId, $forceResend);
+            $results['email'] = $response;
+            $this->recordAudit(
+                !empty($response['repeated_attempt']) ? 'client.acceptance.email.duplicate_attempt' : ((string) ($response['status'] ?? '') === 'erro' ? 'client.acceptance.email.failed' : 'client.acceptance.email.sent'),
+                'client_acceptance',
+                $acceptanceId,
+                [
+                    'contract_id' => $contractId,
+                    'recipient' => $emailRecipient,
+                    'result' => $response,
+                ],
+                $request
+            );
+        }
+
+        return $results;
+    }
+
+    private function dispatchAutomaticFinancialTicket(int $contractId, array $contractData, int $taskId, Request $request): void
+    {
+        try {
+            $response = $this->mkAuthTicketService->openFinancialTicket(
+                $this->buildFinancialTicketPayload($contractData, $taskId)
+            );
+
+            $summary = sprintf(
+                'HTTP %s · %sms%s',
+                (string) ($response['http_status'] ?? '-'),
+                (string) ($response['duration_ms'] ?? 0),
+                $this->resolveTicketId($response) !== null ? ' · ID ' . $this->resolveTicketId($response) : ''
+            );
+            $this->financialTaskRepository->appendSystemNote(
+                $taskId,
+                '[' . date('Y-m-d H:i:s') . '] Chamado financeiro automatizado ' . (($response['dry_run'] ?? true) ? 'simulado' : 'aberto') . ' no MkAuth. Endpoint: ' . (string) ($response['endpoint'] ?? '/api/chamado/inserir') . '. ' . $summary,
+                'em_andamento'
+            );
+            $this->recordAudit('client.financial_task.ticket.auto_created', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'response' => $response,
+            ], $request);
+
+            if (!empty($response['message_fallback_used']) && !empty($response['sis_msg_id'])) {
+                $this->recordAudit('client.financial_task.ticket.message_inserted', 'financial_task', $taskId, [
+                    'contract_id' => $contractId,
+                    'ticket_id' => $this->resolveTicketId($response),
+                    'sis_msg_id' => (int) $response['sis_msg_id'],
+                    'fallback_status' => (string) ($response['message_fallback_status'] ?? ''),
+                ], $request);
+            } elseif (($response['message_fallback_status'] ?? '') === 'failed') {
+                $this->recordAudit('client.financial_task.ticket.message_failed', 'financial_task', $taskId, [
+                    'contract_id' => $contractId,
+                    'ticket_id' => $this->resolveTicketId($response),
+                    'error' => (string) ($response['message_fallback_error'] ?? ''),
+                ], $request);
+            }
+        } catch (\Throwable $exception) {
+            $this->financialTaskRepository->appendSystemNote(
+                $taskId,
+                '[' . date('Y-m-d H:i:s') . '] Falha ao abrir chamado financeiro automatico: ' . $exception->getMessage()
+            );
+            $this->recordAudit('client.financial_task.ticket.auto_failed', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'error' => $exception->getMessage(),
+            ], $request);
+        }
+    }
+
+    private function resolveTicketId(array $response): ?string
+    {
+        foreach (['ticket_id', 'chamado', 'chamado_id'] as $key) {
+            $value = $response[$key] ?? null;
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
+    }
+
+    private function hasAutomaticFinancialTicket(int $contractId, ?int $taskId = null): bool
+    {
+        try {
+            $logs = $this->localRepository->auditLogsForContract($contractId, null, $taskId, null, 100);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        foreach ($logs as $log) {
+            if ((string) ($log['action'] ?? '') === 'client.financial_task.ticket.auto_created') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function buildAcceptanceWhatsappMessages(array $draft, array $contract, array $acceptance): array
+    {
+        $company = $this->resolveProviderDisplayName();
+        $customer = trim((string) ($draft['nome_completo'] ?? $contract['nome_cliente'] ?? 'Cliente'));
+        $technician = $this->resolveTechnicianDisplayName($contract, $draft);
+        $link = $this->buildAcceptanceLink($acceptance);
+        $ttl = (string) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48);
+        $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
+        $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
+
+        $first = "Olá, {$customer}! 👋\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$technician}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
+
+        return [
+            trim($first),
+            $link,
+        ];
+    }
+
+    private function buildAcceptanceEmailMessage(array $draft, array $contract, array $acceptance): array
+    {
+        $company = $this->resolveProviderDisplayName();
+        $customer = trim((string) ($draft['nome_completo'] ?? $contract['nome_cliente'] ?? 'Cliente'));
+        $technician = $this->resolveTechnicianDisplayName($contract, $draft);
+        $link = $this->buildAcceptanceLink($acceptance);
+        $ttl = (string) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48);
+        $subject = 'Aceite digital do contrato - ' . $company;
+        $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
+        $companyClosing = $company === 'nossa equipe' ? 'Nossa equipe' : 'Equipe ' . $company;
+        $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
+        $text = "Olá, {$customer}!\n\nAqui é {$companyOpening}.\n\nSeu cadastro foi realizado pelo técnico {$technician}.\n\nPara concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:\n\n{$link}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
+        $html = '<p>Olá, <strong>' . htmlspecialchars($customer, ENT_QUOTES, 'UTF-8') . '</strong>!</p>'
+            . '<p>Aqui é ' . htmlspecialchars($companyOpening, ENT_QUOTES, 'UTF-8') . '.</p>'
+            . '<p>Seu cadastro foi realizado pelo técnico ' . htmlspecialchars($technician, ENT_QUOTES, 'UTF-8') . '.</p>'
+            . '<p>Para concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:</p>'
+            . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>'
+            . '<p>Este link é pessoal, seguro e expira em ' . htmlspecialchars($ttl, ENT_QUOTES, 'UTF-8') . ' horas.</p>'
+            . '<p>Se tiver qualquer dúvida, ' . htmlspecialchars($supportLine, ENT_QUOTES, 'UTF-8') . ' antes de confirmar.</p>'
+            . '<p><strong>Atenciosamente,<br>' . htmlspecialchars($companyClosing, ENT_QUOTES, 'UTF-8') . '</strong></p>';
+
+        return [$subject, $html, $text];
+    }
+
+    private function buildAcceptanceLink(array $acceptance): string
+    {
+        $tokenHash = trim((string) ($acceptance['token_hash'] ?? ''));
+
+        if ($tokenHash === '') {
+            return Url::absolute('/aceite/indisponivel');
+        }
+
+        return Url::absolute('/aceite/' . rawurlencode($tokenHash));
+    }
+
+    private function buildFinancialTicketPayload(array $contractData, ?int $taskId = null): array
+    {
+        $providerName = $this->resolveProviderDisplayName();
+        $tipoAdesao = strtolower(trim((string) ($contractData['tipo_adesao'] ?? 'cheia')));
+        $observacaoAdesao = trim((string) ($contractData['observacao_adesao'] ?? ''));
+        $autorizadoPor = trim((string) ($contractData['beneficio_concedido_por'] ?? ''));
+        $assunto = $tipoAdesao === 'isenta'
+            ? 'Financeiro - Conferir Adesao Isenta'
+            : 'Financeiro - Lancar Adesao';
+        $valorAdesao = $this->normalizeMoney((string) ($contractData['valor_adesao'] ?? '0'));
+        $parcelas = max(1, (int) ($contractData['parcelas_adesao'] ?? 1));
+        $valorParcela = $parcelas > 0 ? ($valorAdesao / $parcelas) : 0.0;
+        $aceiteId = (int) ($contractData['acceptance_id'] ?? 0);
+        $observacaoNormalizada = strtolower(trim(preg_replace('/\s+/', ' ', str_replace(["\r", "\n"], ' ', $observacaoAdesao)) ?? ''));
+        $autorizadoNormalizado = strtolower(trim((string) $autorizadoPor));
+        $observacaoExtra = $observacaoAdesao !== '' && $observacaoNormalizada !== '' && $observacaoNormalizada !== $autorizadoNormalizado && !str_starts_with($observacaoNormalizada, 'autorizado por:') ? $observacaoAdesao : '';
+
+        $description = implode("\n", array_filter([
+            'Solicitação automática de ' . $providerName . '.',
+            '',
+            'Ação necessária: conferir e lançar manualmente a adesão deste cliente, se proceder.',
+            '',
+            'Login: ' . (string) ($contractData['mkauth_login'] ?? '-'),
+            'Cliente: ' . (string) ($contractData['nome_cliente'] ?? '-'),
+            '',
+            'Tipo de adesão: ' . $tipoAdesao,
+            'Valor total da adesão: R$ ' . number_format($valorAdesao, 2, ',', '.'),
+            'Parcelas: ' . $parcelas . 'x de R$ ' . number_format($valorParcela, 2, ',', '.'),
+            'Vencimento da primeira parcela: ' . (string) ($contractData['vencimento_primeira_parcela'] ?? '-'),
+            '',
+            'Autorizado por: ' . ($autorizadoPor !== '' ? $autorizadoPor : '-'),
+            $observacaoExtra !== '' ? 'Observação da adesão: ' . $observacaoExtra : null,
+            'Contrato ID: ' . (string) ($contractData['contract_id'] ?? 0),
+            'Aceite ID: ' . ($aceiteId > 0 ? (string) $aceiteId : '-'),
+            'Tarefa financeira ID: ' . (string) ($taskId ?? 0),
+        ]));
+
+        return [
+            'login' => (string) ($contractData['mkauth_login'] ?? ''),
+            'nome' => (string) ($contractData['nome_cliente'] ?? ''),
+            'email' => (string) ($contractData['email_cliente'] ?? $contractData['email'] ?? $this->config->get('email.smtp_from', '')),
+            'telefone' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'assunto' => $assunto,
+            'prioridade' => (string) $this->config->get('contracts.mkauth_ticket.priority', 'normal'),
+            'descricao' => $description,
+            'msg' => $description,
+            'observacao' => $description,
+        ];
+    }
+
+    private function resolveProviderDisplayName(): string
+    {
+        try {
+            $provider = $this->localRepository->currentProvider();
+            if (is_array($provider) && trim((string) ($provider['name'] ?? '')) !== '') {
+                $providerName = trim((string) $provider['name']);
+                if (!in_array(strtolower($providerName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+                    return $providerName;
+                }
+            }
+        } catch (\Throwable) {
+            // Fallback abaixo.
+        }
+
+        $appName = trim((string) $this->config->get('app.name', ''));
+        if ($appName !== '' && !in_array(strtolower($appName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+            return $appName;
+        }
+
+        return 'nossa equipe';
+    }
+
+    private function resolveTechnicianDisplayName(array $contract, array $draft = []): string
+    {
+        $candidates = [
+            (string) ($contract['created_by'] ?? ''),
+            (string) ($contract['tecnico_nome'] ?? ''),
+            (string) ($contract['tecnico'] ?? ''),
+            (string) ($contract['accepted_by'] ?? ''),
+            (string) ($draft['beneficio_concedido_por'] ?? ''),
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        $userName = trim((string) ($_SESSION['user']['name'] ?? ''));
+
+        return $userName !== '' ? $userName : 'Equipe técnica';
+    }
+
+    private function isDuplicateManualSend(string $scope, string $requestId): bool
+    {
+        $requestId = trim($requestId);
+        if ($requestId === '') {
+            return false;
+        }
+
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            @session_start();
+        }
+
+        if (!isset($_SESSION['manual_send_request_ids']) || !is_array($_SESSION['manual_send_request_ids'])) {
+            $_SESSION['manual_send_request_ids'] = [];
+        }
+
+        $now = time();
+        $locks = $_SESSION['manual_send_request_ids'][$scope] ?? [];
+        if (!is_array($locks)) {
+            $locks = [];
+        }
+
+        $pruned = [];
+        foreach ($locks as $storedRequestId => $storedAt) {
+            if (!is_string($storedRequestId) || trim($storedRequestId) === '') {
+                continue;
+            }
+
+            $timestamp = (int) $storedAt;
+            if (($now - $timestamp) <= 3600) {
+                $pruned[$storedRequestId] = $timestamp;
+            }
+        }
+
+        if (array_key_exists($requestId, $pruned)) {
+            $_SESSION['manual_send_request_ids'][$scope] = $pruned;
+            return true;
+        }
+
+        $pruned[$requestId] = $now;
+        $_SESSION['manual_send_request_ids'][$scope] = $pruned;
+        return false;
+    }
+
     private function buildContractTermBody(array $contractData): string
     {
         $nome = (string) ($contractData['nome_cliente'] ?? '');
@@ -2335,8 +3305,11 @@ final class ClientController
         $autorizadoPor = trim((string) ($contractData['beneficio_concedido_por'] ?? ''));
         $observacao = (string) ($contractData['observacao_adesao'] ?? '');
 
+        $providerName = $this->resolveProviderDisplayName();
+        $contractTitle = $providerName === 'nossa equipe' ? 'Contrato digital da nossa equipe' : 'Contrato digital ' . $providerName;
+
         return trim(implode("\n", [
-            'CONTRATO DIGITAL ISP AUXILIAR',
+            $contractTitle,
             'Cliente: ' . $nome,
             'Login: ' . $login,
             'Telefone: ' . $telefone,
@@ -2695,6 +3668,8 @@ final class ClientController
 
         $payload = json_decode((string) ($checkpoint['payload_json'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
+        $formData = is_array($payload['form_data'] ?? null) ? $payload['form_data'] : [];
+        $emailContext = $this->resolveEmailContext($formData);
 
         return array_replace($payload, [
             'token' => (string) ($checkpoint['token'] ?? ($payload['token'] ?? '')),
@@ -2702,7 +3677,66 @@ final class ClientController
             'login' => (string) ($checkpoint['mkauth_login'] ?? ($payload['login'] ?? '')),
             'updated_at' => (string) ($checkpoint['updated_at'] ?? ($payload['updated_at'] ?? '')),
             'created_at' => (string) ($checkpoint['created_at'] ?? ($payload['created_at'] ?? '')),
+            'email_original' => (string) ($emailContext['email_original'] ?? ''),
+            'email_cliente' => (string) ($emailContext['email_cliente'] ?? 'cliente@ievo.com.br'),
+            'has_real_email' => (bool) ($emailContext['has_real_email'] ?? false),
         ]);
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $table = trim($table);
+
+        if ($table === '') {
+            return false;
+        }
+
+        try {
+            $result = $this->database->fetchOne('SHOW TABLES LIKE :table_name', ['table_name' => $table]);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return is_array($result);
+    }
+
+    private function normalizeBoolean(string $value): bool
+    {
+        $value = strtolower(trim($value));
+
+        return in_array($value, ['1', 'true', 'yes', 'sim', 'on'], true);
+    }
+
+    /**
+     * @return array{email_original:string,email_cliente:string,has_real_email:bool}
+     */
+    private function resolveEmailContext(array $source): array
+    {
+        $fallbackEmail = 'cliente@ievo.com.br';
+        $original = strtolower(trim((string) ($source['email_original'] ?? '')));
+        $current = strtolower(trim((string) ($source['email_cliente'] ?? $source['email'] ?? '')));
+
+        if ($current === '' && $original !== '') {
+            $current = $original;
+        }
+
+        if (($current === '' || $current === $fallbackEmail) && $original !== '' && $original !== $fallbackEmail) {
+            $current = $original;
+        }
+
+        if ($original === '' && $current !== '' && $current !== $fallbackEmail) {
+            $original = $current;
+        }
+
+        if ($current === '') {
+            $current = $fallbackEmail;
+        }
+
+        return [
+            'email_original' => $original,
+            'email_cliente' => $current,
+            'has_real_email' => $current !== '' && $current !== $fallbackEmail,
+        ];
     }
 
     private function projectRootPath(): string

@@ -90,6 +90,11 @@ final class LocalRepository
         return $settings;
     }
 
+    public function normalizeLogin(string $login): string
+    {
+        return strtolower(trim($login));
+    }
+
     public function providerSetting(string $key, string $default = ''): string
     {
         $key = trim($key);
@@ -114,7 +119,7 @@ final class LocalRepository
         $normalized = [];
 
         foreach ($items as $item) {
-            $login = strtolower(trim((string) $item));
+            $login = $this->normalizeLogin((string) $item);
             if ($login === '') {
                 continue;
             }
@@ -144,7 +149,7 @@ final class LocalRepository
                 continue;
             }
 
-            $login = strtolower(trim((string) ($entry['login'] ?? '')));
+            $login = $this->normalizeLogin((string) ($entry['login'] ?? ''));
             if ($login === '') {
                 continue;
             }
@@ -164,7 +169,7 @@ final class LocalRepository
 
     public function permissionProfile(string $login): array
     {
-        $login = strtolower(trim($login));
+        $login = $this->normalizeLogin($login);
         if ($login === '') {
             return [];
         }
@@ -176,6 +181,43 @@ final class LocalRepository
         }
 
         return [];
+    }
+
+    public function accessProfileForUser(array $user): array
+    {
+        $login = $this->normalizeLogin((string) ($user['login'] ?? ''));
+        $role = $this->normalizeLogin((string) ($user['role'] ?? ''));
+        $permissionProfile = $this->permissionProfile($login);
+
+        $managerLogins = $this->providerSettingList('mkauth_manager_logins');
+        $singleManager = $this->normalizeLogin($this->providerSetting('mkauth_manager_login', ''));
+        if ($singleManager !== '') {
+            $managerLogins[] = $singleManager;
+        }
+
+        $adminLogins = $this->providerSettingList('admin_access_logins');
+        $settingsLogins = $this->providerSettingList('settings_access_logins');
+        $contractLogins = $this->providerSettingList('contract_access_logins');
+        $financialLogins = $this->providerSettingList('financial_access_logins');
+
+        $isAdminRole = in_array($role, ['platform_admin', 'admin', 'administrador'], true);
+        $isManagerRole = in_array($role, ['manager', 'gestor'], true) || !empty($user['can_manage']);
+
+        $isAdmin = $isAdminRole
+            || ($login !== '' && in_array($login, $adminLogins, true))
+            || !empty($permissionProfile['gestor_admin']);
+        $isManager = $isAdmin || $isManagerRole || ($login !== '' && in_array($login, $managerLogins, true));
+
+        return [
+            'login' => $login,
+            'is_admin' => $isAdmin,
+            'is_manager' => $isManager,
+            'gestor_admin' => !empty($permissionProfile['gestor_admin']),
+            'can_manage_settings' => $isManager || !empty($permissionProfile['configuracoes']) || ($login !== '' && in_array($login, $settingsLogins, true)),
+            'can_access_contracts' => $isManager || !empty($permissionProfile['contratos']) || ($login !== '' && in_array($login, $contractLogins, true)),
+            'can_manage_financial' => $isManager || !empty($permissionProfile['financeiro']) || ($login !== '' && in_array($login, $financialLogins, true)),
+            'can_manage_users' => $isAdmin,
+        ];
     }
 
     public function saveProviderSettings(array $settings): void

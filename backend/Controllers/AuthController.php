@@ -72,14 +72,21 @@ final class AuthController
         }
 
         if ($localUser !== null) {
-            $localRole = (string) ($localUser['role'] ?? 'manager');
+            $normalizedLogin = $this->localRepository->normalizeLogin((string) ($localUser['login'] ?? $username));
+            $access = $this->localRepository->accessProfileForUser([
+                'login' => $normalizedLogin,
+                'role' => (string) ($localUser['role'] ?? 'manager'),
+                'can_manage' => !empty($localUser['can_manage']),
+            ]);
+            $localRole = $access['is_admin'] ? 'admin' : ($access['is_manager'] ? 'manager' : (string) ($localUser['role'] ?? 'manager'));
             $_SESSION['user'] = [
                 'id' => (int) $localUser['id'],
                 'provider_id' => $localUser['provider_id'] ?? null,
                 'name' => (string) ($localUser['name'] ?? ucfirst($username)),
-                'login' => (string) ($localUser['login'] ?? $username),
+                'login' => $normalizedLogin,
                 'email' => (string) ($localUser['email'] ?? ''),
                 'role' => $localRole,
+                'can_manage' => $access['is_manager'],
                 'source' => 'local',
             ];
 
@@ -114,17 +121,24 @@ final class AuthController
                 return Response::redirect('/login?error=password');
             }
 
-            $managerLogin = strtolower(trim($this->localRepository->providerSetting('mkauth_manager_login', '')));
-            $remoteLogin = strtolower(trim((string) ($remoteUser['login'] ?? $username)));
-            $isManager = $managerLogin !== '' && $remoteLogin !== '' && $managerLogin === $remoteLogin;
+            $normalizedLogin = $this->localRepository->normalizeLogin((string) ($remoteUser['login'] ?? $username));
+            $access = $this->localRepository->accessProfileForUser([
+                'login' => $normalizedLogin,
+                'role' => (string) ($remoteUser['nivel'] ?? 'Operador'),
+                'can_manage' => false,
+            ]);
+            $isManager = $access['is_manager'];
 
             $_SESSION['user'] = [
                 'name' => (string) ($remoteUser['nome'] ?? ucfirst($username)),
-                'login' => (string) ($remoteUser['login'] ?? $username),
-                'role' => $isManager ? 'manager' : 'technician',
+                'login' => $normalizedLogin,
+                'role' => $access['is_admin'] ? 'admin' : ($isManager ? 'manager' : 'technician'),
                 'mkauth_level' => (string) ($remoteUser['nivel'] ?? 'Operador'),
                 'source' => 'mkauth',
                 'can_manage' => $isManager,
+                'can_manage_settings' => $access['can_manage_settings'],
+                'can_access_contracts' => $access['can_access_contracts'],
+                'can_manage_financial' => $access['can_manage_financial'],
                 'uuid' => (string) ($remoteUser['uuid_acesso'] ?? $remoteUser['uuid'] ?? ''),
             ];
 
@@ -146,9 +160,10 @@ final class AuthController
             return Response::redirect('/dashboard');
         }
 
+        $normalizedLogin = $this->localRepository->normalizeLogin($username);
         $_SESSION['user'] = [
-            'name' => ucfirst($username),
-            'login' => $username,
+            'name' => ucfirst($normalizedLogin),
+            'login' => $normalizedLogin,
             'role' => 'Administrador',
             'source' => 'local-demo',
         ];
