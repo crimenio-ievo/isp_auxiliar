@@ -24,3 +24,11 @@
 /backups/*
 !/backups/.gitkeep
 .env
+
+# Dados operacionais / produção
+storage/contracts/acceptances/*.json
+storage/uploads/
+storage/cache/
+backups/
+logs/
+.env
