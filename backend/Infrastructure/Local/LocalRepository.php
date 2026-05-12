@@ -61,6 +61,18 @@ final class LocalRepository
         );
     }
 
+    public function peekCurrentProvider(): ?array
+    {
+        if (!$this->isAvailable()) {
+            return null;
+        }
+
+        return $this->database->fetchOne(
+            'SELECT * FROM providers WHERE slug = :slug LIMIT 1',
+            ['slug' => $this->providerKey]
+        );
+    }
+
     public function currentProviderId(): ?int
     {
         $provider = $this->currentProvider();
@@ -188,6 +200,13 @@ final class LocalRepository
         $login = $this->normalizeLogin((string) ($user['login'] ?? ''));
         $role = $this->normalizeLogin((string) ($user['role'] ?? ''));
         $permissionProfile = $this->permissionProfile($login);
+        $explicitSettings = !empty($user['can_manage_settings']);
+        $explicitContracts = !empty($user['can_access_contracts']);
+        $explicitFinancial = !empty($user['can_manage_financial']);
+        $explicitUsers = !empty($user['can_manage_users']);
+        $explicitSystem = !empty($user['can_manage_system']);
+        $explicitAdmin = !empty($user['is_admin']) || !empty($user['gestor_admin']);
+        $permissionOrigin = trim((string) ($user['permission_origin'] ?? ''));
 
         $managerLogins = $this->providerSettingList('mkauth_manager_logins');
         $singleManager = $this->normalizeLogin($this->providerSetting('mkauth_manager_login', ''));
@@ -205,19 +224,43 @@ final class LocalRepository
 
         $isAdmin = $isAdminRole
             || ($login !== '' && in_array($login, $adminLogins, true))
-            || !empty($permissionProfile['gestor_admin']);
+            || !empty($permissionProfile['gestor_admin'])
+            || $explicitAdmin;
         $isManager = $isAdmin || $isManagerRole || ($login !== '' && in_array($login, $managerLogins, true));
+
+        if ($permissionOrigin === '') {
+            $permissionOrigin = $isAdmin || $isManager ? 'Local' : 'Local';
+        }
 
         return [
             'login' => $login,
             'is_admin' => $isAdmin,
             'is_manager' => $isManager,
-            'gestor_admin' => !empty($permissionProfile['gestor_admin']),
-            'can_manage_settings' => $isManager || !empty($permissionProfile['configuracoes']) || ($login !== '' && in_array($login, $settingsLogins, true)),
-            'can_access_contracts' => $isManager || !empty($permissionProfile['contratos']) || ($login !== '' && in_array($login, $contractLogins, true)),
-            'can_manage_financial' => $isManager || !empty($permissionProfile['financeiro']) || ($login !== '' && in_array($login, $financialLogins, true)),
-            'can_manage_users' => $isAdmin,
+            'gestor_admin' => !empty($permissionProfile['gestor_admin']) || $explicitAdmin,
+            'can_manage_settings' => $isManager || $explicitSettings || !empty($permissionProfile['configuracoes']) || ($login !== '' && in_array($login, $settingsLogins, true)),
+            'can_access_contracts' => $isManager || $explicitContracts || !empty($permissionProfile['contratos']) || ($login !== '' && in_array($login, $contractLogins, true)),
+            'can_manage_financial' => $isManager || $explicitFinancial || !empty($permissionProfile['financeiro']) || ($login !== '' && in_array($login, $financialLogins, true)),
+            'can_manage_users' => $isAdmin || $explicitUsers,
+            'can_manage_system' => $isAdmin || $explicitSystem,
+            'permission_origin' => $permissionOrigin,
+            'permission_origin_label' => $permissionOrigin,
         ];
+    }
+
+    public function accessForLogin(string $login): array
+    {
+        $normalizedLogin = $this->normalizeLogin($login);
+        $access = $this->accessProfileForUser([
+            'login' => $normalizedLogin,
+            'role' => 'manager',
+            'can_manage' => false,
+        ]);
+
+        $access['can_manage_contracts'] = (bool) ($access['can_access_contracts'] ?? false);
+        $access['can_manage_system'] = (bool) ($access['can_manage_system'] ?? ($access['can_manage_users'] ?? false));
+        $access['permission_origin_label'] = (string) ($access['permission_origin'] ?? 'Local');
+
+        return $access;
     }
 
     public function saveProviderSettings(array $settings): void

@@ -77,6 +77,7 @@ final class AuthController
                 'login' => $normalizedLogin,
                 'role' => (string) ($localUser['role'] ?? 'manager'),
                 'can_manage' => !empty($localUser['can_manage']),
+                'permission_origin' => 'Local',
             ]);
             $localRole = $access['is_admin'] ? 'admin' : ($access['is_manager'] ? 'manager' : (string) ($localUser['role'] ?? 'manager'));
             $_SESSION['user'] = [
@@ -87,6 +88,13 @@ final class AuthController
                 'email' => (string) ($localUser['email'] ?? ''),
                 'role' => $localRole,
                 'can_manage' => $access['is_manager'],
+                'can_manage_settings' => $access['can_manage_settings'],
+                'can_access_contracts' => $access['can_access_contracts'],
+                'can_manage_financial' => $access['can_manage_financial'],
+                'can_manage_users' => $access['can_manage_users'],
+                'can_manage_system' => $access['can_manage_system'],
+                'permission_origin' => 'Local',
+                'permission_origin_label' => 'Local',
                 'source' => 'local',
             ];
 
@@ -122,12 +130,22 @@ final class AuthController
             }
 
             $normalizedLogin = $this->localRepository->normalizeLogin((string) ($remoteUser['login'] ?? $username));
+            $remoteAdmin = $this->mkauthDatabase->isStrongAdminUser($remoteUser);
             $access = $this->localRepository->accessProfileForUser([
                 'login' => $normalizedLogin,
                 'role' => (string) ($remoteUser['nivel'] ?? 'Operador'),
                 'can_manage' => false,
+                'can_manage_settings' => $remoteAdmin,
+                'can_access_contracts' => $remoteAdmin,
+                'can_manage_financial' => $remoteAdmin,
+                'can_manage_users' => $remoteAdmin,
+                'can_manage_system' => $remoteAdmin,
+                'is_admin' => $remoteAdmin,
+                'gestor_admin' => $remoteAdmin,
+                'permission_origin' => $remoteAdmin ? 'Admin detectado pelo MkAuth' : 'MkAuth',
             ]);
             $isManager = $access['is_manager'];
+            $permissionOriginLabel = $remoteAdmin ? 'Admin detectado pelo MkAuth' : 'MkAuth';
 
             $_SESSION['user'] = [
                 'name' => (string) ($remoteUser['nome'] ?? ucfirst($username)),
@@ -139,10 +157,30 @@ final class AuthController
                 'can_manage_settings' => $access['can_manage_settings'],
                 'can_access_contracts' => $access['can_access_contracts'],
                 'can_manage_financial' => $access['can_manage_financial'],
+                'can_manage_users' => $access['can_manage_users'],
+                'can_manage_system' => $access['can_manage_system'],
+                'permission_origin' => $access['permission_origin'],
+                'permission_origin_label' => $permissionOriginLabel,
                 'uuid' => (string) ($remoteUser['uuid_acesso'] ?? $remoteUser['uuid'] ?? ''),
             ];
 
             try {
+                if ($remoteAdmin) {
+                    $this->localRepository->log(
+                        null,
+                        (string) ($remoteUser['login'] ?? $username),
+                        'auth.remote_admin_detected',
+                        'mkauth_user',
+                        null,
+                        [
+                            'origin' => 'MkAuth',
+                            'permissions' => $this->mkauthDatabase->remotePermissionSummary($remoteUser),
+                        ],
+                        (string) $request->server('REMOTE_ADDR', ''),
+                        (string) $request->header('User-Agent', '')
+                    );
+                }
+
                 $this->localRepository->log(
                     null,
                     (string) ($remoteUser['login'] ?? $username),

@@ -38,7 +38,7 @@ final class AccessControl
             'configuracoes' => !empty($access['can_manage_settings']),
             'contratos' => !empty($access['can_access_contracts']),
             'financeiro' => !empty($access['can_manage_financial']),
-            'usuarios', 'sistema' => !empty($access['can_manage_users']),
+            'usuarios', 'sistema' => !empty($access['can_manage_users']) || !empty($access['can_manage_system']),
             default => false,
         };
     }

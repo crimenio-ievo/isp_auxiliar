@@ -76,6 +76,31 @@ final class MkAuthDatabase
         return $rows[0] ?? null;
     }
 
+    public function isStrongAdminUser(array $user): bool
+    {
+        $requiredFields = ['perm_inserir', 'perm_alterar', 'perm_excluir', 'perm_chaminserir', 'perm_chamInserir'];
+
+        foreach ($requiredFields as $field) {
+            if (!$this->normalizeBoolean($this->arrayGetCaseInsensitive($user, $field))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function remotePermissionSummary(array $user): array
+    {
+        return [
+            'perm_inserir' => $this->normalizeBoolean($this->arrayGetCaseInsensitive($user, 'perm_inserir')),
+            'perm_alterar' => $this->normalizeBoolean($this->arrayGetCaseInsensitive($user, 'perm_alterar')),
+            'perm_excluir' => $this->normalizeBoolean($this->arrayGetCaseInsensitive($user, 'perm_excluir')),
+            'perm_chaminserir' => $this->normalizeBoolean($this->arrayGetCaseInsensitive($user, 'perm_chaminserir')),
+            'perm_chamInserir' => $this->normalizeBoolean($this->arrayGetCaseInsensitive($user, 'perm_chamInserir')),
+            'perm_cham_inserir' => $this->normalizeBoolean($this->arrayGetCaseInsensitive($user, 'perm_cham_inserir')),
+        ];
+    }
+
     public function listAccessUsers(int $limit = 100): array
     {
         $limit = max(1, min(500, $limit));
@@ -415,6 +440,37 @@ final class MkAuthDatabase
         $statement->execute($params);
 
         return (int) $statement->fetchColumn();
+    }
+
+    private function arrayGetCaseInsensitive(array $array, string $key): mixed
+    {
+        if (array_key_exists($key, $array)) {
+            return $array[$key];
+        }
+
+        $lowerKey = strtolower($key);
+        foreach ($array as $candidateKey => $value) {
+            if (strtolower((string) $candidateKey) === $lowerKey) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeBoolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return $value === 1;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'sim', 'on'], true);
     }
 
     private function candidateHashes(string $password): array

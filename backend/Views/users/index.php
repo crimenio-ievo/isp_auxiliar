@@ -6,6 +6,8 @@ use App\Core\Url;
 
 $accessUsers = is_array($accessUsers ?? null) ? $accessUsers : [];
 $managerLogin = (string) ($managerLogin ?? '');
+$currentUser = is_array($user ?? null) ? $user : [];
+$permissionOrigin = (string) ($currentUser['permission_origin_label'] ?? $currentUser['permission_origin'] ?? 'Local');
 
 ob_start();
 ?>
@@ -14,6 +16,7 @@ ob_start();
         <p class="section-heading__eyebrow">Acesso</p>
         <h1>Usuarios</h1>
         <p class="page-description">Usuários operacionais consultados no MkAuth para acesso ao ISP Auxiliar.</p>
+        <p class="page-description">Origem da permissão atual: <strong><?= htmlspecialchars($permissionOrigin, ENT_QUOTES, 'UTF-8'); ?></strong></p>
     </div>
 </section>
 
