@@ -39,11 +39,18 @@ if ($repository instanceof LocalRepository) {
 }
 
 $providerSettingsCount = 0;
+$hasLocalAdmin = false;
 if ($repository instanceof LocalRepository && $provider !== null) {
     try {
         $providerSettingsCount = count($repository->providerSettings());
     } catch (\Throwable) {
         $providerSettingsCount = 0;
+    }
+
+    try {
+        $hasLocalAdmin = $repository->hasLocalAdminUser();
+    } catch (\Throwable) {
+        $hasLocalAdmin = false;
     }
 }
 
@@ -73,6 +80,7 @@ echo "DB_HOST: {$dbHost}\n";
 echo "DB_DATABASE: {$dbDatabase}\n";
 echo 'provider encontrado: ' . ($provider === null ? 'nao' : ((string) ($provider['slug'] ?? '-') . ' / ' . (string) ($provider['name'] ?? '-'))) . "\n";
 echo 'provider_settings existentes: ' . $providerSettingsCount . "\n";
+echo 'admin local existente: ' . boolLabel($hasLocalAdmin) . ' (' . ($hasLocalAdmin ? 'OK' : 'FALHOU') . ")\n";
 echo 'permissões para ' . $loginArgument . ":\n";
 echo ' - can_manage_settings: ' . boolLabel((bool) ($access['can_manage_settings'] ?? false)) . "\n";
 echo ' - can_access_contracts: ' . boolLabel((bool) ($access['can_access_contracts'] ?? false)) . "\n";

@@ -9,9 +9,28 @@ use App\Infrastructure\Local\LocalRepository;
 
 require dirname(__DIR__) . '/backend/bootstrap/app.php';
 
-$loginArgument = trim((string) ($argv[1] ?? ''));
+$args = array_slice($argv ?? [], 1);
+$loginArgument = '';
+$localPassword = '';
+
+foreach ($args as $arg) {
+    if (str_starts_with($arg, '--local-password=')) {
+        $localPassword = substr($arg, strlen('--local-password='));
+        continue;
+    }
+
+    if ($arg !== '' && !str_starts_with($arg, '-')) {
+        $loginArgument = $arg;
+    }
+}
+
 if ($loginArgument === '') {
-    fwrite(STDERR, "Uso: php scripts/ensure_admin.php login_mkauth\n");
+    fwrite(STDERR, "Uso: php scripts/ensure_admin.php crimenio --local-password='SENHA'\n");
+    exit(1);
+}
+
+if (trim($localPassword) === '') {
+    fwrite(STDERR, "Informe --local-password para criar ou atualizar o admin local.\n");
     exit(1);
 }
 
@@ -29,6 +48,13 @@ try {
 $login = $repository->normalizeLogin($loginArgument);
 if ($login === '') {
     fwrite(STDERR, "Login invalido.\n");
+    exit(1);
+}
+
+try {
+    $localUserId = $repository->upsertLocalAdminUser($login, $localPassword, 'Administrador local');
+} catch (\Throwable $exception) {
+    fwrite(STDERR, "Nao foi possivel criar/atualizar o admin local: {$exception->getMessage()}\n");
     exit(1);
 }
 
@@ -69,6 +95,7 @@ echo "ISP Auxiliar - ensure admin\n";
 if (is_array($provider)) {
     echo 'Provider: ' . (string) ($provider['slug'] ?? '-') . " / " . (string) ($provider['name'] ?? '-') . "\n";
 }
+echo 'Admin local atualizado com sucesso. ID: ' . $localUserId . "\n";
 echo "Login normalizado: {$login}\n";
 echo "Permissoes mescladas com sucesso.\n";
 echo "accessForLogin({$login}):\n";

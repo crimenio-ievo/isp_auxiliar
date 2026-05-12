@@ -381,6 +381,80 @@ final class LocalRepository
         return $this->database->lastInsertId();
     }
 
+    public function upsertLocalAdminUser(string $login, string $password, string $name = 'Administrador local'): int
+    {
+        if (!$this->isAvailable()) {
+            throw new \RuntimeException('Banco local indisponivel.');
+        }
+
+        $login = $this->normalizeLogin($login);
+        if ($login === '') {
+            throw new \RuntimeException('Login invalido para administrador local.');
+        }
+
+        $email = $login . '@local.invalid';
+        $existing = $this->database->fetchOne(
+            'SELECT id FROM app_users WHERE LOWER(login) = LOWER(:login) OR LOWER(email) = LOWER(:email) LIMIT 1',
+            [
+                'login' => $login,
+                'email' => $email,
+            ]
+        );
+
+        $params = [
+            'provider_id' => $this->currentProviderId(),
+            'name' => $name,
+            'email' => $email,
+            'login' => $login,
+            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'role' => 'platform_admin',
+        ];
+
+        if (is_array($existing) && isset($existing['id'])) {
+            $this->database->execute(
+                'UPDATE app_users
+                 SET provider_id = :provider_id,
+                     name = :name,
+                     email = :email,
+                     login = :login,
+                     password_hash = :password_hash,
+                     role = :role,
+                     status = "active",
+                     updated_at = NOW()
+                 WHERE id = :id',
+                $params + ['id' => (int) $existing['id']]
+            );
+
+            return (int) $existing['id'];
+        }
+
+        $this->database->execute(
+            'INSERT INTO app_users (provider_id, name, email, login, password_hash, role, status, created_at, updated_at)
+             VALUES (:provider_id, :name, :email, :login, :password_hash, :role, "active", NOW(), NOW())',
+            $params
+        );
+
+        return $this->database->lastInsertId();
+    }
+
+    public function hasLocalAdminUser(): bool
+    {
+        if (!$this->isAvailable()) {
+            return false;
+        }
+
+        $providerId = $this->currentProviderId();
+
+        return $this->database->fetchOne(
+            'SELECT id
+             FROM app_users
+             WHERE status = "active"
+               AND (role = "platform_admin" OR (provider_id = :provider_id AND role IN ("manager", "platform_admin")))
+             LIMIT 1',
+            ['provider_id' => $providerId]
+        ) !== null;
+    }
+
     public function listLocalUsers(int $limit = 100): array
     {
         $providerId = $this->currentProviderId();

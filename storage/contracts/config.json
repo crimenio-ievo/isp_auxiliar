@@ -10,7 +10,7 @@
         "quantidade_digitos_validacao_cpf": 3,
         "multa_padrao": 0
     },
-    "saved_at": "2026-05-11 18:32:04",
+    "saved_at": "2026-05-12 14:40:40",
     "saved_by": "crimenio",
     "email": {
         "enabled": true,
@@ -26,7 +26,7 @@
         "smtp_from_name": "iEvo Technology - Financeiro"
     },
     "system": {
-        "settings_saved_at": "2026-05-11 18:32:04",
+        "settings_saved_at": "2026-05-12 14:40:40",
         "settings_saved_by": "crimenio"
     },
     "evotrix": {
@@ -48,6 +48,7 @@
         "endpoint": "/api/chamado/inserir",
         "subject": "Financeiro - Boleto / Carne",
         "priority": "normal",
-        "timeout_seconds": 15
+        "timeout_seconds": 15,
+        "message_fallback": true
     }
 }

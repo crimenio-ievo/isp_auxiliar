@@ -84,3 +84,5 @@ Antes de liberar o piloto real:
 ## Observação
 
 O fluxo operacional continua dependente de configurações válidas de banco, `APP_URL`, `SMTP`, `Evotrix` e `MkAuth`. Este guia não altera o banco do MkAuth nem cria cobrança.
+
+**Nunca executar `scripts/reset_test_operational_data.php` em produção.**
