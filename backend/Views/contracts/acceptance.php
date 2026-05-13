@@ -33,6 +33,9 @@ $documentValidationPossible = (bool) ($documentValidationPossible ?? ($context['
 $documentValidationBlocked = $documentValidationRequired && !$documentValidationPossible;
 $termBody = (string) ($context['termBody'] ?? '');
 $maskedDocument = (string) ($context['maskedDocument'] ?? '-');
+$termUrl = (string) ($termUrl ?? ($context['termUrl'] ?? ''));
+$centralAssinanteUrl = trim((string) ($centralAssinanteUrl ?? ($context['centralAssinanteUrl'] ?? 'https://sistema.ievo.com.br/central')));
+$centralAssinanteUrl = $centralAssinanteUrl !== '' ? $centralAssinanteUrl : 'https://sistema.ievo.com.br/central';
 $status = (string) ($acceptance['status'] ?? '');
 $isAccepted = $status === 'aceito';
 $isExpired = str_contains((string) ($context['error'] ?? ''), 'expirou');
@@ -54,12 +57,20 @@ ob_start();
         <p class="section-heading__eyebrow">Aceite concluído</p>
         <h1><?= $alreadyAcceptedView ? 'Aceite concluído' : 'Seu aceite foi confirmado com sucesso.'; ?></h1>
         <p class="page-description">
-            Seu contrato foi registrado com segurança.<br>
-            <?= htmlspecialchars($providerThanks, ENT_QUOTES, 'UTF-8'); ?><br>
-            Qualquer dúvida, <?= htmlspecialchars($providerSupport, ENT_QUOTES, 'UTF-8'); ?> estará à disposição.
+            Seu aceite foi registrado com segurança.<br>
+            Você pode acessar uma cópia do termo assinado por este link.<br>
+            Para boletos, faturas, notas e segunda via, acesse a Central do Assinante.
         </p>
 
         <div class="summary-grid acceptance-success-card__meta">
+            <div class="summary-item">
+                <span>Cliente</span>
+                <strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
+            </div>
+            <div class="summary-item">
+                <span>Provedor</span>
+                <strong><?= htmlspecialchars($providerName, ENT_QUOTES, 'UTF-8'); ?></strong>
+            </div>
             <div class="summary-item">
                 <span>Protocolo</span>
                 <strong><?= htmlspecialchars($protocol, ENT_QUOTES, 'UTF-8'); ?></strong>
@@ -71,7 +82,11 @@ ob_start();
         </div>
 
         <div class="hero-actions acceptance-success-card__actions">
-            <button type="button" class="button" data-close-page>Fechar</button>
+            <?php if ($termUrl !== ''): ?>
+                <a class="button button--full-mobile" href="<?= htmlspecialchars($termUrl, ENT_QUOTES, 'UTF-8'); ?>">Ver termo assinado</a>
+            <?php endif; ?>
+            <a class="button button--ghost" href="<?= htmlspecialchars($centralAssinanteUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">Acessar Central do Assinante</a>
+            <button type="button" class="button button--ghost" data-close-page>Fechar</button>
         </div>
     </article>
 </section>

@@ -143,6 +143,58 @@ final class MkAuthTicketService
         ];
     }
 
+    public function checkFinancialTicketStatus(string $ticketId): array
+    {
+        $ticketId = trim($ticketId);
+
+        if ($ticketId === '') {
+            throw new RuntimeException('Numero do chamado MkAuth nao informado.');
+        }
+
+        if (!$this->mkauthDatabase instanceof MkAuthDatabase || !$this->mkauthDatabase->isConfigured()) {
+            throw new RuntimeException('Banco MkAuth nao configurado para consulta de chamado.');
+        }
+
+        $ticket = $this->mkauthDatabase->findSupportTicketByNumber($ticketId);
+        if (!is_array($ticket)) {
+            return [
+                'status' => 'not_found',
+                'ticket_id' => $ticketId,
+                'found' => false,
+                'closed' => false,
+                'open' => false,
+                'ambiguous' => false,
+                'message' => 'Chamado nao localizado no MkAuth.',
+                'http_status' => null,
+                'duration_ms' => 0,
+            ];
+        }
+
+        $statusInfo = $this->mkauthDatabase->describeSupportTicketStatus($ticket);
+        $summary = trim((string) ($statusInfo['summary'] ?? ''));
+        $state = (string) ($statusInfo['state'] ?? 'ambiguous');
+        $message = match ($state) {
+            'open' => 'Chamado ainda aberto no MkAuth.',
+            'closed' => 'Chamado fechado no MkAuth.',
+            default => 'Status do chamado ambiguo no MkAuth.',
+        };
+
+        return [
+            'status' => $state === 'closed' ? 'closed' : ($state === 'open' ? 'open' : 'ambiguous'),
+            'ticket_id' => $ticketId,
+            'found' => true,
+            'closed' => $state === 'closed',
+            'open' => $state === 'open',
+            'ambiguous' => $state === 'ambiguous',
+            'ticket' => $ticket,
+            'raw_status' => (string) ($statusInfo['status'] ?? ''),
+            'closed_at' => (string) ($statusInfo['fechamento'] ?? ''),
+            'message' => $summary !== '' ? $message . ' ' . $summary : $message,
+            'http_status' => 200,
+            'duration_ms' => 0,
+        ];
+    }
+
     private function normalizePayload(array $payload): array
     {
         $description = trim((string) ($payload['descricao'] ?? $payload['msg'] ?? $payload['mensagem'] ?? ''));

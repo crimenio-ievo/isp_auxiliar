@@ -89,6 +89,51 @@ final class MkAuthDatabase
         return true;
     }
 
+    public function companyLegalProfile(): array
+    {
+        if (!$this->isConfigured()) {
+            return [
+                'source' => 'fallback',
+                'table' => null,
+                'data' => [],
+                'complete' => false,
+            ];
+        }
+
+        $tables = ['sis_provedor', 'sis_fornecedor'];
+
+        foreach ($tables as $table) {
+            try {
+                $row = $this->fetchOne('SELECT * FROM ' . $table . ' ORDER BY id ASC LIMIT 1');
+            } catch (\Throwable) {
+                $row = null;
+            }
+
+            if (!is_array($row) || $row === []) {
+                continue;
+            }
+
+            $data = $this->normalizeCompanyLegalRow($row);
+            if ($data === []) {
+                continue;
+            }
+
+            return [
+                'source' => 'mkauth',
+                'table' => $table,
+                'data' => $data,
+                'complete' => $this->companyLegalProfileIsComplete($data),
+            ];
+        }
+
+        return [
+            'source' => 'fallback',
+            'table' => null,
+            'data' => [],
+            'complete' => false,
+        ];
+    }
+
     public function remotePermissionSummary(array $user): array
     {
         return [
@@ -312,6 +357,66 @@ final class MkAuthDatabase
         );
     }
 
+    public function findSupportTicketByNumber(string $ticket): ?array
+    {
+        $ticket = trim($ticket);
+
+        if ($ticket === '') {
+            return null;
+        }
+
+        return $this->fetchOne(
+            'SELECT id, uuid_suporte, assunto, abertura, fechamento, email, status, chamado, nome, login, atendente, prioridade, motivo_fechar
+             FROM sis_suporte
+             WHERE chamado = :chamado
+             ORDER BY id DESC
+             LIMIT 1',
+            ['chamado' => $ticket]
+        );
+    }
+
+    public function describeSupportTicketStatus(array $ticket): array
+    {
+        $statusRaw = strtolower(trim((string) ($ticket['status'] ?? '')));
+        $fechamento = trim((string) ($ticket['fechamento'] ?? ''));
+        $motivoFechar = trim((string) ($ticket['motivo_fechar'] ?? ''));
+
+        $openStates = ['aberto', 'em_andamento', 'andamento', 'pendente'];
+        $closedStates = ['fechado', 'encerrado', 'finalizado', 'concluido', 'concluído', 'resolvido'];
+
+        $state = 'ambiguous';
+        if ($statusRaw !== '' && in_array($statusRaw, $openStates, true) && $fechamento === '') {
+            $state = 'open';
+        } elseif ($statusRaw !== '' && in_array($statusRaw, $closedStates, true)) {
+            $state = 'closed';
+        } elseif ($fechamento !== '' && !in_array($statusRaw, $openStates, true)) {
+            $state = 'closed';
+        }
+
+        $summaryParts = [];
+        if ($statusRaw !== '') {
+            $summaryParts[] = 'status=' . $statusRaw;
+        }
+        if ($fechamento !== '') {
+            $summaryParts[] = 'fechamento=' . $fechamento;
+        }
+        if ($motivoFechar !== '') {
+            $summaryParts[] = 'motivo=' . mb_substr($motivoFechar, 0, 160);
+        }
+
+        return [
+            'state' => $state,
+            'status' => $statusRaw,
+            'fechamento' => $fechamento,
+            'motivo_fechar' => $motivoFechar,
+            'is_open' => $state === 'open',
+            'is_closed' => $state === 'closed',
+            'is_ambiguous' => $state === 'ambiguous',
+            'summary' => implode(' · ', $summaryParts),
+            'raw' => $ticket,
+        ];
+    }
+
     public function insertTicketMessage(
         string $ticket,
         string $message,
@@ -327,6 +432,36 @@ final class MkAuthDatabase
 
         if ($ticket === '' || $message === '') {
             return null;
+        }
+
+        $emptyRow = $this->fetchOne(
+            'SELECT id
+             FROM sis_msg
+             WHERE chamado = :chamado
+               AND (msg IS NULL OR TRIM(msg) = "")
+             ORDER BY id DESC
+             LIMIT 1',
+            ['chamado' => $ticket]
+        );
+
+        if (is_array($emptyRow) && isset($emptyRow['id'])) {
+            $this->connection()->prepare(
+                'UPDATE sis_msg
+                 SET msg = :msg,
+                     tipo = :tipo,
+                     login = :login,
+                     atendente = :atendente,
+                     msg_data = COALESCE(msg_data, NOW())
+                 WHERE id = :id'
+            )->execute([
+                'id' => (int) $emptyRow['id'],
+                'msg' => $message,
+                'tipo' => $tipo,
+                'login' => $login,
+                'atendente' => $atendente,
+            ]);
+
+            return (int) $emptyRow['id'];
         }
 
         $latest = $this->findLatestTicketMessage($ticket);
@@ -456,6 +591,72 @@ final class MkAuthDatabase
         }
 
         return null;
+    }
+
+    private function normalizeCompanyLegalRow(array $row): array
+    {
+        $brandName = trim((string) ($row['nome'] ?? $row['nomefan'] ?? $row['contato'] ?? ''));
+        $legalName = trim((string) ($row['razao'] ?? $row['razaosoc'] ?? $row['nome'] ?? $row['nomefan'] ?? ''));
+        $document = trim((string) ($row['cnpj'] ?? $row['cpf_cnpj'] ?? ''));
+        $street = trim((string) ($row['endereco'] ?? ''));
+        $number = trim((string) ($row['numero'] ?? ''));
+        $addressParts = array_filter([$street, $number], static fn (string $value): bool => $value !== '');
+        $address = $addressParts !== [] ? implode(', ', $addressParts) : '';
+        $neighborhood = trim((string) ($row['bairro'] ?? ''));
+        $city = trim((string) ($row['cidade'] ?? ''));
+        $state = trim((string) ($row['estado'] ?? ''));
+        $zip = trim((string) ($row['cep'] ?? ''));
+        $phone = trim((string) ($row['fone'] ?? $row['telefone'] ?? $row['celular'] ?? $row['whatsapp'] ?? ''));
+        $site = trim((string) ($row['site'] ?? ''));
+        $email = trim((string) ($row['email'] ?? ''));
+        $anatelProcess = trim((string) ($row['fistel'] ?? $row['codigo_receita'] ?? ''));
+
+        if ($brandName === '' && $legalName === '' && $document === '' && $address === '' && $phone === '' && $email === '') {
+            return [];
+        }
+
+        return [
+            'brand_name' => $brandName,
+            'legal_name' => $legalName !== '' ? $legalName : $brandName,
+            'document' => $document,
+            'address' => $address,
+            'neighborhood' => $neighborhood,
+            'city' => $city,
+            'state' => $state,
+            'zip' => $zip,
+            'phone' => $phone,
+            'site' => $site,
+            'email' => $email,
+            'anatel_process' => $anatelProcess,
+            'nome' => $brandName,
+            'razao' => $legalName !== '' ? $legalName : $brandName,
+            'cnpj' => $document,
+            'endereco' => $address,
+            'bairro' => $neighborhood,
+            'cidade' => $city,
+            'estado' => $state,
+            'cep' => $zip,
+            'telefone' => $phone,
+            'fone' => $phone,
+            'celular' => $phone,
+            'site' => $site,
+            'email' => $email,
+            'autorizacao_anatel' => $anatelProcess,
+            'processo_scm' => $anatelProcess,
+        ];
+    }
+
+    private function companyLegalProfileIsComplete(array $data): bool
+    {
+        $required = ['brand_name', 'legal_name', 'document', 'address', 'city', 'state', 'zip', 'phone', 'email'];
+
+        foreach ($required as $field) {
+            if (trim((string) ($data[$field] ?? '')) === '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function normalizeBoolean(mixed $value): bool

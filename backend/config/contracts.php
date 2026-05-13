@@ -26,6 +26,7 @@ $commercial = [
     'parcelas_maximas_adesao' => max(1, (int) Env::get('CONTRACT_PARCELAS_MAXIMAS_ADESAO', '3')),
     'fidelidade_meses_padrao' => max(1, (int) Env::get('CONTRACT_FIDELIDADE_MESES_PADRAO', '12')),
     'multa_padrao' => (float) Env::get('CONTRACT_MULTA_PADRAO', '0'),
+    'central_assinante_url' => Env::get('CONTRACT_CENTRAL_ASSINANTE_URL', 'https://sistema.ievo.com.br/central'),
     'exigir_validacao_cpf_aceite' => filter_var(
         Env::get('CONTRACT_EXIGIR_VALIDACAO_CPF_ACEITE', '1'),
         FILTER_VALIDATE_BOOL,
@@ -89,14 +90,14 @@ return [
         'aceite_nova_instalacao' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_nova_instalacao',
-            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link abaixo:\n\n{link_aceite}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
-            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas'],
+            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas', 'central_assinante_url'],
         ],
         'aceite_regularizacao_contrato' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_regularizacao_contrato',
-            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link abaixo:\n\n{link_aceite}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
-            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas'],
+            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas', 'central_assinante_url'],
         ],
     ],
 ];

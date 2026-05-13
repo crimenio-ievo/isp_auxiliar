@@ -8,6 +8,7 @@ $pageTitle = $pageTitle ?? 'ISP Auxiliar';
 $layoutMode = $layoutMode ?? 'app';
 $content = $content ?? '';
 $hideFooter = !empty($hideFooter);
+$hideHeader = !empty($hideHeader);
 $bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
 $basePath = Url::basePath();
 ?>
@@ -23,7 +24,9 @@ $basePath = Url::basePath();
     <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=20260429b'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
-    <?php require __DIR__ . '/header.php'; ?>
+    <?php if (!$hideHeader): ?>
+        <?php require __DIR__ . '/header.php'; ?>
+    <?php endif; ?>
 
     <div class="shell">
         <?php if ($layoutMode !== 'guest'): ?>

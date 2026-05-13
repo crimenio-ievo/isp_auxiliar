@@ -62,6 +62,26 @@ final class FinancialTaskRepository
         );
     }
 
+    public function updateTicketMetadata(int $id, array $data): int
+    {
+        $sql = 'UPDATE financial_tasks
+                SET mkauth_ticket_id = :mkauth_ticket_id,
+                    mkauth_ticket_status = :mkauth_ticket_status,
+                    mkauth_ticket_checked_at = :mkauth_ticket_checked_at,
+                    completed_at = :completed_at,
+                    completed_by = :completed_by,
+                    updated_at = NOW()
+                WHERE id = :id';
+
+        return $this->database->execute($sql, array_merge(['id' => $id], [
+            'mkauth_ticket_id' => $data['mkauth_ticket_id'] ?? null,
+            'mkauth_ticket_status' => $data['mkauth_ticket_status'] ?? null,
+            'mkauth_ticket_checked_at' => $data['mkauth_ticket_checked_at'] ?? null,
+            'completed_at' => $data['completed_at'] ?? null,
+            'completed_by' => $data['completed_by'] ?? null,
+        ]));
+    }
+
     public function listByStatus(string $status, int $limit = 100): array
     {
         $limit = max(1, min(500, $limit));

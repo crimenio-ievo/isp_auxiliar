@@ -217,6 +217,13 @@ final class ContractController
         }
 
         $this->financialTaskRepository->updateStatus($taskId, 'concluido');
+        try {
+            $this->financialTaskRepository->updateTicketMetadata($taskId, [
+                'completed_at' => date('Y-m-d H:i:s'),
+                'completed_by' => (string) ($this->resolveUser()['login'] ?? ''),
+            ]);
+        } catch (\Throwable) {
+        }
         $this->recordAudit('contract.financial_task.completed', 'financial_task', $taskId, [
             'contract_id' => $contractId,
             'status' => 'concluido',
@@ -585,6 +592,16 @@ final class ContractController
             $response = $this->mkAuthTicketService->openFinancialTicket(
                 $this->buildFinancialTicketPayload($detail)
             );
+            $ticketId = $this->resolveTicketId($response);
+            if ($ticketId !== null) {
+                $this->syncFinancialTaskTicketMetadata(
+                    $taskId,
+                    $ticketId,
+                    (string) ($response['status'] ?? 'aberto'),
+                    null,
+                    null
+                );
+            }
 
             $responseSummary = sprintf(
                 'HTTP %s · %sms%s',
@@ -605,6 +622,7 @@ final class ContractController
                 'contract_id' => $contractId,
                 'force_resend' => $forceResend,
                 'request_id' => $requestId,
+                'ticket_id' => $ticketId,
                 'response' => $response,
             ], $request);
 
@@ -648,6 +666,125 @@ final class ContractController
         return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
     }
 
+    public function verificarStatusMkauth(Request $request): Response
+    {
+        if (!$this->canManageFinancial()) {
+            Flash::set('error', 'Seu usuário não possui permissão para consultar o status do chamado no MkAuth.');
+            return Response::redirect('/contratos');
+        }
+
+        $contractId = (int) $request->input('contract_id', 0);
+        $returnTo = trim((string) $request->input('return_to', '/contratos/detalhe?id=' . $contractId));
+        $detail = $contractId > 0 ? $this->loadContractDetail($contractId) : null;
+
+        if ($contractId <= 0 || $detail === null) {
+            Flash::set('error', 'Nao foi possivel localizar o contrato solicitado.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
+        $taskId = (int) ($financialTask['id'] ?? 0);
+        if ($taskId <= 0) {
+            Flash::set('error', 'Nao foi possivel localizar a tarefa financeira vinculada.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $ticketId = $this->resolveFinancialTicketId($financialTask, $detail);
+        if ($ticketId === '') {
+            $this->recordAudit('financial_task.mkauth_ticket.not_found', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'reason' => 'missing_ticket_id',
+            ], $request);
+            Flash::set('error', 'Nenhum número de chamado MkAuth foi localizado para esta pendência.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        try {
+            $status = $this->mkAuthTicketService->checkFinancialTicketStatus($ticketId);
+        } catch (\Throwable $exception) {
+            $this->recordAudit('financial_task.mkauth_ticket.ambiguous', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'ticket_id' => $ticketId,
+                'error' => $exception->getMessage(),
+            ], $request);
+            Flash::set('warning', 'Nao foi possivel consultar o status do chamado no MkAuth agora: ' . $exception->getMessage());
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $now = date('Y-m-d H:i:s');
+
+        if (empty($status['found'])) {
+            $this->recordAudit('financial_task.mkauth_ticket.not_found', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'ticket_id' => $ticketId,
+                'status' => $status,
+            ], $request);
+            $this->financialTaskRepository->updateTicketMetadata($taskId, [
+                'mkauth_ticket_id' => $ticketId,
+                'mkauth_ticket_status' => 'not_found',
+                'mkauth_ticket_checked_at' => $now,
+            ]);
+            Flash::set('error', 'Chamado nao encontrado no MkAuth. A pendência local permanece aberta.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        if (!empty($status['closed'])) {
+            $this->syncFinancialTaskTicketMetadata(
+                $taskId,
+                $ticketId,
+                (string) ($status['raw_status'] ?? 'fechado'),
+                $now,
+                (string) $this->resolveUser()['login']
+            );
+            $this->financialTaskRepository->updateStatus($taskId, 'concluido');
+            $this->financialTaskRepository->appendSystemNote(
+                $taskId,
+                '[' . $now . '] Chamado financeiro fechado no MkAuth em ' . $now . '. Pendencia marcada como concluida.',
+                'concluido'
+            );
+            $this->recordAudit('financial_task.mkauth_ticket.closed', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'ticket_id' => $ticketId,
+                'status' => $status,
+            ], $request);
+            Flash::set('success', 'Chamado financeiro fechado no MkAuth. Pendência marcada como concluída.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        if (!empty($status['open'])) {
+            $this->syncFinancialTaskTicketMetadata(
+                $taskId,
+                $ticketId,
+                (string) ($status['raw_status'] ?? 'aberto'),
+                $now,
+                null
+            );
+            $this->recordAudit('financial_task.mkauth_ticket.checked', 'financial_task', $taskId, [
+                'contract_id' => $contractId,
+                'ticket_id' => $ticketId,
+                'status' => $status,
+            ], $request);
+            Flash::set('info', 'Chamado ainda aberto no MkAuth.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
+
+        $this->syncFinancialTaskTicketMetadata(
+            $taskId,
+            $ticketId,
+            (string) ($status['raw_status'] ?? 'ambiguous'),
+            $now,
+            null
+        );
+        $this->recordAudit('financial_task.mkauth_ticket.ambiguous', 'financial_task', $taskId, [
+            'contract_id' => $contractId,
+            'ticket_id' => $ticketId,
+            'status' => $status,
+        ], $request);
+        Flash::set('warning', 'O status do chamado no MkAuth ficou ambíguo. Mantivemos a pendência em andamento.');
+
+        return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+    }
+
     private function resolveTicketId(array $response): ?string
     {
         foreach (['ticket_id', 'chamado', 'chamado_id'] as $key) {
@@ -659,6 +796,72 @@ final class ContractController
         }
 
         return null;
+    }
+
+    private function resolveFinancialTicketId(array $financialTask, array $detail): string
+    {
+        $candidates = [
+            (string) ($financialTask['mkauth_ticket_id'] ?? ''),
+            (string) ($financialTask['ticket_id'] ?? ''),
+            (string) ($financialTask['external_ticket_id'] ?? ''),
+        ];
+
+        $providerResponse = $financialTask['provider_response'] ?? null;
+        if (is_string($providerResponse)) {
+            $decoded = json_decode($providerResponse, true);
+            if (is_array($decoded)) {
+                $candidates[] = (string) ($decoded['ticket_id'] ?? $decoded['chamado'] ?? $decoded['chamado_id'] ?? '');
+            }
+        } elseif (is_array($providerResponse)) {
+            $candidates[] = (string) ($providerResponse['ticket_id'] ?? $providerResponse['chamado'] ?? $providerResponse['chamado_id'] ?? '');
+        }
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
+        foreach ($auditLogs as $log) {
+            if (!is_array($log) || !str_starts_with((string) ($log['action'] ?? ''), 'contract.financial_task.ticket.')) {
+                continue;
+            }
+
+            $context = json_decode((string) ($log['context_json'] ?? ''), true);
+            if (!is_array($context)) {
+                continue;
+            }
+
+            foreach (['ticket_id', 'chamado', 'chamado_id'] as $key) {
+                $value = trim((string) ($context['response'][$key] ?? $context[$key] ?? ''));
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    private function syncFinancialTaskTicketMetadata(int $taskId, string $ticketId, string $ticketStatus, ?string $checkedAt, ?string $completedBy): void
+    {
+        try {
+            $task = $this->financialTaskRepository->findById($taskId);
+            if (!is_array($task)) {
+                return;
+            }
+
+            $this->financialTaskRepository->updateTicketMetadata($taskId, [
+                'mkauth_ticket_id' => $ticketId !== '' ? $ticketId : ($task['mkauth_ticket_id'] ?? null),
+                'mkauth_ticket_status' => $ticketStatus !== '' ? $ticketStatus : ($task['mkauth_ticket_status'] ?? null),
+                'mkauth_ticket_checked_at' => $checkedAt ?? ($task['mkauth_ticket_checked_at'] ?? null),
+                'completed_at' => $completedBy !== null ? ($checkedAt ?? date('Y-m-d H:i:s')) : ($task['completed_at'] ?? null),
+                'completed_by' => $completedBy !== null ? $completedBy : ($task['completed_by'] ?? null),
+            ]);
+        } catch (\Throwable) {
+        }
     }
 
     private function buildState(): array
@@ -1365,12 +1568,11 @@ final class ContractController
         $tech = (string) ($variables['{tecnico_nome}'] ?? $this->resolveTechnicianDisplayName($contract));
         $link = trim((string) ($variables['{link_aceite}'] ?? $this->buildSimulatedAcceptanceLink($detail)));
         $ttl = (string) ($variables['{validade_horas}'] ?? $this->config->get('contracts.acceptance_ttl_hours', 48));
+        $centralAssinanteUrl = (string) ($variables['{central_assinante_url}'] ?? $this->resolveCentralAssinanteUrl());
 
         $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
         $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
-        $messageOne = "Olá, {$name}! 👋\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$tech}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital no link que enviaremos a seguir.";
-
-        $messageOne = trim($messageOne) . "\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
+        $messageOne = "Olá, {$name}! 👋\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$tech}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital no link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
 
         return [
             $messageOne,
@@ -1387,16 +1589,20 @@ final class ContractController
         $company = (string) ($variables['{empresa_nome}'] ?? $this->resolveProviderDisplayName());
         $tech = (string) ($variables['{tecnico_nome}'] ?? $this->resolveTechnicianDisplayName($contract));
         $ttl = (string) ($variables['{validade_horas}'] ?? $this->config->get('contracts.acceptance_ttl_hours', 48));
+        $centralAssinanteUrl = (string) ($variables['{central_assinante_url}'] ?? $this->resolveCentralAssinanteUrl());
         $subject = 'Aceite digital do contrato - ' . $company;
         $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
         $companyClosing = $company === 'nossa equipe' ? 'Nossa equipe' : 'Equipe ' . $company;
         $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
-        $text = "Olá, {$name}!\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$tech}.\n\nPara concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:\n\n{$link}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
+        $text = "Olá, {$name}!\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$tech}.\n\nPara concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:\n\n{$link}\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
         $html = '<p>Olá, <strong>' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</strong>!</p>'
             . '<p>Aqui é ' . htmlspecialchars($companyOpening, ENT_QUOTES, 'UTF-8') . '.</p>'
             . '<p>Seu cadastro foi realizado pelo técnico ' . htmlspecialchars($tech, ENT_QUOTES, 'UTF-8') . '.</p>'
             . '<p>Para concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:</p>'
             . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>'
+            . '<p>Após a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.</p>'
+            . '<p>Boletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:<br>'
+            . htmlspecialchars($centralAssinanteUrl, ENT_QUOTES, 'UTF-8') . '</p>'
             . '<p>Este link é pessoal, seguro e expira em ' . htmlspecialchars($ttl, ENT_QUOTES, 'UTF-8') . ' horas.</p>'
             . '<p>Se tiver qualquer dúvida, ' . htmlspecialchars($supportLine, ENT_QUOTES, 'UTF-8') . ' antes de confirmar.</p>'
             . '<p><strong>Atenciosamente,<br>' . htmlspecialchars($companyClosing, ENT_QUOTES, 'UTF-8') . '</strong></p>';
@@ -1415,6 +1621,7 @@ final class ContractController
             '{cliente_nome}' => (string) ($contract['nome_cliente'] ?? 'Cliente'),
             '{empresa_nome}' => $providerName,
             '{tecnico_nome}' => $technicianName,
+            '{central_assinante_url}' => $this->resolveCentralAssinanteUrl(),
             '{link_aceite}' => $this->buildSimulatedAcceptanceLink($detail),
             '{validade_horas}' => (string) $this->config->get('contracts.acceptance_ttl_hours', 48),
         ];
@@ -1445,10 +1652,12 @@ final class ContractController
     private function resolveTechnicianDisplayName(array $contract): string
     {
         $candidates = [
+            (string) ($contract['technician_name'] ?? ''),
             (string) ($contract['created_by'] ?? ''),
             (string) ($contract['tecnico_nome'] ?? ''),
             (string) ($contract['tecnico'] ?? ''),
             (string) ($contract['accepted_by'] ?? ''),
+            (string) ($contract['technician_login'] ?? ''),
         ];
 
         foreach ($candidates as $candidate) {
@@ -1458,9 +1667,32 @@ final class ContractController
             }
         }
 
-        $userName = trim((string) ($_SESSION['user']['name'] ?? ''));
+        $user = $this->resolveUser();
+        $userName = trim((string) ($user['name'] ?? ''));
+        if ($userName !== '') {
+            return $userName;
+        }
 
-        return $userName !== '' ? $userName : 'Equipe técnica';
+        $userLogin = trim((string) ($user['login'] ?? ''));
+
+        return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+    }
+
+    private function resolveCentralAssinanteUrl(): string
+    {
+        $url = '';
+
+        try {
+            $url = trim((string) $this->localRepository->providerSetting('central_assinante_url', ''));
+        } catch (\Throwable) {
+            $url = '';
+        }
+
+        if ($url === '') {
+            $url = trim((string) $this->config->get('contracts.commercial.central_assinante_url', 'https://sistema.ievo.com.br/central'));
+        }
+
+        return $url !== '' ? $url : 'https://sistema.ievo.com.br/central';
     }
 
     private function resolveAcceptanceTemplatePurpose(string $tipoAceite): string
@@ -1566,7 +1798,13 @@ final class ContractController
 
         $ticketLast = null;
         foreach ($auditLogs as $log) {
-            if (!is_array($log) || !str_starts_with((string) ($log['action'] ?? ''), 'contract.financial_task.ticket.')) {
+            if (
+                !is_array($log)
+                || (
+                    !str_starts_with((string) ($log['action'] ?? ''), 'contract.financial_task.ticket.')
+                    && !str_starts_with((string) ($log['action'] ?? ''), 'financial_task.mkauth_ticket.')
+                )
+            ) {
                 continue;
             }
 

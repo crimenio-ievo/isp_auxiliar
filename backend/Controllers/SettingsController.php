@@ -136,6 +136,21 @@ final class SettingsController
             'domain' => (string) $request->input('provider_domain', ''),
             'base_path' => (string) $request->input('provider_base_path', ''),
         ]);
+
+        $this->localRepository->saveProviderSettings([
+            'provider_legal_name' => trim((string) $request->input('provider_legal_name', '')),
+            'provider_cnpj' => trim((string) $request->input('provider_cnpj', '')),
+            'provider_address' => trim((string) $request->input('provider_address', '')),
+            'provider_neighborhood' => trim((string) $request->input('provider_neighborhood', '')),
+            'provider_city' => trim((string) $request->input('provider_city', '')),
+            'provider_state' => trim((string) $request->input('provider_state', '')),
+            'provider_zip' => trim((string) $request->input('provider_zip', '')),
+            'provider_phone' => trim((string) $request->input('provider_phone', '')),
+            'provider_site' => trim((string) $request->input('provider_site', '')),
+            'provider_email' => trim((string) $request->input('provider_email', '')),
+            'provider_anatel_process' => trim((string) $request->input('provider_anatel_process', '')),
+            'central_assinante_url' => trim((string) $request->input('central_assinante_url', '')),
+        ]);
     }
 
     private function saveMkAuthSettings(Request $request, array $providerSettings): void
@@ -225,6 +240,7 @@ final class SettingsController
             'parcelas_maximas_adesao' => max(1, (int) $request->input('parcelas_maximas_adesao', (string) ($commercial['parcelas_maximas_adesao'] ?? 3))),
             'fidelidade_meses_padrao' => max(1, (int) $request->input('fidelidade_meses_padrao', (string) ($commercial['fidelidade_meses_padrao'] ?? 12))),
             'validade_link_aceite_horas' => max(1, (int) $request->input('validade_link_aceite_horas', (string) ($commercial['validade_link_aceite_horas'] ?? 48))),
+            'central_assinante_url' => trim((string) $request->input('central_assinante_url', (string) ($commercial['central_assinante_url'] ?? 'https://sistema.ievo.com.br/central'))),
             'exigir_validacao_cpf_aceite' => $this->normalizeBoolean((string) $request->input('exigir_validacao_cpf_aceite', '1')),
             'quantidade_digitos_validacao_cpf' => max(1, (int) $request->input('quantidade_digitos_validacao_cpf', (string) ($commercial['quantidade_digitos_validacao_cpf'] ?? 3))),
             'multa_padrao' => $this->normalizeMoney((string) $request->input('multa_padrao', (string) ($commercial['multa_padrao'] ?? 0))),
@@ -594,6 +610,54 @@ final class SettingsController
             'provider_base_path' => $providerBasePath,
             'public_acceptance_link' => $publicAcceptanceLink,
             'sample_acceptance_link' => $sampleAcceptanceLink,
+        ];
+    }
+
+    private function resolveProviderLegalProfile(): array
+    {
+        $provider = [];
+        $settings = [];
+
+        try {
+            $provider = (array) ($this->localRepository->currentProvider() ?? []);
+            $settings = $this->localRepository->providerSettings();
+        } catch (\Throwable) {
+            $provider = [];
+            $settings = [];
+        }
+
+        $getSetting = static function (array $settings, string $key, string $fallback = ''): string {
+            $value = trim((string) ($settings[$key] ?? ''));
+
+            return $value !== '' ? $value : $fallback;
+        };
+
+        $brandName = trim((string) ($provider['name'] ?? ''));
+        if ($brandName === '' || in_array(strtolower($brandName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+            $brandName = $getSetting($settings, 'provider_name', (string) $this->config->get('app.name', 'nossa equipe'));
+        }
+
+        $centralAssinanteUrl = $getSetting(
+            $settings,
+            'central_assinante_url',
+            (string) $this->config->get('contracts.commercial.central_assinante_url', 'https://sistema.ievo.com.br/central')
+        );
+
+        return [
+            'brand_name' => $brandName !== '' ? $brandName : 'nossa equipe',
+            'legal_name' => $getSetting($settings, 'provider_legal_name', (string) ($provider['name'] ?? '')),
+            'document' => $getSetting($settings, 'provider_cnpj', (string) ($provider['document'] ?? '')),
+            'address' => $getSetting($settings, 'provider_address', ''),
+            'neighborhood' => $getSetting($settings, 'provider_neighborhood', ''),
+            'city' => $getSetting($settings, 'provider_city', ''),
+            'state' => $getSetting($settings, 'provider_state', ''),
+            'zip' => $getSetting($settings, 'provider_zip', ''),
+            'phone' => $getSetting($settings, 'provider_phone', ''),
+            'site' => $getSetting($settings, 'provider_site', ''),
+            'email' => $getSetting($settings, 'provider_email', ''),
+            'anatel_process' => $getSetting($settings, 'provider_anatel_process', ''),
+            'central_assinante_url' => $centralAssinanteUrl !== '' ? $centralAssinanteUrl : 'https://sistema.ievo.com.br/central',
+            'source' => !empty($settings) ? 'provider_settings' : 'providers',
         ];
     }
 

@@ -22,9 +22,9 @@ final class ContractRepository
     {
         $this->database->execute(
             'INSERT INTO client_contracts
-                (client_id, mkauth_login, nome_cliente, telefone_cliente, tipo_adesao, valor_adesao, parcelas_adesao, valor_parcela_adesao, vencimento_primeira_parcela, fidelidade_meses, beneficio_valor, multa_total, tipo_aceite, observacao_adesao, status_financeiro, created_at, updated_at)
+                (client_id, mkauth_login, technician_name, technician_login, nome_cliente, telefone_cliente, tipo_adesao, valor_adesao, parcelas_adesao, valor_parcela_adesao, vencimento_primeira_parcela, fidelidade_meses, beneficio_valor, multa_total, tipo_aceite, observacao_adesao, status_financeiro, created_at, updated_at)
              VALUES
-                (:client_id, :mkauth_login, :nome_cliente, :telefone_cliente, :tipo_adesao, :valor_adesao, :parcelas_adesao, :valor_parcela_adesao, :vencimento_primeira_parcela, :fidelidade_meses, :beneficio_valor, :multa_total, :tipo_aceite, :observacao_adesao, :status_financeiro, NOW(), NOW())',
+                (:client_id, :mkauth_login, :technician_name, :technician_login, :nome_cliente, :telefone_cliente, :tipo_adesao, :valor_adesao, :parcelas_adesao, :valor_parcela_adesao, :vencimento_primeira_parcela, :fidelidade_meses, :beneficio_valor, :multa_total, :tipo_aceite, :observacao_adesao, :status_financeiro, NOW(), NOW())',
             $this->normalizeData($data)
         );
 
@@ -61,6 +61,8 @@ final class ContractRepository
             'UPDATE client_contracts
              SET client_id = :client_id,
                  mkauth_login = :mkauth_login,
+                 technician_name = :technician_name,
+                 technician_login = :technician_login,
                  nome_cliente = :nome_cliente,
                  telefone_cliente = :telefone_cliente,
                  tipo_adesao = :tipo_adesao,
@@ -106,6 +108,8 @@ final class ContractRepository
         return [
             'client_id' => $data['client_id'] ?? null,
             'mkauth_login' => (string) ($data['mkauth_login'] ?? ''),
+            'technician_name' => $this->normalizeNullableString($data['technician_name'] ?? null),
+            'technician_login' => $this->normalizeNullableString($data['technician_login'] ?? null),
             'nome_cliente' => (string) ($data['nome_cliente'] ?? ''),
             'telefone_cliente' => (string) ($data['telefone_cliente'] ?? ''),
             'tipo_adesao' => (string) ($data['tipo_adesao'] ?? 'cheia'),
@@ -125,5 +129,12 @@ final class ContractRepository
     private function normalizeAmount(mixed $value): string
     {
         return number_format((float) $value, 2, '.', '');
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
     }
 }

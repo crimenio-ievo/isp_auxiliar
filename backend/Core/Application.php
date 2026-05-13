@@ -89,7 +89,7 @@ final class Application
             return true;
         }
 
-        return (bool) preg_match('#^/aceite/[^/]+(?:/confirmar)?$#', $request->path());
+        return (bool) preg_match('#^/aceite/[^/]+(?:/(?:confirmar|termo))?$#', $request->path());
     }
 
     /**

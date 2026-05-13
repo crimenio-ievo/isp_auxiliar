@@ -41,6 +41,9 @@ if ($permissionRows === []) {
 
 $moneyValue = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $providerValue = static fn (string $key, string $default = ''): string => (string) ($providerSettings[$key] ?? $default);
+$providerAnatelDefault = strtolower(trim((string) ($provider['slug'] ?? ''))) === 'ievo'
+    ? 'Processo nº 53500.292642/2022-7'
+    : '';
 $selected = static fn (bool $state): string => $state ? 'selected' : '';
 $checked = static fn (bool $state): string => $state ? 'checked' : '';
 $emailPasswordConfigured = trim((string) ($storedEmail['smtp_password'] ?? $email['smtp_password'] ?? '')) !== '';
@@ -141,6 +144,63 @@ ob_start();
                         <span>Caminho público do sistema</span>
                         <input type="text" name="provider_base_path" value="<?= htmlspecialchars((string) ($provider['base_path'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" placeholder="/isp_auxiliar/public">
                         <small class="field-help">Se o sistema roda em subdiretório, informe o caminho público completo do ambiente.</small>
+                    </label>
+                </div>
+            </section>
+            <section class="card">
+                <div class="section-heading">
+                    <p class="section-heading__eyebrow">Dados jurídicos</p>
+                    <h2>Contratada e contato oficial</h2>
+                </div>
+                <div class="form-grid">
+                    <label class="field field--span-2">
+                        <span>Razão social</span>
+                        <input type="text" name="provider_legal_name" value="<?= htmlspecialchars($providerValue('provider_legal_name', (string) ($provider['name'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Razão social do provedor">
+                    </label>
+                    <label class="field">
+                        <span>CNPJ</span>
+                        <input type="text" name="provider_cnpj" value="<?= htmlspecialchars($providerValue('provider_cnpj', (string) ($provider['document'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>" placeholder="00.000.000/0001-00">
+                    </label>
+                    <label class="field">
+                        <span>Telefone / WhatsApp</span>
+                        <input type="text" name="provider_phone" value="<?= htmlspecialchars($providerValue('provider_phone'), ENT_QUOTES, 'UTF-8'); ?>" placeholder="(00) 00000-0000">
+                    </label>
+                    <label class="field field--span-2">
+                        <span>Endereço</span>
+                        <input type="text" name="provider_address" value="<?= htmlspecialchars($providerValue('provider_address'), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Rua, número, complemento">
+                    </label>
+                    <label class="field">
+                        <span>Bairro</span>
+                        <input type="text" name="provider_neighborhood" value="<?= htmlspecialchars($providerValue('provider_neighborhood'), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label class="field">
+                        <span>Cidade</span>
+                        <input type="text" name="provider_city" value="<?= htmlspecialchars($providerValue('provider_city'), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label class="field">
+                        <span>UF</span>
+                        <input type="text" name="provider_state" value="<?= htmlspecialchars($providerValue('provider_state'), ENT_QUOTES, 'UTF-8'); ?>" maxlength="2">
+                    </label>
+                    <label class="field">
+                        <span>CEP</span>
+                        <input type="text" name="provider_zip" value="<?= htmlspecialchars($providerValue('provider_zip'), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label class="field">
+                        <span>Site</span>
+                        <input type="url" name="provider_site" value="<?= htmlspecialchars($providerValue('provider_site'), ENT_QUOTES, 'UTF-8'); ?>" placeholder="https://provedor.com.br">
+                    </label>
+                    <label class="field">
+                        <span>E-mail</span>
+                        <input type="email" name="provider_email" value="<?= htmlspecialchars($providerValue('provider_email'), ENT_QUOTES, 'UTF-8'); ?>" placeholder="contato@provedor.com.br">
+                    </label>
+                    <label class="field field--span-2">
+                        <span>Autorização ANATEL / Processo SCM</span>
+                        <input type="text" name="provider_anatel_process" value="<?= htmlspecialchars($providerValue('provider_anatel_process', $providerAnatelDefault), ENT_QUOTES, 'UTF-8'); ?>" placeholder="Processo / autorização SCM">
+                    </label>
+                    <label class="field field--span-2">
+                        <span>Central do Assinante URL</span>
+                        <input type="url" name="central_assinante_url" value="<?= htmlspecialchars($providerValue('central_assinante_url', 'https://sistema.ievo.com.br/central'), ENT_QUOTES, 'UTF-8'); ?>" placeholder="https://sistema.ievo.com.br/central">
+                        <small class="field-help">Usada no aceite, termo assinado e mensagens ao cliente.</small>
                     </label>
                 </div>
             </section>
@@ -296,6 +356,11 @@ ob_start();
                     <label class="field">
                         <span>Validade link aceite (h)</span>
                         <input type="number" min="1" name="validade_link_aceite_horas" value="<?= htmlspecialchars((string) ($commercial['validade_link_aceite_horas'] ?? 48), ENT_QUOTES, 'UTF-8'); ?>">
+                    </label>
+                    <label class="field field--span-2">
+                        <span>Central do Assinante URL</span>
+                        <input type="url" name="central_assinante_url" value="<?= htmlspecialchars((string) ($commercial['central_assinante_url'] ?? 'https://sistema.ievo.com.br/central'), ENT_QUOTES, 'UTF-8'); ?>" placeholder="https://sistema.ievo.com.br/central">
+                        <small class="field-help">Usada nas mensagens e na tela pós-aceite. Se vazia, o sistema usa a URL padrão acima.</small>
                     </label>
                     <label class="field">
                         <span>Exigir validação CPF/CNPJ</span>

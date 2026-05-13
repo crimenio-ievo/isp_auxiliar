@@ -22,9 +22,9 @@ final class ContractAcceptanceRepository
     {
         $this->database->execute(
             'INSERT INTO contract_acceptances
-                (contract_id, token_hash, token_expires_at, status, telefone_enviado, whatsapp_message_id, sent_at, accepted_at, ip_address, user_agent, termo_versao, termo_hash, pdf_path, evidence_json_path, created_at, updated_at)
+                (contract_id, technician_name, technician_login, token_hash, token_expires_at, status, telefone_enviado, whatsapp_message_id, sent_at, accepted_at, ip_address, user_agent, termo_versao, termo_hash, pdf_path, evidence_json_path, created_at, updated_at)
              VALUES
-                (:contract_id, :token_hash, :token_expires_at, :status, :telefone_enviado, :whatsapp_message_id, :sent_at, :accepted_at, :ip_address, :user_agent, :termo_versao, :termo_hash, :pdf_path, :evidence_json_path, NOW(), NOW())',
+                (:contract_id, :technician_name, :technician_login, :token_hash, :token_expires_at, :status, :telefone_enviado, :whatsapp_message_id, :sent_at, :accepted_at, :ip_address, :user_agent, :termo_versao, :termo_hash, :pdf_path, :evidence_json_path, NOW(), NOW())',
             $this->normalizeData($data)
         );
 
@@ -60,6 +60,8 @@ final class ContractAcceptanceRepository
         return $this->database->execute(
             'UPDATE contract_acceptances
              SET contract_id = :contract_id,
+                 technician_name = :technician_name,
+                 technician_login = :technician_login,
                  token_hash = :token_hash,
                  token_expires_at = :token_expires_at,
                  status = :status,
@@ -158,6 +160,8 @@ final class ContractAcceptanceRepository
     {
         return [
             'contract_id' => $data['contract_id'] ?? null,
+            'technician_name' => $this->normalizeNullableString($data['technician_name'] ?? null),
+            'technician_login' => $this->normalizeNullableString($data['technician_login'] ?? null),
             'token_hash' => $this->normalizeTokenHash((string) ($data['token_hash'] ?? $data['token'] ?? '')),
             'token_expires_at' => (string) ($data['token_expires_at'] ?? date('Y-m-d H:i:s')),
             'status' => (string) ($data['status'] ?? 'criado'),
@@ -187,5 +191,12 @@ final class ContractAcceptanceRepository
         }
 
         return hash('sha256', $value);
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
     }
 }

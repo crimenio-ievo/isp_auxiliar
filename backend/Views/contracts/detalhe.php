@@ -404,6 +404,11 @@ ob_start();
             <div class="summary-grid">
                 <div class="summary-item"><span>Título</span><strong><?= htmlspecialchars((string) ($financialTask['titulo'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 <div class="summary-item"><span>Status</span><strong><span class="pill"><?= htmlspecialchars((string) ($financialTask['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></strong></div>
+                <div class="summary-item"><span>Chamado MkAuth</span><strong><?= htmlspecialchars((string) ($financialTask['mkauth_ticket_id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                <div class="summary-item"><span>Status MkAuth</span><strong><span class="pill pill--muted"><?= htmlspecialchars((string) ($financialTask['mkauth_ticket_status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></strong></div>
+                <div class="summary-item"><span>Última consulta</span><strong><?= htmlspecialchars((string) ($financialTask['mkauth_ticket_checked_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                <div class="summary-item"><span>Concluído em</span><strong><?= htmlspecialchars((string) ($financialTask['completed_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                <div class="summary-item"><span>Concluído por</span><strong><?= htmlspecialchars((string) ($financialTask['completed_by'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 <div class="summary-item summary-item--span-2"><span>Descrição</span><strong><?= nl2br(htmlspecialchars((string) ($financialTask['descricao'] ?? '-'), ENT_QUOTES, 'UTF-8')); ?></strong></div>
             </div>
 
@@ -413,6 +418,11 @@ ob_start();
                         <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
                         <button type="submit" class="button">Marcar como concluído</button>
+                    </form>
+                    <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/verificar-status'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja verificar o status do chamado no MkAuth?');">
+                        <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES, 'UTF-8'); ?>">
+                        <button type="submit" class="button button--ghost">Verificar status no MkAuth</button>
                     </form>
                     <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/financeiro/chamado'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja abrir chamado financeiro no MkAuth?');" class="integration-send-form" data-integration-send-form="mkauth_ticket">
                         <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">

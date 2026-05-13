@@ -2822,6 +2822,7 @@ final class ClientController
 
         $observacaoAdesao = trim((string) ($data['observacao_adesao'] ?? $data['observacao'] ?? $data['observacao_aceite'] ?? ''));
         $observacaoAdesaoLines = [];
+        $technician = $this->resolveTechnicianIdentity();
 
         if ($beneficioConcedidoPor !== '') {
             $observacaoAdesaoLines[] = 'Autorizado por: ' . $beneficioConcedidoPor;
@@ -2836,6 +2837,8 @@ final class ClientController
         return [
             'client_id' => $registrationId,
             'mkauth_login' => $login,
+            'technician_name' => $technician['name'],
+            'technician_login' => $technician['login'],
             'nome_cliente' => $nome,
             'email_cliente' => (string) ($data['email_original'] ?? $data['email'] ?? ''),
             'has_real_email' => (bool) ($data['has_real_email'] ?? false),
@@ -2860,8 +2863,11 @@ final class ClientController
         $ttlHours = max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48));
         $expiresAt = (new \DateTimeImmutable())->modify('+' . $ttlHours . ' hours')->format('Y-m-d H:i:s');
         $plainToken = bin2hex(random_bytes(16));
+        $technician = $this->resolveTechnicianIdentity();
         $acceptanceData = [
             'contract_id' => $contractId,
+            'technician_name' => $technician['name'],
+            'technician_login' => $technician['login'],
             'token' => $plainToken,
             'token_expires_at' => $expiresAt,
             'status' => 'criado',
@@ -3030,6 +3036,16 @@ final class ClientController
             $response = $this->mkAuthTicketService->openFinancialTicket(
                 $this->buildFinancialTicketPayload($contractData, $taskId)
             );
+            $ticketId = $this->resolveTicketId($response);
+            if ($ticketId !== null) {
+                try {
+                    $this->financialTaskRepository->updateTicketMetadata($taskId, [
+                        'mkauth_ticket_id' => $ticketId,
+                        'mkauth_ticket_status' => (string) ($response['status'] ?? 'aberto'),
+                    ]);
+                } catch (\Throwable) {
+                }
+            }
 
             $summary = sprintf(
                 'HTTP %s · %sms%s',
@@ -3044,6 +3060,7 @@ final class ClientController
             );
             $this->recordAudit('client.financial_task.ticket.auto_created', 'financial_task', $taskId, [
                 'contract_id' => $contractId,
+                'ticket_id' => $ticketId ?? null,
                 'response' => $response,
             ], $request);
 
@@ -3109,10 +3126,11 @@ final class ClientController
         $technician = $this->resolveTechnicianDisplayName($contract, $draft);
         $link = $this->buildAcceptanceLink($acceptance);
         $ttl = (string) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48);
+        $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
         $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
         $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
 
-        $first = "Olá, {$customer}! 👋\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$technician}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
+        $first = "Olá, {$customer}! 👋\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$technician}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
 
         return [
             trim($first),
@@ -3127,16 +3145,20 @@ final class ClientController
         $technician = $this->resolveTechnicianDisplayName($contract, $draft);
         $link = $this->buildAcceptanceLink($acceptance);
         $ttl = (string) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48);
+        $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
         $subject = 'Aceite digital do contrato - ' . $company;
         $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
         $companyClosing = $company === 'nossa equipe' ? 'Nossa equipe' : 'Equipe ' . $company;
         $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
-        $text = "Olá, {$customer}!\n\nAqui é {$companyOpening}.\n\nSeu cadastro foi realizado pelo técnico {$technician}.\n\nPara concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:\n\n{$link}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
+        $text = "Olá, {$customer}!\n\nAqui é {$companyOpening}.\n\nSeu cadastro foi realizado pelo técnico {$technician}.\n\nPara concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:\n\n{$link}\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
         $html = '<p>Olá, <strong>' . htmlspecialchars($customer, ENT_QUOTES, 'UTF-8') . '</strong>!</p>'
             . '<p>Aqui é ' . htmlspecialchars($companyOpening, ENT_QUOTES, 'UTF-8') . '.</p>'
             . '<p>Seu cadastro foi realizado pelo técnico ' . htmlspecialchars($technician, ENT_QUOTES, 'UTF-8') . '.</p>'
             . '<p>Para concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:</p>'
             . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>'
+            . '<p>Após a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.</p>'
+            . '<p>Boletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:<br>'
+            . htmlspecialchars($centralAssinanteUrl, ENT_QUOTES, 'UTF-8') . '</p>'
             . '<p>Este link é pessoal, seguro e expira em ' . htmlspecialchars($ttl, ENT_QUOTES, 'UTF-8') . ' horas.</p>'
             . '<p>Se tiver qualquer dúvida, ' . htmlspecialchars($supportLine, ENT_QUOTES, 'UTF-8') . ' antes de confirmar.</p>'
             . '<p><strong>Atenciosamente,<br>' . htmlspecialchars($companyClosing, ENT_QUOTES, 'UTF-8') . '</strong></p>';
@@ -3230,11 +3252,15 @@ final class ClientController
     private function resolveTechnicianDisplayName(array $contract, array $draft = []): string
     {
         $candidates = [
+            (string) ($contract['technician_name'] ?? ''),
+            (string) ($draft['technician_name'] ?? ''),
             (string) ($contract['created_by'] ?? ''),
             (string) ($contract['tecnico_nome'] ?? ''),
             (string) ($contract['tecnico'] ?? ''),
             (string) ($contract['accepted_by'] ?? ''),
             (string) ($draft['beneficio_concedido_por'] ?? ''),
+            (string) ($contract['technician_login'] ?? ''),
+            (string) ($draft['technician_login'] ?? ''),
         ];
 
         foreach ($candidates as $candidate) {
@@ -3244,9 +3270,53 @@ final class ClientController
             }
         }
 
-        $userName = trim((string) ($_SESSION['user']['name'] ?? ''));
+        $user = $this->resolveUser();
+        $userName = trim((string) ($user['name'] ?? ''));
 
-        return $userName !== '' ? $userName : 'Equipe técnica';
+        if ($userName !== '') {
+            return $userName;
+        }
+
+        $userLogin = trim((string) ($user['login'] ?? ''));
+
+        return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+    }
+
+    private function resolveTechnicianIdentity(): array
+    {
+        $user = $this->resolveUser();
+        $name = trim((string) ($user['name'] ?? ''));
+        $login = trim((string) ($user['login'] ?? ''));
+
+        if ($name === '' && $login !== '') {
+            $name = $login;
+        }
+
+        if ($name === '') {
+            $name = 'Equipe técnica';
+        }
+
+        return [
+            'name' => $name,
+            'login' => $login,
+        ];
+    }
+
+    private function resolveCentralAssinanteUrl(): string
+    {
+        $url = '';
+
+        try {
+            $url = trim((string) $this->localRepository->providerSetting('central_assinante_url', ''));
+        } catch (\Throwable) {
+            $url = '';
+        }
+
+        if ($url === '') {
+            $url = trim((string) $this->config->get('contracts.commercial.central_assinante_url', 'https://sistema.ievo.com.br/central'));
+        }
+
+        return $url !== '' ? $url : 'https://sistema.ievo.com.br/central';
     }
 
     private function isDuplicateManualSend(string $scope, string $requestId): bool
@@ -3307,11 +3377,15 @@ final class ClientController
 
         $providerName = $this->resolveProviderDisplayName();
         $contractTitle = $providerName === 'nossa equipe' ? 'Contrato digital da nossa equipe' : 'Contrato digital ' . $providerName;
+        $technician = $this->resolveTechnicianIdentity();
+        $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
 
         return trim(implode("\n", [
             $contractTitle,
             'Cliente: ' . $nome,
             'Login: ' . $login,
+            'Técnico responsável: ' . $technician['name'],
+            'Login do técnico: ' . $technician['login'],
             'Telefone: ' . $telefone,
             'Tipo de adesão: ' . $tipoAdesao,
             'Valor da adesão: R$ ' . $valorAdesao,
@@ -3323,6 +3397,8 @@ final class ClientController
             '',
             'A taxa de adesão poderá ser concedida com desconto, isenção ou parcelamento, condicionada à fidelidade de 12 meses. O cancelamento antes do fim da fidelidade poderá gerar cobrança proporcional conforme condições contratadas.',
             'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
+            'A cópia do termo e os documentos de cobrança podem ser consultados pela Central do Assinante:',
+            $centralAssinanteUrl,
             'O aceite é realizado por link enviado ao telefone por WhatsApp e/ou e-mail cadastrado. A confirmação por qualquer um desses canais valida o aceite eletrônico.',
         ]));
     }
@@ -3335,15 +3411,15 @@ final class ClientController
             'aceite_nova_instalacao' => [
                 'channel' => 'whatsapp',
                 'purpose' => 'aceite_nova_instalacao',
-                'body' => "Olá, {nome} 👋\n\nSeu cadastro foi realizado.\n\nConfira seus dados, plano, valores e contrato no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {$ttlHours} horas.",
-                'variables_json' => ['nome', 'link_aceite'],
+                'body' => "Olá, {nome} 👋\n\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nConfira seus dados, plano, valores e aceite digital no link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal e expira em {$ttlHours} horas.",
+                'variables_json' => ['nome', 'tecnico_nome', 'central_assinante_url', 'link_aceite'],
                 'active' => 1,
             ],
             'aceite_regularizacao_contrato' => [
                 'channel' => 'whatsapp',
                 'purpose' => 'aceite_regularizacao_contrato',
-                'body' => "Olá, {nome} 👋\n\nSeu contrato foi preparado para regularização.\n\nConfira os dados e aceite no link abaixo:\n\n{link_aceite}\n\nEste link é pessoal e expira em {$ttlHours} horas.",
-                'variables_json' => ['nome', 'link_aceite'],
+                'body' => "Olá, {nome} 👋\n\nSeu contrato foi preparado para regularização pelo técnico {tecnico_nome}.\n\nConfira os dados e aceite digital no link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal e expira em {$ttlHours} horas.",
+                'variables_json' => ['nome', 'tecnico_nome', 'central_assinante_url', 'link_aceite'],
                 'active' => 1,
             ],
         ];

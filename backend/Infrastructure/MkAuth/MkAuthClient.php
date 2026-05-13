@@ -87,6 +87,22 @@ final class MkAuthClient
         return $this->request('GET', $path, [], true);
     }
 
+    public function listCompany(): array
+    {
+        return $this->request('GET', '/api/empresa/listagem', [], true);
+    }
+
+    public function showCompany(string $uuid): array
+    {
+        $uuid = trim($uuid);
+
+        if ($uuid === '') {
+            return $this->listCompany();
+        }
+
+        return $this->request('GET', '/api/empresa/show/' . rawurlencode($uuid), [], true);
+    }
+
     private function request(string $method, string $path, array $payload = [], bool $authRequired = false): array
     {
         if (!$this->isConfigured()) {

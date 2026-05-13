@@ -8,10 +8,12 @@ use App\Core\Config;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Url;
 use App\Core\View;
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
 use App\Infrastructure\Contracts\ContractRepository;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 
 /**
@@ -28,6 +30,7 @@ final class AcceptanceController
         private ContractAcceptanceRepository $acceptanceRepository,
         private ContractRepository $contractRepository,
         private LocalRepository $localRepository,
+        private MkAuthClient $mkauthClient,
         private MkAuthDatabase $mkauthDatabase
     ) {
     }
@@ -38,6 +41,8 @@ final class AcceptanceController
         $context = $this->loadContextByToken($token);
         $flash = Flash::get();
         $providerName = $this->resolveProviderDisplayName();
+        $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
+        $termUrl = Url::to('/aceite/' . rawurlencode($token) . '/termo');
 
         $html = $this->view->render('contracts/acceptance', [
             'layoutMode' => 'guest',
@@ -45,18 +50,101 @@ final class AcceptanceController
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'providerName' => $providerName,
             'basePath' => $request->basePath(),
+            'hideHeader' => true,
+            'hideFooter' => true,
             'user' => [
                 'name' => 'Cliente',
                 'login' => '',
                 'role' => 'guest',
             ],
             'token' => $token,
+            'termUrl' => $termUrl,
+            'centralAssinanteUrl' => $centralAssinanteUrl,
             'context' => $context,
             'documentValidationRequired' => (bool) ($context['documentValidationRequired'] ?? false),
             'documentValidationDigits' => (int) ($context['documentValidationDigits'] ?? 3),
             'documentValidationPossible' => (bool) ($context['documentValidationPossible'] ?? false),
             'errorMessage' => $flash['error'] ?? null,
             'successMessage' => $flash['success'] ?? null,
+        ]);
+
+        return Response::html($html);
+    }
+
+    public function term(Request $request): Response
+    {
+        $token = trim((string) $request->route('token', ''));
+        $context = $this->loadContextByToken($token);
+        $acceptance = is_array($context['acceptance'] ?? null) ? $context['acceptance'] : [];
+
+        if (($acceptance['status'] ?? '') !== 'aceito') {
+            Flash::set('error', 'O termo assinado fica disponível após a confirmação do aceite.');
+
+            return Response::redirect('/aceite/' . rawurlencode($token));
+        }
+
+        $termState = $this->loadTermAccessState($token, $request);
+        $documentDigits = max(3, (int) ($context['documentValidationDigits'] ?? 3));
+        $termValidated = !empty($termState['validated']);
+        $termLocked = !empty($termState['locked']);
+        $termAttemptsRemaining = max(0, 5 - (int) ($termState['attempts'] ?? 0));
+        $termValidationError = '';
+
+        if ($request->method() === 'POST' && !$termValidated && !$termLocked) {
+            $inputDigits = preg_replace('/\D+/', '', (string) $request->input('document_prefix', '')) ?? '';
+            $inputDigits = substr($inputDigits, 0, $documentDigits);
+            $fullDocument = preg_replace('/\D+/', '', (string) ($context['documentValidation']['document_full'] ?? '')) ?? '';
+            $expectedPrefix = substr($fullDocument, 0, $documentDigits);
+
+            if ($inputDigits !== '' && strlen($inputDigits) === $documentDigits && hash_equals($expectedPrefix, $inputDigits)) {
+                $termState['validated'] = true;
+                $termState['validated_at'] = date('Y-m-d H:i:s');
+                $this->saveTermAccessState($token, $request, $termState);
+                return Response::redirect('/aceite/' . rawurlencode($token) . '/termo');
+            }
+
+            $termState['attempts'] = (int) ($termState['attempts'] ?? 0) + 1;
+            $termLocked = $termState['attempts'] >= 5;
+            $termState['locked'] = $termLocked;
+            $this->saveTermAccessState($token, $request, $termState);
+            $termAttemptsRemaining = max(0, 5 - (int) $termState['attempts']);
+            $termValidationError = $termLocked
+                ? 'Limite de tentativas atingido. Solicite um novo acesso ao atendimento.'
+                : 'Os 3 primeiros dígitos não conferem. Verifique e tente novamente.';
+        }
+
+        $signaturePath = trim((string) ($context['publicDetails']['assinatura_path'] ?? ''));
+        $signatureRef = '';
+        if ($signaturePath !== '') {
+            $signatureRef = basename(dirname($signaturePath));
+        }
+
+        $html = $this->view->render('contracts/termo', [
+            'layoutMode' => 'guest',
+            'pageTitle' => 'Termo assinado',
+            'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'providerName' => $this->resolveProviderDisplayName(),
+            'providerLegal' => $this->resolveProviderLegalProfile(),
+            'basePath' => $request->basePath(),
+            'hideHeader' => true,
+            'hideFooter' => true,
+            'user' => [
+                'name' => 'Cliente',
+                'login' => '',
+                'role' => 'guest',
+            ],
+            'token' => $token,
+            'termUrl' => Url::to('/aceite/' . rawurlencode($token) . '/termo'),
+            'acceptanceUrl' => Url::to('/aceite/' . rawurlencode($token)),
+            'centralAssinanteUrl' => $this->resolveCentralAssinanteUrl(),
+            'context' => $context,
+            'signaturePath' => $signaturePath,
+            'signatureRef' => $signatureRef,
+            'termValidated' => $termValidated,
+            'termLocked' => $termLocked,
+            'termAttemptsRemaining' => $termAttemptsRemaining,
+            'termValidationError' => $termValidationError,
+            'termValidationDigits' => $documentDigits,
         ]);
 
         return Response::html($html);
@@ -244,20 +332,22 @@ final class AcceptanceController
             return ['error' => 'Contrato vinculado nao encontrado.'];
         }
 
+        $status = (string) ($acceptance['status'] ?? '');
+        if (!in_array($status, ['criado', 'enviado', 'aceito'], true)) {
+            return ['error' => 'Este aceite nao esta disponivel para conclusao.', 'acceptance' => $acceptance, 'contract' => $contract];
+        }
+
         $expiresAt = trim((string) ($acceptance['token_expires_at'] ?? ''));
+        $tokenExpired = false;
         if ($expiresAt !== '') {
             try {
-                if (new \DateTimeImmutable($expiresAt) < new \DateTimeImmutable()) {
+                $tokenExpired = new \DateTimeImmutable($expiresAt) < new \DateTimeImmutable();
+                if ($tokenExpired && $status !== 'aceito') {
                     return ['error' => 'Este link de aceite expirou. Solicite novo envio.'];
                 }
             } catch (\Throwable) {
                 return ['error' => 'Nao foi possivel validar a validade do link.'];
             }
-        }
-
-        $status = (string) ($acceptance['status'] ?? '');
-        if (!in_array($status, ['criado', 'enviado', 'aceito'], true)) {
-            return ['error' => 'Este aceite nao esta disponivel para conclusao.', 'acceptance' => $acceptance, 'contract' => $contract];
         }
 
         $registration = null;
@@ -312,20 +402,27 @@ final class AcceptanceController
             'registration' => $registration,
             'checkpoint' => $checkpointData,
             'planSnapshot' => $planSnapshot,
-            'error' => $status === 'aceito' ? 'Este aceite ja foi concluido.' : null,
+            'postAcceptance' => $status === 'aceito',
+            'tokenExpired' => $tokenExpired,
+            'error' => null,
         ];
     }
 
     private function resolveProviderDisplayName(): string
     {
+        $providerProfile = $this->resolveProviderLegalProfile();
+        if (trim((string) ($providerProfile['brand_name'] ?? '')) !== '') {
+            return trim((string) $providerProfile['brand_name']);
+        }
+
         try {
             $provider = $this->localRepository->currentProvider();
-        if (is_array($provider) && trim((string) ($provider['name'] ?? '')) !== '') {
-            $providerName = trim((string) $provider['name']);
-            if (!in_array(strtolower($providerName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
-                return $providerName;
+            if (is_array($provider) && trim((string) ($provider['name'] ?? '')) !== '') {
+                $providerName = trim((string) $provider['name']);
+                if (!in_array(strtolower($providerName), ['isp auxiliar', 'provedor', 'nossa equipe'], true)) {
+                    return $providerName;
+                }
             }
-        }
         } catch (\Throwable) {
             // Fallback abaixo.
         }
@@ -336,6 +433,282 @@ final class AcceptanceController
         }
 
         return 'nossa equipe';
+    }
+
+    private function resolveTechnicianDisplayName(array $contract): string
+    {
+        $candidates = [
+            (string) ($contract['technician_name'] ?? ''),
+            (string) ($contract['created_by'] ?? ''),
+            (string) ($contract['tecnico_nome'] ?? ''),
+            (string) ($contract['tecnico'] ?? ''),
+            (string) ($contract['accepted_by'] ?? ''),
+            (string) ($contract['technician_login'] ?? ''),
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        $user = $_SESSION['user'] ?? [];
+        $userName = trim((string) ($user['name'] ?? ''));
+        if ($userName !== '') {
+            return $userName;
+        }
+
+        $userLogin = trim((string) ($user['login'] ?? ''));
+
+        return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+    }
+
+    private function resolveCentralAssinanteUrl(): string
+    {
+        $providerProfile = $this->resolveProviderLegalProfile();
+        $url = trim((string) ($providerProfile['central_assinante_url'] ?? ''));
+        if ($url === '') {
+            $url = trim((string) $this->config->get('contracts.commercial.central_assinante_url', 'https://sistema.ievo.com.br/central'));
+        }
+
+        return $url !== '' ? $url : 'https://sistema.ievo.com.br/central';
+    }
+
+    private function resolveProviderLegalProfile(): array
+    {
+        try {
+            $provider = (array) ($this->localRepository->currentProvider() ?? []);
+            $settings = $this->localRepository->providerSettings();
+        } catch (\Throwable) {
+            $provider = [];
+            $settings = [];
+        }
+
+        $setting = static function (array $settings, string $key, string $fallback = ''): string {
+            $value = trim((string) ($settings[$key] ?? ''));
+
+            return $value !== '' ? $value : $fallback;
+        };
+
+        $providerName = trim((string) ($provider['name'] ?? ''));
+        $providerDocument = trim((string) ($provider['document'] ?? ''));
+        $providerDomain = trim((string) ($provider['domain'] ?? ''));
+        $providerBasePath = trim((string) ($provider['base_path'] ?? ''));
+
+        $localValues = [
+            'brand_name' => $setting($settings, 'provider_name', $providerName),
+            'legal_name' => $setting($settings, 'provider_legal_name', $providerName),
+            'document' => $setting($settings, 'provider_cnpj', $providerDocument),
+            'address' => $setting($settings, 'provider_address', ''),
+            'neighborhood' => $setting($settings, 'provider_neighborhood', ''),
+            'city' => $setting($settings, 'provider_city', ''),
+            'state' => $setting($settings, 'provider_state', ''),
+            'zip' => $setting($settings, 'provider_zip', ''),
+            'phone' => $setting($settings, 'provider_phone', ''),
+            'site' => $setting($settings, 'provider_site', ''),
+            'email' => $setting($settings, 'provider_email', ''),
+            'anatel_process' => $setting($settings, 'provider_anatel_process', ''),
+            'central_assinante_url' => $setting(
+                $settings,
+                'central_assinante_url',
+                (string) $this->config->get('contracts.commercial.central_assinante_url', 'https://sistema.ievo.com.br/central')
+            ),
+        ];
+
+        $needMkAuth = false;
+        foreach (['brand_name', 'legal_name', 'document', 'address', 'neighborhood', 'city', 'state', 'zip', 'phone', 'site', 'email', 'anatel_process'] as $field) {
+            if (trim((string) ($localValues[$field] ?? '')) === '') {
+                $needMkAuth = true;
+                break;
+            }
+        }
+
+        $mkauthCompany = [];
+        $mkauthSource = 'fallback';
+        if ($needMkAuth && $this->mkauthClient->isConfigured()) {
+            try {
+                $mkauthCompany = $this->extractMkAuthCompanyProfile($this->mkauthClient->listCompany());
+                if ($mkauthCompany !== []) {
+                    $mkauthSource = 'mkauth';
+                }
+            } catch (\Throwable) {
+                $mkauthCompany = [];
+            }
+        }
+
+        if ($needMkAuth && $mkauthCompany === []) {
+            try {
+                $mkauthProfile = $this->mkauthDatabase->companyLegalProfile();
+                if (is_array($mkauthProfile) && !empty($mkauthProfile['data']) && is_array($mkauthProfile['data'])) {
+                    $mkauthCompany = $mkauthProfile['data'];
+                    $mkauthSource = (string) ($mkauthProfile['source'] ?? 'mkauth');
+                }
+            } catch (\Throwable) {
+                $mkauthCompany = [];
+            }
+        }
+
+        $mkAuthValues = [
+            'brand_name' => trim((string) ($mkauthCompany['nome'] ?? '')),
+            'legal_name' => trim((string) (($mkauthCompany['razao'] ?? '') ?: ($mkauthCompany['nome'] ?? ''))),
+            'document' => trim((string) ($mkauthCompany['cnpj'] ?? '')),
+            'address' => trim((string) ($mkauthCompany['endereco'] ?? '')),
+            'neighborhood' => trim((string) ($mkauthCompany['bairro'] ?? '')),
+            'city' => trim((string) ($mkauthCompany['cidade'] ?? '')),
+            'state' => trim((string) ($mkauthCompany['estado'] ?? '')),
+            'zip' => trim((string) ($mkauthCompany['cep'] ?? '')),
+            'phone' => trim((string) (($mkauthCompany['telefone'] ?? '') ?: ($mkauthCompany['fone'] ?? '') ?: ($mkauthCompany['celular'] ?? ''))),
+            'site' => trim((string) ($mkauthCompany['site'] ?? '')),
+            'email' => trim((string) ($mkauthCompany['email'] ?? '')),
+            'anatel_process' => trim((string) (($mkauthCompany['autorizacao_anatel'] ?? '') ?: ($mkauthCompany['processo_scm'] ?? ''))),
+        ];
+
+        $resolved = [];
+        $usedLocal = false;
+        $usedMkAuth = false;
+        foreach ($localValues as $field => $value) {
+            $value = trim((string) $value);
+            if ($value !== '') {
+                $resolved[$field] = $value;
+                $usedLocal = true;
+                continue;
+            }
+
+            $mkValue = trim((string) ($mkAuthValues[$field] ?? ''));
+            if ($mkValue !== '') {
+                $resolved[$field] = $mkValue;
+                $usedMkAuth = true;
+                continue;
+            }
+
+            $resolved[$field] = '';
+        }
+
+        $brandName = $resolved['brand_name'] !== '' ? $resolved['brand_name'] : (trim((string) $this->config->get('app.name', '')) ?: 'nossa equipe');
+
+        if ($resolved['legal_name'] === '') {
+            $resolved['legal_name'] = $brandName;
+        }
+
+        $resolved['central_assinante_url'] = $resolved['central_assinante_url'] !== ''
+            ? $resolved['central_assinante_url']
+            : 'https://sistema.ievo.com.br/central';
+
+        if (trim((string) ($resolved['anatel_process'] ?? '')) === '') {
+            $providerSlug = strtolower(trim((string) ($provider['slug'] ?? '')));
+            $providerDisplay = strtolower(trim((string) ($resolved['brand_name'] ?? $providerName ?? '')));
+            if ($providerSlug === 'ievo' || str_contains($providerDisplay, 'ievo')) {
+                $resolved['anatel_process'] = 'Processo nº 53500.292642/2022-7';
+            }
+        }
+
+        if ($mkauthCompany !== [] && $usedMkAuth) {
+            $source = $mkauthSource;
+        } elseif ($usedLocal) {
+            $source = 'local';
+        } elseif ($providerName !== '') {
+            $source = 'providers';
+        } else {
+            $source = 'fallback';
+        }
+
+        return [
+            'brand_name' => $brandName,
+            'legal_name' => $resolved['legal_name'],
+            'document' => $resolved['document'],
+            'address' => $resolved['address'],
+            'neighborhood' => $resolved['neighborhood'],
+            'city' => $resolved['city'],
+            'state' => $resolved['state'],
+            'zip' => $resolved['zip'],
+            'phone' => $resolved['phone'],
+            'site' => $resolved['site'],
+            'email' => $resolved['email'],
+            'anatel_process' => $resolved['anatel_process'],
+            'central_assinante_url' => $resolved['central_assinante_url'],
+            'source' => $source,
+        ];
+    }
+
+    private function extractMkAuthCompanyProfile(array $response): array
+    {
+        $candidates = [
+            $response['data'] ?? null,
+            $response['dados'] ?? null,
+            $response['empresa'] ?? null,
+            $response['empresas'] ?? null,
+            $response['result'] ?? null,
+            $response['items'] ?? null,
+            $response['records'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_array($candidate) && $candidate !== []) {
+                if (array_is_list($candidate)) {
+                    $first = $candidate[0] ?? null;
+                    if (is_array($first)) {
+                        return $first;
+                    }
+                } else {
+                    return $candidate;
+                }
+            }
+        }
+
+        foreach ($response as $value) {
+            if (is_array($value) && $value !== []) {
+                if (array_is_list($value)) {
+                    $first = $value[0] ?? null;
+                    if (is_array($first)) {
+                        return $first;
+                    }
+                } else {
+                    return $value;
+                }
+            }
+        }
+
+        return [];
+    }
+
+    private function loadTermAccessState(string $token, Request $request): array
+    {
+        $sessionKey = $this->termAccessSessionKey($token, $request);
+        $state = $_SESSION['acceptance_term_validation'][$sessionKey] ?? [];
+
+        if (!is_array($state)) {
+            $state = [];
+        }
+
+        $state['attempts'] = max(0, (int) ($state['attempts'] ?? 0));
+        $state['validated'] = !empty($state['validated']);
+        $state['locked'] = !empty($state['locked']) || $state['attempts'] >= 5;
+
+        return $state;
+    }
+
+    private function saveTermAccessState(string $token, Request $request, array $state): void
+    {
+        $sessionKey = $this->termAccessSessionKey($token, $request);
+        if (!isset($_SESSION['acceptance_term_validation']) || !is_array($_SESSION['acceptance_term_validation'])) {
+            $_SESSION['acceptance_term_validation'] = [];
+        }
+
+        $_SESSION['acceptance_term_validation'][$sessionKey] = [
+            'attempts' => max(0, (int) ($state['attempts'] ?? 0)),
+            'validated' => !empty($state['validated']),
+            'validated_at' => (string) ($state['validated_at'] ?? ''),
+            'locked' => !empty($state['locked']),
+        ];
+    }
+
+    private function termAccessSessionKey(string $token, Request $request): string
+    {
+        $ip = (string) $request->server('REMOTE_ADDR', '');
+        $sessionId = session_id() ?: 'guest';
+
+        return hash('sha256', $token . '|' . $ip . '|' . $sessionId);
     }
 
     private function buildContractTermBody(array $contract): string
@@ -354,11 +727,16 @@ final class AcceptanceController
         $contractTitle = $providerName === 'nossa equipe'
             ? 'Contrato digital da nossa equipe'
             : 'Contrato digital ' . $providerName;
+        $technicianName = trim((string) ($contract['technician_name'] ?? ''));
+        $technicianLogin = trim((string) ($contract['technician_login'] ?? ''));
+        $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
 
         return trim(implode("\n", [
             $contractTitle,
             'Cliente: ' . $nome,
             'Login: ' . $login,
+            'Técnico responsável: ' . ($technicianName !== '' ? $technicianName : 'Equipe técnica'),
+            'Login do técnico: ' . ($technicianLogin !== '' ? $technicianLogin : '-'),
             'Telefone: ' . $telefone,
             'Tipo de adesão: ' . $tipoAdesao,
             'Valor da adesão: R$ ' . $valorAdesao,
@@ -369,6 +747,8 @@ final class AcceptanceController
             '',
             'A taxa de adesão poderá ser concedida com desconto, isenção ou parcelamento, condicionada à fidelidade de 12 meses. O cancelamento antes do fim da fidelidade poderá gerar cobrança proporcional conforme condições contratadas.',
             'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
+            'A cópia do termo e os documentos de cobrança podem ser consultados pela Central do Assinante:',
+            $centralAssinanteUrl,
             'O aceite é realizado por link enviado ao telefone por WhatsApp e/ou e-mail cadastrado. A confirmação por qualquer um desses canais valida o aceite eletrônico.',
         ]));
     }
@@ -379,6 +759,8 @@ final class AcceptanceController
             'id' => (int) ($contract['id'] ?? 0),
             'client_id' => $contract['client_id'] ?? null,
             'mkauth_login' => (string) ($contract['mkauth_login'] ?? ''),
+            'technician_name' => (string) ($contract['technician_name'] ?? ''),
+            'technician_login' => (string) ($contract['technician_login'] ?? ''),
             'nome_cliente' => (string) ($contract['nome_cliente'] ?? ''),
             'telefone_cliente' => (string) ($contract['telefone_cliente'] ?? ''),
             'tipo_adesao' => (string) ($contract['tipo_adesao'] ?? ''),
