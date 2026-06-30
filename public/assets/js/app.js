@@ -1654,6 +1654,278 @@ if (contractCommercialForm) {
     updateCommercialSection(true);
 }
 
+const upgradeForm = document.querySelector('[data-upgrade-form]');
+
+if (upgradeForm) {
+    const planSelect = upgradeForm.querySelector('[data-upgrade-plan-select]');
+    const currentTechnologyInput = upgradeForm.querySelector('[data-upgrade-current-technology]');
+    const currentTechnologyFamilyInput = upgradeForm.querySelector('[data-upgrade-current-technology-family]');
+    const currentMonthlyValueInput = upgradeForm.querySelector('[data-upgrade-current-monthly-value]');
+    const newTechnologyHiddenInput = upgradeForm.querySelector('input[name="nova_tecnologia"]');
+    const newTechnologyDisplayInput = upgradeForm.querySelector('[data-upgrade-new-technology-display]');
+    const benefitDescriptionInput = upgradeForm.querySelector('[data-upgrade-benefit-description]');
+    const benefitValueInput = upgradeForm.querySelector('[data-upgrade-benefit-value]');
+    const monthlyValueInput = upgradeForm.querySelector('[data-upgrade-monthly-value]');
+    const fidelityInput = upgradeForm.querySelector('[data-upgrade-fidelity]');
+    const monthlyDisplay = upgradeForm.querySelector('[data-upgrade-monthly-display]');
+    const benefitFlagsInput = upgradeForm.querySelector('[data-upgrade-benefit-flags]');
+    const benefitSummary = upgradeForm.querySelector('[data-upgrade-benefit-summary]');
+    const benefitOtherWrapper = upgradeForm.querySelector('[data-upgrade-other-benefit-wrapper]');
+    const benefitOtherTextInput = upgradeForm.querySelector('[data-upgrade-benefit-other-text]');
+    const benefitOtherTextValueInput = upgradeForm.querySelector('[data-upgrade-benefit-other-text-value]');
+    const benefitCheckboxes = Array.from(upgradeForm.querySelectorAll('[data-upgrade-benefit-checkbox]'));
+
+    const normalizeTechnologyFamily = (value) => {
+        const text = String(value || '').trim().toLowerCase();
+        if (text === 'fibra' || text.includes('fibra') || text === 'f') {
+            return 'fibra';
+        }
+        if (text === 'radio' || text.includes('radio') || text.includes('rádio') || text === 'r') {
+            return 'radio';
+        }
+        return '';
+    };
+
+    const currentTechnologyFamily = () => {
+        const fromField = normalizeTechnologyFamily(currentTechnologyFamilyInput?.value || '');
+        if (fromField) {
+            return fromField;
+        }
+
+        return normalizeTechnologyFamily(currentTechnologyInput?.value || '');
+    };
+
+    const readCurrentMonthlyValue = () => parseMoneyFieldValue(String(currentMonthlyValueInput?.value || '0'));
+    const buildBenefitFlags = () => {
+        const flags = {};
+
+        for (const checkbox of benefitCheckboxes) {
+            const flag = String(checkbox?.dataset?.upgradeBenefitCheckbox || '').trim();
+            if (!flag) {
+                continue;
+            }
+
+            flags[flag] = Boolean(checkbox.checked);
+        }
+
+        return flags;
+    };
+
+    const shouldAutoSet = (element) => {
+        if (!(element instanceof HTMLElement)) {
+            return true;
+        }
+
+        return element.dataset.manualTouched !== '1';
+    };
+
+    const setBenefitFlags = (flags) => {
+        const normalized = flags && typeof flags === 'object' ? flags : {};
+
+        for (const checkbox of benefitCheckboxes) {
+            const flag = String(checkbox?.dataset?.upgradeBenefitCheckbox || '').trim();
+            if (!flag) {
+                continue;
+            }
+
+            if (!shouldAutoSet(checkbox)) {
+                continue;
+            }
+
+            checkbox.checked = Boolean(normalized[flag]);
+        }
+    };
+
+    const buildBenefitDescription = (flags, otherText = '') => {
+        const activeFlags = Object.values(flags || {}).filter((value) => Boolean(value));
+
+        if (activeFlags.length === 2 && flags.radio_to_fiber && flags.adhesion_waiver) {
+            return 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação';
+        }
+
+        if (activeFlags.length === 2 && flags.plan_upgrade && flags.adhesion_waiver) {
+            return 'upgrade de plano, com isenção da taxa de adesão/instalação';
+        }
+
+        const parts = [];
+
+        if (flags.radio_to_fiber) {
+            parts.push('migração de tecnologia de rádio para fibra óptica');
+        }
+
+        if (flags.adhesion_waiver) {
+            parts.push('isenção da taxa de adesão/instalação');
+        }
+
+        if (flags.plan_upgrade) {
+            parts.push('upgrade de plano');
+        }
+
+        if (flags.retention) {
+            parts.push('condição comercial especial para retenção do cliente');
+        }
+
+        if (flags.other_benefit) {
+            const text = String(otherText || '').trim();
+            parts.push(text || 'outro benefício');
+        }
+
+        const filtered = parts.filter((value) => String(value || '').trim() !== '');
+        if (filtered.length === 0) {
+            return '';
+        }
+
+        if (filtered.length === 1) {
+            return filtered[0];
+        }
+
+        const last = filtered.pop();
+        return `${filtered.join(', ')} e ${last}`;
+    };
+
+    const renderBenefitSummary = (monthlyValueText, benefitDescriptionText) => {
+        if (!benefitSummary) {
+            return;
+        }
+
+        const monthlyLabel = monthlyValueText ? `Novo valor mensal: ${monthlyValueText}` : 'Novo valor mensal: -';
+        const benefitLabel = benefitDescriptionText ? `Benefício: ${benefitDescriptionText}` : 'Benefício: -';
+        benefitSummary.textContent = `${monthlyLabel} | ${benefitLabel}`;
+    };
+
+    const applyUpgradeDefaults = () => {
+        if (!planSelect) {
+            return;
+        }
+
+        const selectedOption = planSelect.selectedOptions[0];
+        const installType = String(selectedOption?.dataset.upgradeInstallType || '').toLowerCase();
+        const optionTechnology = String(selectedOption?.dataset.upgradeTechnology || '').trim();
+        const monthlyValue = String(selectedOption?.dataset.upgradeMonthlyValue || selectedOption?.dataset.monthlyValue || '').trim();
+        const selectedTechnology = optionTechnology || (installType === 'radio' ? 'Rádio' : (installType === 'fibra' ? 'Fibra' : ''));
+        const currentFamily = currentTechnologyFamily();
+        const currentMonthly = readCurrentMonthlyValue();
+        const newMonthly = parseMoneyFieldValue(monthlyValue);
+        const selectedPlan = String(planSelect.value || '').trim();
+        const currentPlan = String(upgradeForm.querySelector('input[name="plano_atual"]')?.value || '').trim();
+        const newFamily = normalizeTechnologyFamily(selectedTechnology);
+        const movingFromRadioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
+        const isRetention = selectedPlan !== '' && selectedPlan !== currentPlan && newMonthly > 0 && currentMonthly > 0 && newMonthly < currentMonthly && !movingFromRadioToFiber;
+        const isUpgrade = selectedPlan !== '' && selectedPlan !== currentPlan && newMonthly >= currentMonthly && !movingFromRadioToFiber;
+        const suggestionFlags = {
+            radio_to_fiber: movingFromRadioToFiber,
+            adhesion_waiver: movingFromRadioToFiber,
+            plan_upgrade: isUpgrade,
+            retention: isRetention,
+            other_benefit: false,
+        };
+        const otherBenefitCheckbox = benefitCheckboxes.find((checkbox) => checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit') || null;
+        const otherBenefitChecked = Boolean(otherBenefitCheckbox && otherBenefitCheckbox.checked);
+        const flags = {
+            radio_to_fiber: Boolean(buildBenefitFlags().radio_to_fiber),
+            adhesion_waiver: Boolean(buildBenefitFlags().adhesion_waiver),
+            plan_upgrade: Boolean(buildBenefitFlags().plan_upgrade),
+            retention: Boolean(buildBenefitFlags().retention),
+            other_benefit: otherBenefitChecked,
+        };
+
+        if (newTechnologyHiddenInput) {
+            newTechnologyHiddenInput.value = selectedTechnology;
+        }
+
+        if (newTechnologyDisplayInput) {
+            newTechnologyDisplayInput.value = selectedTechnology;
+        }
+
+        if (monthlyValueInput && monthlyValue !== '') {
+            monthlyValueInput.value = formatMoneyFieldValue(parseMoneyFieldValue(monthlyValue));
+        }
+
+        const formattedMonthly = formatMoneyFieldValue(newMonthly || 0);
+        if (monthlyDisplay) {
+            monthlyDisplay.textContent = `R$ ${formattedMonthly}`;
+        }
+
+        if (benefitCheckboxes.length > 0) {
+            for (const checkbox of benefitCheckboxes) {
+                const flag = String(checkbox?.dataset?.upgradeBenefitCheckbox || '').trim();
+                if (!flag || checkbox.dataset.manualTouched === '1') {
+                    continue;
+                }
+
+                checkbox.checked = Boolean(suggestionFlags[flag]);
+            }
+        }
+
+        const currentFlags = buildBenefitFlags();
+        const currentOtherBenefitCheckbox = benefitCheckboxes.find((checkbox) => checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit') || null;
+        const currentOtherBenefitChecked = Boolean(currentOtherBenefitCheckbox && currentOtherBenefitCheckbox.checked);
+
+        if (benefitOtherWrapper) {
+            benefitOtherWrapper.hidden = !currentOtherBenefitChecked;
+        }
+        if (benefitOtherTextInput && !currentOtherBenefitChecked) {
+            benefitOtherTextInput.value = '';
+        }
+        if (benefitOtherTextValueInput) {
+            benefitOtherTextValueInput.value = currentOtherBenefitChecked ? String(benefitOtherTextInput?.value || '').trim() : '';
+        }
+
+        const otherText = String(benefitOtherTextInput?.value || '').trim();
+        const benefitDescription = buildBenefitDescription(currentFlags, otherText);
+
+        if (benefitDescriptionInput) {
+            benefitDescriptionInput.value = benefitDescription;
+        }
+
+        if (benefitFlagsInput) {
+            benefitFlagsInput.value = JSON.stringify(currentFlags);
+        }
+
+        if (benefitValueInput && shouldAutoSet(benefitValueInput)) {
+            benefitValueInput.value = formatMoneyFieldValue(1200);
+        }
+
+        if (fidelityInput) {
+            fidelityInput.value = '12';
+        }
+
+        renderBenefitSummary(formattedMonthly ? `R$ ${formattedMonthly}` : '', benefitDescription);
+    };
+
+    if (planSelect) {
+        planSelect.addEventListener('change', applyUpgradeDefaults);
+    }
+
+    for (const checkbox of benefitCheckboxes) {
+        checkbox.addEventListener('change', () => {
+            checkbox.dataset.manualTouched = '1';
+            if (checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit' && benefitOtherWrapper) {
+                benefitOtherWrapper.hidden = !checkbox.checked;
+            }
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (benefitOtherTextInput) {
+        benefitOtherTextInput.addEventListener('input', () => {
+            if (benefitOtherTextValueInput) {
+                benefitOtherTextValueInput.value = String(benefitOtherTextInput.value || '').trim();
+            }
+            benefitOtherTextInput.dataset.manualTouched = '1';
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (benefitValueInput) {
+        benefitValueInput.addEventListener('input', () => {
+            benefitValueInput.dataset.manualTouched = '1';
+        });
+    }
+
+    applyUpgradeDefaults();
+}
+
 const addressNumberInput = document.querySelector('[data-address-number-input]');
 
 if (addressNumberInput instanceof HTMLInputElement) {

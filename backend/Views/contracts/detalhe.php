@@ -41,6 +41,10 @@ $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?
 $whatsappRequestId = bin2hex(random_bytes(16));
 $emailRequestId = bin2hex(random_bytes(16));
 $financialRequestId = bin2hex(random_bytes(16));
+$upgradeSnapshot = json_decode((string) ($contract['upgrade_snapshot_json'] ?? ''), true);
+$upgradeSnapshot = is_array($upgradeSnapshot) ? $upgradeSnapshot : [];
+$upgradeBenefitFlags = is_array($upgradeSnapshot['benefit_flags'] ?? null) ? $upgradeSnapshot['benefit_flags'] : [];
+$upgradeHasWaiver = !empty($upgradeBenefitFlags['radio_to_fiber']) || !empty($upgradeBenefitFlags['adhesion_waiver']);
 $fallbackEmail = 'cliente@ievo.com.br';
 $resolveEmailContext = static function (array $source) use ($fallbackEmail): array {
     $original = strtolower(trim((string) ($source['email_original'] ?? '')));
@@ -229,10 +233,10 @@ ob_start();
             <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Nova tecnologia</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['new_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['benefit_description'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-            <div class="summary-item"><span>Valor do benefício</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['benefit_value'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Valor da taxa de adesão/instalação isentada</span><strong><?= htmlspecialchars($upgradeHasWaiver ? 'R$ ' . $formatMoney($upgradeSnapshot['benefit_value'] ?? 0) : 'Não se aplica', ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['new_monthly_value'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['fidelity_months'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
-            <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['multa_proporcional'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars($upgradeHasWaiver ? 'R$ ' . $formatMoney($upgradeSnapshot['multa_proporcional'] ?? 0) : 'Conforme contrato', ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item summary-item--span-2"><span>Observação</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['observacao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
         </div>
     <?php endif; ?>

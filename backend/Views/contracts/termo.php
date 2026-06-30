@@ -266,7 +266,6 @@ ob_start();
                     <h2>Registro técnico do aceite</h2>
                     <div class="document-grid">
                         <div><span>Técnico responsável</span><strong><?= htmlspecialchars($technicianName !== '' ? $technicianName : 'Equipe técnica', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div><span>Login do técnico</span><strong><?= htmlspecialchars($technicianLogin !== '' ? $technicianLogin : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                         <div><span>IP</span><strong><?= htmlspecialchars($ipAddress !== '' ? $ipAddress : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                         <div><span>Navegador / dispositivo</span><strong><?= htmlspecialchars($userAgent !== '' ? $userAgent : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                         <div><span>Contrato ID</span><strong><?= htmlspecialchars($contractId > 0 ? (string) $contractId : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>

@@ -34,4 +34,10 @@ $evotrix = [
 
 $evotrix = array_replace($evotrix, array_intersect_key($evotrixOverrides, $evotrix));
 
+$appEnv = strtolower(trim((string) Env::get('APP_ENV', 'production')));
+if ($appEnv !== 'production') {
+    $evotrix['dry_run'] = true;
+    $evotrix['allow_only_test_phone'] = true;
+}
+
 return $evotrix;

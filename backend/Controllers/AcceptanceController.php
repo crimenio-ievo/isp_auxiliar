@@ -12,6 +12,7 @@ use App\Core\Url;
 use App\Core\View;
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
 use App\Infrastructure\Contracts\ContractRepository;
+use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
@@ -29,6 +30,7 @@ final class AcceptanceController
         private Config $config,
         private ContractAcceptanceRepository $acceptanceRepository,
         private ContractRepository $contractRepository,
+        private FinancialTaskRepository $financialTaskRepository,
         private LocalRepository $localRepository,
         private MkAuthClient $mkauthClient,
         private MkAuthDatabase $mkauthDatabase
@@ -332,6 +334,10 @@ final class AcceptanceController
             $userAgent
         );
 
+        if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
+            $this->queueUpgradeOperationalTask($contract, $acceptance, $acceptanceId, $request);
+        }
+
         Flash::set('success', 'Termos aceitos com sucesso.');
 
         return Response::redirect('/aceite/' . rawurlencode($token));
@@ -487,6 +493,101 @@ final class AcceptanceController
         $userLogin = trim((string) ($user['login'] ?? ''));
 
         return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+    }
+
+    private function queueUpgradeOperationalTask(array $contract, array $acceptance, int $acceptanceId, Request $request): void
+    {
+        $contractId = (int) ($contract['id'] ?? 0);
+        if ($contractId <= 0) {
+            return;
+        }
+
+        $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
+        $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
+        $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
+        $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
+        $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
+        $originalContractReference = trim((string) ($upgradeSnapshot['original_contract_reference'] ?? ''));
+        $currentMonthlyValue = number_format((float) ($upgradeSnapshot['current_monthly_value'] ?? 0), 2, ',', '.');
+        $newMonthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
+        $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);
+        $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
+        $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
+        $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+        $benefitSentence = $waiverApplied
+            ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
+            : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
+        $penaltySentence = $waiverApplied
+            ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
+            : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
+
+        $description = implode("\n", array_filter([
+            'Upgrade / Migração aceito em aceite remoto.',
+            'Cliente: ' . (string) ($contract['nome_cliente'] ?? '-'),
+            'Login: ' . (string) ($contract['mkauth_login'] ?? '-'),
+            'Plano antigo: ' . ($currentPlan !== '' ? $currentPlan : '-'),
+            'Plano novo: ' . ($newPlan !== '' ? $newPlan : '-'),
+            'Valor antigo: R$ ' . $currentMonthlyValue,
+            'Valor novo: R$ ' . $newMonthlyValue,
+            'Tecnologia antiga: ' . ($currentTechnology !== '' ? $currentTechnology : '-'),
+            'Tecnologia nova: ' . ($newTechnology !== '' ? $newTechnology : '-'),
+            'Benefício: ' . ($benefitDescription !== '' ? $benefitDescription : '-'),
+            'Valor da taxa de adesão/instalação isentada: R$ ' . $benefitValue,
+            $originalContractReference !== '' ? 'Referência original: ' . $originalContractReference : null,
+            $penaltySentence,
+            'Necessário verificar financeiro/proporcionalidade.',
+            'Aplicar alteração manual no MkAuth.',
+            'Aceite ID: ' . $acceptanceId,
+        ]));
+
+        try {
+            $existingTask = $this->financialTaskRepository->findByContractId($contractId);
+            if (is_array($existingTask) && isset($existingTask['id'])) {
+                $this->financialTaskRepository->appendSystemNote((int) $existingTask['id'], $description, 'aberto');
+                return;
+            }
+
+            $taskId = $this->financialTaskRepository->create([
+                'contract_id' => $contractId,
+                'mkauth_login' => (string) ($contract['mkauth_login'] ?? ''),
+                'titulo' => 'Aplicar upgrade / migração manualmente',
+                'descricao' => $description,
+                'setor' => 'financeiro',
+                'status' => 'aberto',
+            ]);
+
+            if ($taskId !== null && $taskId > 0) {
+                $this->localRepository->log(
+                    null,
+                    (string) ($contract['mkauth_login'] ?? ''),
+                    'contract.upgrade.operational_task.created',
+                    'financial_task',
+                    $taskId,
+                    [
+                        'contract_id' => $contractId,
+                        'acceptance_id' => $acceptanceId,
+                        'description' => $description,
+                    ],
+                    (string) $request->server('REMOTE_ADDR', ''),
+                    (string) $request->header('User-Agent', '')
+                );
+            }
+        } catch (\Throwable $exception) {
+            $this->localRepository->log(
+                null,
+                (string) ($contract['mkauth_login'] ?? ''),
+                'contract.upgrade.operational_task.failed',
+                'financial_task',
+                null,
+                [
+                    'contract_id' => $contractId,
+                    'acceptance_id' => $acceptanceId,
+                    'error' => $exception->getMessage(),
+                ],
+                (string) $request->server('REMOTE_ADDR', ''),
+                (string) $request->header('User-Agent', '')
+            );
+        }
     }
 
     private function resolveCentralAssinanteUrl(): string
@@ -762,33 +863,49 @@ final class AcceptanceController
             $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
             $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
             $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
+            $originalContractReference = trim((string) ($upgradeSnapshot['original_contract_reference'] ?? ''));
+            $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);
             $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
             $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
             $monthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
             $fidelityMonths = max(1, (int) ($upgradeSnapshot['fidelity_months'] ?? $fidelidade));
-            $penaltyValue = number_format((float) ($upgradeSnapshot['multa_proporcional'] ?? ($contract['multa_total'] ?? 0)), 2, ',', '.');
             $observation = trim((string) ($upgradeSnapshot['observacao'] ?? $observacao));
+            $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+            $benefitSentence = $waiverApplied
+                ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
+                : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
+            $penaltySentence = $waiverApplied
+                ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
+                : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
 
             return trim(implode("\n", [
-                $contractTitle,
-                'Cliente: ' . $nome,
-                'Login: ' . $login,
+                'Termo Aditivo ao Contrato de Prestação de Serviço',
+                '',
+                'Contratada: ' . $contractTitle,
+                'Contratante: ' . $nome,
                 'Técnico responsável: ' . ($technicianName !== '' ? $technicianName : 'Equipe técnica'),
-                'Login do técnico: ' . ($technicianLogin !== '' ? $technicianLogin : '-'),
                 'Telefone: ' . $telefone,
-                'Tipo de aceite: upgrade_migracao',
+                $originalContractReference !== '' ? 'Referência original: ' . $originalContractReference : null,
+                '',
+                'Cláusula Primeira: objeto e benefício',
                 'Plano atual: ' . ($currentPlan !== '' ? $currentPlan : '-'),
                 'Tecnologia atual: ' . ($currentTechnology !== '' ? $currentTechnology : '-'),
                 'Novo plano: ' . ($newPlan !== '' ? $newPlan : '-'),
                 'Nova tecnologia: ' . ($newTechnology !== '' ? $newTechnology : '-'),
-                'Benefício concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-'),
-                'Valor do benefício: R$ ' . $benefitValue,
+                $benefitSentence,
                 'Novo valor mensal: R$ ' . $monthlyValue,
+                $penaltySentence,
+                '',
+                'Cláusula Segunda: renovação da fidelidade por 12 meses',
                 'Fidelidade: ' . $fidelityMonths . ' meses',
-                'Multa proporcional: R$ ' . $penaltyValue,
+                'As demais condições comerciais permanecem válidas, exceto o que este aditivo alterar expressamente.',
+                '',
+                'Cláusula Terceira: disposições gerais',
+                'A alteração operacional no MkAuth será aplicada manualmente após a confirmação do aceite.',
+                'As demais cláusulas do contrato original permanecem vigentes.',
                 'Observação: ' . ($observation !== '' ? $observation : '-'),
                 '',
-                'Após a assinatura remota, a alteração no MkAuth será executada manualmente pelo operador.',
+                'Assinatura eletrônica/remota',
                 'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
                 'A cópia do termo e os documentos de cobrança podem ser consultados pela Central do Assinante:',
                 $centralAssinanteUrl,
@@ -798,9 +915,7 @@ final class AcceptanceController
         return trim(implode("\n", [
             $contractTitle,
             'Cliente: ' . $nome,
-            'Login: ' . $login,
             'Técnico responsável: ' . ($technicianName !== '' ? $technicianName : 'Equipe técnica'),
-            'Login do técnico: ' . ($technicianLogin !== '' ? $technicianLogin : '-'),
             'Telefone: ' . $telefone,
             'Tipo de adesão: ' . $tipoAdesao,
             'Valor da adesão: R$ ' . $valorAdesao,

@@ -53,11 +53,17 @@ $upgradeCurrentPlan = trim((string) ($upgradeDetails['current_plan'] ?? ''));
 $upgradeCurrentTechnology = trim((string) ($upgradeDetails['current_technology'] ?? ''));
 $upgradeNewPlan = trim((string) ($upgradeDetails['new_plan'] ?? ''));
 $upgradeNewTechnology = trim((string) ($upgradeDetails['new_technology'] ?? ''));
+$upgradeBenefitFlags = is_array($upgradeDetails['benefit_flags'] ?? null) ? $upgradeDetails['benefit_flags'] : [];
+$upgradeHasWaiver = !empty($upgradeBenefitFlags['radio_to_fiber']) || !empty($upgradeBenefitFlags['adhesion_waiver']);
 $upgradeBenefit = trim((string) ($upgradeDetails['benefit_description'] ?? ''));
-$upgradeBenefitValue = isset($upgradeDetails['benefit_value']) ? 'R$ ' . number_format((float) $upgradeDetails['benefit_value'], 2, ',', '.') : '-';
+$upgradeBenefitValue = $upgradeHasWaiver
+    ? (isset($upgradeDetails['benefit_value']) ? 'R$ ' . number_format((float) $upgradeDetails['benefit_value'], 2, ',', '.') : '-')
+    : 'Não se aplica';
 $upgradeMonthlyValue = isset($upgradeDetails['new_monthly_value']) ? 'R$ ' . number_format((float) $upgradeDetails['new_monthly_value'], 2, ',', '.') : '-';
 $upgradeFidelity = max(1, (int) ($upgradeDetails['fidelity_months'] ?? 12));
-$upgradePenalty = isset($upgradeDetails['multa_proporcional']) ? 'R$ ' . number_format((float) $upgradeDetails['multa_proporcional'], 2, ',', '.') : 'R$ 0,00';
+$upgradePenalty = $upgradeHasWaiver
+    ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
+    : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
 $upgradeObservation = trim((string) ($upgradeDetails['observacao'] ?? ''));
 $hideFooter = $isAccepted;
 $alreadyAcceptedView = $isAccepted && empty($successMessage);
@@ -202,7 +208,7 @@ ob_start();
                     <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars($upgradeNewPlan !== '' ? $upgradeNewPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Nova tecnologia</span><strong><?= htmlspecialchars($upgradeNewTechnology !== '' ? $upgradeNewTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars($upgradeBenefit !== '' ? $upgradeBenefit : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Valor do benefício</span><strong><?= htmlspecialchars($upgradeBenefitValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Valor da taxa de adesão/instalação isentada</span><strong><?= htmlspecialchars($upgradeBenefitValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars($upgradeMonthlyValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) $upgradeFidelity, ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
                     <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars($upgradePenalty, ENT_QUOTES, 'UTF-8'); ?></strong></div>
@@ -230,7 +236,7 @@ ob_start();
                 <p><?= nl2br(htmlspecialchars($termBody !== '' ? $termBody : 'Termo indisponível.', ENT_QUOTES, 'UTF-8')); ?></p>
             </div>
 
-            <?php if ($signaturePath !== '' && $signatureRef !== ''): ?>
+            <?php if (!$remoteSignatureRequired && $signaturePath !== '' && $signatureRef !== ''): ?>
                 <div class="contract-signature-preview" style="margin-top: 18px;">
                     <p class="section-heading__eyebrow">Assinatura registrada</p>
                     <img
@@ -299,7 +305,7 @@ ob_start();
                             <input type="hidden" name="assinatura_cliente" data-signature-input value="">
                             <div class="signature-pad__actions">
                                 <button class="button button--ghost" type="button" data-signature-clear>Limpar assinatura</button>
-                                <small class="field-help" data-signature-help>Desenhe sua assinatura para concluir o aceite remoto.</small>
+                                <small class="field-help" data-signature-help>Assinatura eletrônica para confirmação deste termo.</small>
                             </div>
                         </div>
                     <?php else: ?>

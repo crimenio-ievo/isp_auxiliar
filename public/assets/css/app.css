@@ -875,6 +875,65 @@ textarea {
     color: #b3261e;
 }
 
+.upgrade-summary-value {
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+    font-weight: 700;
+}
+
+.upgrade-benefit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.upgrade-benefit-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface-muted);
+    line-height: 1.45;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
+
+.upgrade-benefit-card--wide {
+    grid-column: 1 / -1;
+}
+
+.upgrade-benefit-card__checkbox {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    min-width: 22px;
+    margin-top: 2px;
+}
+
+.upgrade-benefit-card__body {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.upgrade-benefit-card__body strong {
+    font-size: 0.98rem;
+}
+
+.upgrade-benefit-card__body small {
+    color: var(--muted);
+    font-size: 0.86rem;
+    line-height: 1.4;
+}
+
+.upgrade-benefit-card input[type="checkbox"] {
+    margin: 0;
+}
+
 .geo-capture {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1985,6 +2044,10 @@ body.modal-open {
 
     .page-header,
     .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .upgrade-benefit-grid {
         grid-template-columns: 1fr;
     }
 

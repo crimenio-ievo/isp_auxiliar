@@ -3513,46 +3513,135 @@ final class ClientController
             $registration = null;
         }
 
-        if (!is_array($clientProfile) || $clientProfile === [] || !is_array($contract) || $contract === []) {
+        if (!is_array($clientProfile) || $clientProfile === []) {
             return null;
         }
 
-        $currentPlan = trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? $registration['plan_name'] ?? $contract['plan_name'] ?? ''));
-        $currentTechnology = trim((string) ($clientProfile['plano_tecnologia'] ?? $contract['plano_tecnologia'] ?? ''));
-        $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
         $planOptions = $this->loadPlans();
+        $currentPlan = trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? $registration['plan_name'] ?? $contract['plan_name'] ?? ''));
+        $currentPlanOption = $this->findPlanOptionByName($currentPlan, $planOptions);
+        $currentTechnology = $this->resolveTechnologyLabel(
+            (string) ($clientProfile['plano_tecnologia'] ?? $contract['plano_tecnologia'] ?? ''),
+            is_array($currentPlanOption) ? $currentPlanOption : [],
+            $currentPlan
+        );
+        $upgradeSnapshot = $this->extractUpgradeSnapshot(is_array($contract) ? $contract : []);
+        $defaultNewPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? $currentPlan));
+        if ($defaultNewPlan === '' && isset($planOptions[0]['id'])) {
+            $defaultNewPlan = (string) $planOptions[0]['id'];
+        }
+        $defaultNewPlanOption = $this->findPlanOptionByName($defaultNewPlan, $planOptions);
+        $defaultNewTechnology = $this->resolveTechnologyLabelForPlan(is_array($defaultNewPlanOption) ? $defaultNewPlanOption : []);
+        $currentMonthlyValue = $this->resolvePlanMonthlyValue($currentPlan, $planOptions);
+        if ($currentMonthlyValue === null) {
+            $currentMonthlyValue = $this->resolvePlanMonthlyValue($defaultNewPlan, $planOptions);
+        }
+        $defaultNewMonthlyValue = $this->resolvePlanMonthlyValue($defaultNewPlan, $planOptions);
+        if ($defaultNewMonthlyValue === null) {
+            $defaultNewMonthlyValue = $currentMonthlyValue;
+        }
+        $defaultBenefitDefaults = $this->resolveUpgradeBenefitDefaults(
+            $currentTechnology,
+            $defaultNewTechnology,
+            $currentPlan,
+            $defaultNewPlan,
+            (float) ($currentMonthlyValue ?? 0),
+            (float) ($defaultNewMonthlyValue ?? ($currentMonthlyValue ?? 0))
+        );
+        $currentTechnologyFamily = $this->resolveTechnologyFamily(is_array($currentPlanOption) ? $currentPlanOption : [], $currentTechnology, $currentPlan);
+        $defaultNewTechnologyFamily = $this->resolveTechnologyFamily(is_array($defaultNewPlanOption) ? $defaultNewPlanOption : [], $defaultNewTechnology, $defaultNewPlan);
+        $fidelityMonths = (int) ($upgradeSnapshot['fidelity_months'] ?? ($contract['fidelidade_meses'] ?? $this->config->get('contracts.commercial.fidelidade_meses_padrao', 12)));
+        if ($fidelityMonths < 1) {
+            $fidelityMonths = 12;
+        }
+        $originalContractReference = '';
+        if (is_array($contract) && isset($contract['id']) && (int) $contract['id'] > 0) {
+            $originalContractReference = 'Contrato local #' . (int) $contract['id'];
+        } else {
+            $originalContractReference = 'Cadastro localizado apenas no MkAuth, sem contrato local vinculado.';
+        }
 
         return [
             'login' => $login,
             'clientProfile' => is_array($clientProfile) ? $clientProfile : [],
-            'contract' => $contract,
+            'contract' => is_array($contract) ? $contract : [],
             'registration' => is_array($registration) ? $registration : [],
             'current_plan' => $currentPlan,
             'current_technology' => $currentTechnology,
-            'current_monthly_value' => $this->resolvePlanMonthlyValue($currentPlan, $planOptions),
-            'new_plan' => trim((string) ($upgradeSnapshot['new_plan'] ?? $currentPlan)),
-            'new_technology' => trim((string) ($upgradeSnapshot['new_technology'] ?? $currentTechnology)),
-            'benefit_description' => trim((string) ($upgradeSnapshot['benefit_description'] ?? '')),
-            'benefit_value' => isset($upgradeSnapshot['benefit_value']) ? (float) $upgradeSnapshot['benefit_value'] : 0.0,
-            'new_monthly_value' => isset($upgradeSnapshot['new_monthly_value']) ? (float) $upgradeSnapshot['new_monthly_value'] : null,
-            'fidelity_months' => (int) ($upgradeSnapshot['fidelity_months'] ?? ($contract['fidelidade_meses'] ?? $this->config->get('contracts.commercial.fidelidade_meses_padrao', 12))),
+            'current_technology_family' => $currentTechnologyFamily,
+            'current_monthly_value' => $currentMonthlyValue,
+            'new_plan' => $defaultNewPlan,
+            'new_technology' => trim((string) ($upgradeSnapshot['new_technology'] ?? $defaultNewTechnology)),
+            'new_technology_family' => $defaultNewTechnologyFamily,
+            'benefit_flags' => $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null) ?: $defaultBenefitDefaults['flags'],
+            'benefit_description' => trim((string) ($upgradeSnapshot['benefit_description'] ?? $defaultBenefitDefaults['description'])),
+            'benefit_value' => isset($upgradeSnapshot['benefit_value']) ? (float) $upgradeSnapshot['benefit_value'] : (float) $defaultBenefitDefaults['value'],
+            'new_monthly_value' => isset($upgradeSnapshot['new_monthly_value']) ? (float) $upgradeSnapshot['new_monthly_value'] : $defaultNewMonthlyValue,
+            'fidelity_months' => $fidelityMonths,
             'observacao' => trim((string) ($upgradeSnapshot['observation'] ?? '')),
             'multa_proporcional' => isset($upgradeSnapshot['multa_proporcional']) ? (float) $upgradeSnapshot['multa_proporcional'] : (float) ($contract['multa_total'] ?? 0),
+            'original_contract_reference' => $originalContractReference,
             'planOptions' => $planOptions,
         ];
     }
 
     private function collectUpgradeFormData(Request $request, array $context): array
     {
+        $planOptions = is_array($context['planOptions'] ?? null) ? $context['planOptions'] : [];
+        $currentPlan = trim((string) ($context['current_plan'] ?? ''));
+        $selectedPlan = trim((string) $request->input('novo_plano', $context['new_plan'] ?? $currentPlan));
+        $selectedPlanOption = $this->findPlanOptionByName($selectedPlan, $planOptions);
+        $currentPlanOption = $this->findPlanOptionByName($currentPlan, $planOptions);
+        $currentTechnology = $this->resolveTechnologyLabel(
+            (string) ($context['current_technology'] ?? ''),
+            is_array($currentPlanOption) ? $currentPlanOption : [],
+            $currentPlan
+        );
+        $selectedTechnology = $this->resolveTechnologyLabelForPlan(is_array($selectedPlanOption) ? $selectedPlanOption : []);
+        $selectedTechnologyFamily = $this->resolveTechnologyFamily(is_array($selectedPlanOption) ? $selectedPlanOption : [], $selectedTechnology, $selectedPlan);
+        $monthlyValue = $this->resolvePlanMonthlyValue($selectedPlan, $planOptions);
+        if ($monthlyValue === null) {
+            $monthlyValue = (float) ($context['new_monthly_value'] ?? 0);
+        }
+        $benefitDefaults = $this->resolveUpgradeBenefitDefaults(
+            $currentTechnology,
+            $selectedTechnology,
+            $currentPlan,
+            $selectedPlan,
+            (float) ($context['current_monthly_value'] ?? 0),
+            $monthlyValue
+        );
+        $benefitFlags = $this->normalizeUpgradeBenefitFlags($request->input('benefit_flags', ''));
+        if ($benefitFlags === []) {
+            $benefitFlags = $benefitDefaults['flags'];
+        }
+        $benefitDescription = trim((string) $request->input('beneficio_concedido', ''));
+        if ($benefitDescription === '') {
+            $benefitDescription = $benefitDefaults['description'];
+        }
+        $benefitValue = $this->normalizeMoney((string) $request->input('valor_beneficio', (string) $benefitDefaults['value']));
+        $benefitOtherText = trim((string) $request->input('beneficio_outro_text', ''));
+
         return [
             'login' => $this->sanitizeLogin((string) ($context['login'] ?? $request->input('login', ''))),
             'plano_atual' => trim((string) $request->input('plano_atual', $context['current_plan'] ?? '')),
-            'tecnologia_atual' => trim((string) $request->input('tecnologia_atual', $context['current_technology'] ?? '')),
-            'novo_plano' => trim((string) $request->input('novo_plano', $context['new_plan'] ?? '')),
-            'nova_tecnologia' => trim((string) $request->input('nova_tecnologia', $context['new_technology'] ?? '')),
-            'beneficio_concedido' => trim((string) $request->input('beneficio_concedido', $context['benefit_description'] ?? '')),
-            'valor_beneficio' => $this->normalizeMoney((string) $request->input('valor_beneficio', (string) ($context['benefit_value'] ?? '0'))),
-            'novo_valor_mensal' => $this->normalizeMoney((string) $request->input('novo_valor_mensal', (string) ($context['new_monthly_value'] ?? '0'))),
+            'tecnologia_atual' => $this->resolveTechnologyLabel(
+                (string) $request->input('tecnologia_atual', $currentTechnology),
+                is_array($currentPlanOption) ? $currentPlanOption : [],
+                $currentPlan
+            ),
+            'novo_plano' => $selectedPlan,
+            'nova_tecnologia' => $this->resolveTechnologyLabel(
+                (string) $request->input('nova_tecnologia', $selectedTechnology),
+                is_array($selectedPlanOption) ? $selectedPlanOption : [],
+                $selectedPlan
+            ),
+            'nova_tecnologia_family' => $selectedTechnologyFamily,
+            'benefit_flags' => $benefitFlags,
+            'beneficio_concedido' => $benefitDescription,
+            'beneficio_outro_text' => $benefitOtherText,
+            'valor_beneficio' => $benefitValue,
+            'novo_valor_mensal' => $this->normalizeMoney((string) $request->input('novo_valor_mensal', (string) $monthlyValue)),
             'fidelidade_meses' => max(1, (int) $request->input('fidelidade_meses', (string) ($context['fidelity_months'] ?? 12))),
             'observacao' => trim((string) $request->input('observacao', $context['observacao'] ?? '')),
         ];
@@ -3572,10 +3661,6 @@ final class ClientController
 
         if (trim((string) ($data['tecnologia_atual'] ?? '')) === '') {
             $errors[] = 'Informe a tecnologia atual.';
-        }
-
-        if (trim((string) ($data['nova_tecnologia'] ?? '')) === '') {
-            $errors[] = 'Informe a nova tecnologia.';
         }
 
         if ($this->normalizeMoney((string) ($data['novo_valor_mensal'] ?? '0')) <= 0) {
@@ -3610,6 +3695,7 @@ final class ClientController
             throw new \RuntimeException('Contrato de upgrade nao pôde ser gravado.');
         }
 
+        $contractData['id'] = $contractId;
         $contractData['contract_id'] = $contractId;
         $termBody = $this->buildContractTermBody($contractData);
         $termHash = hash('sha256', $termBody);
@@ -3671,17 +3757,61 @@ final class ClientController
         $clientProfile = is_array($context['clientProfile'] ?? null) ? $context['clientProfile'] : [];
         $contract = is_array($context['contract'] ?? null) ? $context['contract'] : [];
         $registration = is_array($context['registration'] ?? null) ? $context['registration'] : [];
+        $currentPlan = (string) ($data['plano_atual'] ?? $context['current_plan'] ?? '');
+        $newPlan = (string) ($data['novo_plano'] ?? $context['new_plan'] ?? '');
+        $currentPlanOption = $this->findPlanOptionByName($currentPlan, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []);
+        $newPlanOption = $this->findPlanOptionByName($newPlan, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []);
+        $currentTechnology = $this->resolveTechnologyLabel(
+            (string) ($data['tecnologia_atual'] ?? $context['current_technology'] ?? ''),
+            is_array($currentPlanOption) ? $currentPlanOption : [],
+            $currentPlan
+        );
+        $newTechnology = $this->resolveTechnologyLabel(
+            (string) ($data['nova_tecnologia'] ?? $context['new_technology'] ?? ''),
+            is_array($newPlanOption) ? $newPlanOption : [],
+            $newPlan
+        );
+        $originalContractReference = trim((string) ($context['original_contract_reference'] ?? ''));
+        $newTechnologyFamily = $this->resolveTechnologyFamily(is_array($newPlanOption) ? $newPlanOption : [], $newTechnology, $newPlan);
+        $benefitDefaults = $this->resolveUpgradeBenefitDefaults(
+            $currentTechnology,
+            $newTechnology,
+            $currentPlan,
+            $newPlan,
+            (float) ($data['valor_mensal_atual'] ?? ($context['current_monthly_value'] ?? 0)),
+            (float) ($data['novo_valor_mensal'] ?? ($context['new_monthly_value'] ?? 0))
+        );
+        $currentMonthlyValue = (float) ($data['valor_mensal_atual'] ?? ($context['current_monthly_value'] ?? 0));
+        $newMonthlyValue = $this->resolvePlanMonthlyValue($newPlan, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []);
+        if ($newMonthlyValue === null) {
+            $newMonthlyValue = (float) ($data['novo_valor_mensal'] ?? ($context['new_monthly_value'] ?? 0));
+        }
+        $benefitFlags = $this->normalizeUpgradeBenefitFlags($data['benefit_flags'] ?? null);
+        if ($benefitFlags === []) {
+            $benefitFlags = $benefitDefaults['flags'];
+        }
+        $benefitOtherText = trim((string) ($data['beneficio_outro_text'] ?? ''));
+        $benefitDescription = $this->buildUpgradeBenefitDescription($benefitFlags, $benefitOtherText);
+        if ($benefitDescription === '') {
+            $benefitDescription = $benefitDefaults['description'];
+        }
         $snapshot = [
-            'current_plan' => (string) ($data['plano_atual'] ?? $context['current_plan'] ?? ''),
-            'current_technology' => (string) ($data['tecnologia_atual'] ?? $context['current_technology'] ?? ''),
-            'new_plan' => (string) ($data['novo_plano'] ?? $context['new_plan'] ?? ''),
-            'new_technology' => (string) ($data['nova_tecnologia'] ?? $context['new_technology'] ?? ''),
-            'benefit_description' => (string) ($data['beneficio_concedido'] ?? $context['benefit_description'] ?? ''),
-            'benefit_value' => (float) ($data['valor_beneficio'] ?? 0),
-            'new_monthly_value' => (float) ($data['novo_valor_mensal'] ?? 0),
+            'current_plan' => $currentPlan,
+            'current_technology' => $currentTechnology,
+            'current_technology_family' => $this->resolveTechnologyFamily(is_array($currentPlanOption) ? $currentPlanOption : [], $currentTechnology, $currentPlan),
+            'current_monthly_value' => $currentMonthlyValue,
+            'new_plan' => $newPlan,
+            'new_technology' => $newTechnology,
+            'new_technology_family' => $newTechnologyFamily,
+            'benefit_flags' => $benefitFlags,
+            'benefit_description' => $benefitDescription !== '' ? $benefitDescription : (string) ($data['beneficio_concedido'] ?? $context['benefit_description'] ?? ''),
+            'benefit_other_text' => $benefitOtherText,
+            'benefit_value' => (float) ($data['valor_beneficio'] ?? $benefitDefaults['value']),
+            'new_monthly_value' => (float) ($newMonthlyValue ?? 0),
             'fidelity_months' => (int) ($data['fidelidade_meses'] ?? 12),
             'observacao' => (string) ($data['observacao'] ?? ''),
             'multa_proporcional' => (float) ($context['multa_proporcional'] ?? 0),
+            'original_contract_reference' => $originalContractReference,
             'manual_mkauth' => 'Ajuste operacional manual após aceite.',
             'created_at' => date('Y-m-d H:i:s'),
             'created_by' => (string) ($operator['name'] ?? $operatorLogin),
@@ -3781,6 +3911,252 @@ final class ClientController
         }
 
         return null;
+    }
+
+    private function findPlanOptionByName(string $planName, array $plans): ?array
+    {
+        $planName = trim($planName);
+        if ($planName === '') {
+            return null;
+        }
+
+        foreach ($plans as $plan) {
+            if (!is_array($plan)) {
+                continue;
+            }
+
+            $id = trim((string) ($plan['id'] ?? ''));
+            $label = trim((string) ($plan['label'] ?? ''));
+
+            if (($id !== '' && strcasecmp($id, $planName) === 0) || ($label !== '' && strcasecmp($label, $planName) === 0)) {
+                return $plan;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveTechnologyLabelForPlan(array $plan): string
+    {
+        $installType = strtolower(trim((string) ($plan['install_type'] ?? '')));
+        if ($installType === 'fibra') {
+            return 'Fibra';
+        }
+
+        if ($installType === 'radio') {
+            return 'Rádio';
+        }
+
+        return $this->resolveTechnologyLabel(
+            (string) ($plan['technology'] ?? $plan['tecnologia'] ?? ''),
+            $plan,
+            (string) ($plan['label'] ?? $plan['id'] ?? '')
+        );
+    }
+
+    private function resolveTechnologyFamily(array $plan = [], string $technology = '', string $planName = ''): string
+    {
+        $installType = strtolower(trim((string) ($plan['install_type'] ?? '')));
+        if (in_array($installType, ['fibra', 'radio'], true)) {
+            return $installType;
+        }
+
+        $normalizedTechnology = self::normalizeTextForMatch($technology);
+        if (str_contains($normalizedTechnology, 'fibra')) {
+            return 'fibra';
+        }
+        if (str_contains($normalizedTechnology, 'radio') || str_contains($normalizedTechnology, 'hibrid')) {
+            return 'radio';
+        }
+
+        $normalizedPlan = self::normalizeTextForMatch($planName);
+        if (str_contains($normalizedPlan, 'fibra')) {
+            return 'fibra';
+        }
+        if (str_contains($normalizedPlan, 'radio')) {
+            return 'radio';
+        }
+
+        return '';
+    }
+
+    private function resolveTechnologyLabel(string $rawTechnology, array $plan = [], string $planName = ''): string
+    {
+        $installType = strtolower(trim((string) ($plan['install_type'] ?? '')));
+        if ($installType === 'fibra') {
+            return 'Fibra';
+        }
+
+        if ($installType === 'radio') {
+            return 'Rádio';
+        }
+
+        $normalized = strtolower(trim($rawTechnology));
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
+
+        if ($normalized === '') {
+            $planNameNormalized = self::normalizeTextForMatch($planName);
+            if (str_contains($planNameNormalized, 'fibra')) {
+                return 'Fibra';
+            }
+            if (str_contains($planNameNormalized, 'radio')) {
+                return 'Rádio';
+            }
+
+            return '';
+        }
+
+        $map = [
+            'f' => 'Fibra',
+            'fibra' => 'Fibra',
+            'ftth' => 'Fibra',
+            'gpon' => 'Fibra',
+            'h' => 'Híbrida',
+            'hibrida' => 'Híbrida',
+            'híbrida' => 'Híbrida',
+            'r' => 'Rádio',
+            'radio' => 'Rádio',
+            'rádio' => 'Rádio',
+            'wireless' => 'Rádio',
+        ];
+
+        if (isset($map[$normalized])) {
+            return $map[$normalized];
+        }
+
+        $planNameNormalized = self::normalizeTextForMatch($planName);
+        if (str_contains($planNameNormalized, 'fibra')) {
+            return 'Fibra';
+        }
+        if (str_contains($planNameNormalized, 'radio')) {
+            return 'Rádio';
+        }
+
+        if (preg_match('/^[a-z]{1,3}$/', $normalized)) {
+            return '';
+        }
+
+        return $rawTechnology;
+    }
+
+    private function resolveUpgradeBenefitDefaults(string $currentTechnology, string $newTechnology, string $currentPlan = '', string $newPlan = '', float $currentMonthlyValue = 0.0, float $newMonthlyValue = 0.0): array
+    {
+        $currentTechnologyNormalized = self::normalizeTextForMatch($currentTechnology);
+        $newTechnologyNormalized = self::normalizeTextForMatch($newTechnology);
+        $currentPlanNormalized = self::normalizeTextForMatch($currentPlan);
+        $newPlanNormalized = self::normalizeTextForMatch($newPlan);
+        $movingFromRadioToFiber = (
+            ($currentTechnologyNormalized === 'radio' || str_contains($currentPlanNormalized, 'radio'))
+            && ($newTechnologyNormalized === 'fibra' || str_contains($newPlanNormalized, 'fibra'))
+        );
+
+        $flags = [
+            'radio_to_fiber' => $movingFromRadioToFiber,
+            'adhesion_waiver' => $movingFromRadioToFiber,
+            'plan_upgrade' => !$movingFromRadioToFiber && $newMonthlyValue > 0.0 && $currentMonthlyValue > 0.0 && $newMonthlyValue >= $currentMonthlyValue,
+            'retention' => !$movingFromRadioToFiber && $newMonthlyValue > 0.0 && $currentMonthlyValue > 0.0 && $newMonthlyValue < $currentMonthlyValue,
+            'other_benefit' => false,
+        ];
+
+        if ($flags['retention']) {
+            return [
+                'flags' => $flags,
+                'description' => 'condição comercial especial para retenção do cliente',
+                'value' => 1200.00,
+            ];
+        }
+
+        if ($flags['radio_to_fiber']) {
+            return [
+                'flags' => $flags,
+                'description' => 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação',
+                'value' => 1200.00,
+            ];
+        }
+
+        return [
+            'flags' => $flags,
+            'description' => 'upgrade de plano com renovação da fidelidade contratual',
+            'value' => 1200.00,
+        ];
+    }
+
+    private function normalizeUpgradeBenefitFlags(mixed $rawFlags): array
+    {
+        if (is_string($rawFlags) && trim($rawFlags) !== '') {
+            $decoded = json_decode($rawFlags, true);
+            if (is_array($decoded)) {
+                $rawFlags = $decoded;
+            }
+        }
+
+        if (!is_array($rawFlags)) {
+            return [];
+        }
+
+        $map = [
+            'radio_to_fiber' => false,
+            'adhesion_waiver' => false,
+            'plan_upgrade' => false,
+            'retention' => false,
+            'other_benefit' => false,
+        ];
+
+        foreach ($map as $key => $default) {
+            $value = $rawFlags[$key] ?? $rawFlags[str_replace('_', '-', $key)] ?? null;
+            $map[$key] = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+            $map[$key] = $map[$key] ?? in_array(strtolower((string) $value), ['1', 'true', 'yes', 'on'], true);
+        }
+
+        return $map;
+    }
+
+    private function buildUpgradeBenefitDescription(array $flags, string $otherText = ''): string
+    {
+        $activeFlags = array_filter($flags, static fn ($value): bool => filter_var($value, FILTER_VALIDATE_BOOL));
+
+        if (count($activeFlags) === 2 && !empty($flags['radio_to_fiber']) && !empty($flags['adhesion_waiver'])) {
+            return 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação';
+        }
+
+        if (count($activeFlags) === 2 && !empty($flags['plan_upgrade']) && !empty($flags['adhesion_waiver'])) {
+            return 'upgrade de plano, com isenção da taxa de adesão/instalação';
+        }
+
+        $parts = [];
+
+        if (!empty($flags['radio_to_fiber'])) {
+            $parts[] = 'migração de tecnologia de rádio para fibra óptica';
+        }
+
+        if (!empty($flags['adhesion_waiver'])) {
+            $parts[] = 'isenção da taxa de adesão/instalação';
+        }
+
+        if (!empty($flags['plan_upgrade'])) {
+            $parts[] = 'upgrade de plano';
+        }
+
+        if (!empty($flags['retention'])) {
+            $parts[] = 'condição comercial especial para retenção do cliente';
+        }
+
+        if (!empty($flags['other_benefit'])) {
+            $otherText = trim($otherText);
+            $parts[] = $otherText !== '' ? $otherText : 'outro benefício';
+        }
+
+        $parts = array_values(array_filter(array_map('trim', $parts), static fn (string $value): bool => $value !== ''));
+        if ($parts === []) {
+            return '';
+        }
+
+        if (count($parts) === 1) {
+            return $parts[0];
+        }
+
+        $last = array_pop($parts);
+        return implode(', ', $parts) . ' e ' . $last;
     }
 
     private function buildAcceptanceData(int $contractId, array $data, array $contractData, string $termHash, Request $request): array
@@ -4335,33 +4711,49 @@ final class ClientController
             $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
             $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
             $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
+            $originalContractReference = trim((string) ($upgradeSnapshot['original_contract_reference'] ?? ''));
+            $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);
             $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
             $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
             $monthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
             $fidelityMonths = max(1, (int) ($upgradeSnapshot['fidelity_months'] ?? $fidelidade));
-            $penaltyValue = number_format((float) ($upgradeSnapshot['multa_proporcional'] ?? ($contractData['multa_total'] ?? 0)), 2, ',', '.');
             $observation = trim((string) ($upgradeSnapshot['observacao'] ?? $observacao));
+            $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+            $benefitSentence = $waiverApplied
+                ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
+                : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
+            $penaltySentence = $waiverApplied
+                ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
+                : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
 
             return trim(implode("\n", [
-                $contractTitle,
-                'Cliente: ' . $nome,
-                'Login: ' . $login,
+                'Termo Aditivo ao Contrato de Prestação de Serviço',
+                '',
+                'Contratada: ' . $contractTitle,
+                'Contratante: ' . $nome,
                 'Técnico responsável: ' . $technician['name'],
-                'Login do técnico: ' . $technician['login'],
                 'Telefone: ' . $telefone,
-                'Tipo de aceite: upgrade_migracao',
+                $originalContractReference !== '' ? 'Referência original: ' . $originalContractReference : null,
+                '',
+                'Cláusula Primeira: objeto e benefício',
                 'Plano atual: ' . ($currentPlan !== '' ? $currentPlan : '-'),
                 'Tecnologia atual: ' . ($currentTechnology !== '' ? $currentTechnology : '-'),
                 'Novo plano: ' . ($newPlan !== '' ? $newPlan : '-'),
                 'Nova tecnologia: ' . ($newTechnology !== '' ? $newTechnology : '-'),
-                'Benefício concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-'),
-                'Valor do benefício: R$ ' . $benefitValue,
+                $benefitSentence,
                 'Novo valor mensal: R$ ' . $monthlyValue,
+                $penaltySentence,
+                '',
+                'Cláusula Segunda: renovação da fidelidade por 12 meses',
                 'Fidelidade: ' . $fidelityMonths . ' meses',
-                'Multa proporcional: R$ ' . $penaltyValue,
+                'As demais condições comerciais permanecem válidas, exceto o que este aditivo alterar expressamente.',
+                '',
+                'Cláusula Terceira: disposições gerais',
+                'A alteração operacional no MkAuth será aplicada manualmente após a confirmação do aceite.',
+                'As demais cláusulas do contrato original permanecem vigentes.',
                 'Observação: ' . ($observation !== '' ? $observation : '-'),
                 '',
-                'Após a assinatura remota, a alteração no MkAuth será executada manualmente pelo operador.',
+                'Assinatura eletrônica/remota',
                 'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
                 'A cópia do termo e os documentos de cobrança podem ser consultados pela Central do Assinante:',
                 $centralAssinanteUrl,
@@ -4371,9 +4763,7 @@ final class ClientController
         return trim(implode("\n", [
             $contractTitle,
             'Cliente: ' . $nome,
-            'Login: ' . $login,
             'Técnico responsável: ' . $technician['name'],
-            'Login do técnico: ' . $technician['login'],
             'Telefone: ' . $telefone,
             'Tipo de adesão: ' . $tipoAdesao,
             'Valor da adesão: R$ ' . $valorAdesao,
