@@ -55,6 +55,16 @@ final class ContractRepository
         );
     }
 
+    public function listByLogin(string $login, int $limit = 20): array
+    {
+        $limit = max(1, min(100, $limit));
+
+        return $this->database->fetchAll(
+            'SELECT * FROM client_contracts WHERE LOWER(mkauth_login) = LOWER(:login) ORDER BY updated_at DESC, id DESC LIMIT ' . (int) $limit,
+            ['login' => trim($login)]
+        );
+    }
+
     public function updateById(int $id, array $data): int
     {
         return $this->database->execute(

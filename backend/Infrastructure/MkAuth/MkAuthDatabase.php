@@ -270,6 +270,191 @@ final class MkAuthDatabase
         return $rows[0] ?? null;
     }
 
+    public function findClientProfile(string $loginOrCpfCnpj): ?array
+    {
+        $term = trim($loginOrCpfCnpj);
+
+        if ($term === '') {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $term) ?? '';
+        $conditions = ['LOWER(c.login) = LOWER(:login)'];
+        $params = ['login' => $term];
+
+        if ($digits !== '') {
+            $conditions[] = 'REPLACE(REPLACE(REPLACE(REPLACE(c.cpf_cnpj, ".", ""), "-", ""), "/", ""), " ", "") = :digits';
+            $params['digits'] = $digits;
+        }
+
+        $row = $this->fetchOne(
+            'SELECT
+                c.*,
+                COALESCE(NULLIF(p.nome, ""), NULLIF(c.plano, "")) AS plano_nome,
+                p.valor AS plano_valor,
+                p.tecnologia AS plano_tecnologia
+             FROM sis_cliente c
+             LEFT JOIN sis_plano p
+                ON LOWER(p.nome) = LOWER(c.plano)
+                OR p.uuid_plano = c.plano
+             WHERE ' . implode(' OR ', $conditions) . '
+             ORDER BY c.id DESC
+             LIMIT 1',
+            $params
+        );
+
+        return is_array($row) ? $this->normalizeClientProfileRow($row) : null;
+    }
+
+    public function searchClients(string $term, int $limit = 20, int $offset = 0): array
+    {
+        $term = trim($term);
+
+        if ($term === '' || !$this->isConfigured()) {
+            return [];
+        }
+
+        $limit = max(1, min(200, $limit));
+        $offset = max(0, $offset);
+        $digits = preg_replace('/\D+/', '', $term) ?? '';
+        $normalizedTerm = $this->normalizeSearchText($term);
+        $termLike = '%' . $normalizedTerm . '%';
+        $digitLike = $digits !== '' ? '%' . $digits . '%' : '';
+        $tokens = $this->searchTokens($normalizedTerm);
+        $nameExpr = $this->normalizedSqlText('c.nome');
+        $loginExpr = $this->normalizedSqlText('c.login');
+        $addressExpr = $this->normalizedSqlText('c.endereco');
+        $neighborhoodExpr = $this->normalizedSqlText('c.bairro');
+        $cityExpr = $this->normalizedSqlText('c.cidade');
+        $documentExpr = 'REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.cpf_cnpj, ""), ".", ""), "-", ""), "/", ""), " ", "")';
+        $phoneExpr = 'REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.fone, ""), "(", ""), ")", ""), " ", ""), "-", "")';
+        $mobileExpr = 'REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.celular, ""), "(", ""), ")", ""), " ", ""), "-", "")';
+        $hasEmailColumn = $this->columnExists('sis_cliente', 'email');
+        $emailExpr = $hasEmailColumn ? $this->normalizedSqlText('c.email') : null;
+        $conditions = [];
+        $params = [];
+        $nextParam = static function (string $value) use (&$params): string {
+            $key = 'p' . (count($params) + 1);
+            $params[$key] = $value;
+
+            return ':' . $key;
+        };
+
+        if ($emailExpr !== null) {
+            $conditions[] = $emailExpr . ' LIKE ' . $nextParam($termLike);
+        }
+
+        $conditions[] = $nameExpr . ' LIKE ' . $nextParam($termLike);
+        $conditions[] = $loginExpr . ' LIKE ' . $nextParam($termLike);
+        $conditions[] = $addressExpr . ' LIKE ' . $nextParam($termLike);
+        $conditions[] = $neighborhoodExpr . ' LIKE ' . $nextParam($termLike);
+        $conditions[] = $cityExpr . ' LIKE ' . $nextParam($termLike);
+
+        if ($digits !== '') {
+            $conditions[] = $documentExpr . ' LIKE ' . $nextParam($digitLike);
+            $conditions[] = $phoneExpr . ' LIKE ' . $nextParam($digitLike);
+            $conditions[] = $mobileExpr . ' LIKE ' . $nextParam($digitLike);
+        }
+
+        if (strlen($term) <= 32 && !str_contains($term, ' ')) {
+            $conditions[] = $loginExpr . ' = ' . $nextParam($normalizedTerm);
+            $conditions[] = $nameExpr . ' LIKE ' . $nextParam($normalizedTerm . '%');
+        }
+
+        if ($tokens !== []) {
+            $allTokens = [];
+            foreach ($tokens as $token) {
+                $allTokens[] = $nameExpr . ' LIKE ' . $nextParam('%' . $token . '%');
+            }
+            $conditions[] = '(' . implode(' AND ', $allTokens) . ')';
+        }
+
+        $loginExact = $normalizedTerm;
+        $loginPrefix = $normalizedTerm . '%';
+        $nameTokenRank = '0';
+        if ($tokens !== []) {
+            $rankParts = [];
+            foreach ($tokens as $token) {
+                $rankParts[] = $nameExpr . ' LIKE ' . $nextParam('%' . $token . '%');
+            }
+            $nameTokenRank = '(' . implode(' AND ', $rankParts) . ')';
+        }
+        $docExact = $digits !== '' ? $digits : '0';
+        $docPrefix = $digits !== '' ? $digits . '%' : '0';
+        $phoneExact = $digits !== '' ? $digits : '0';
+        $phonePrefix = $digits !== '' ? $digits . '%' : '0';
+
+        $orderParts = [
+            'WHEN ' . $loginExpr . ' = ' . $nextParam($loginExact) . ' THEN 0',
+            'WHEN ' . $documentExpr . ' = ' . $nextParam($docExact) . ' THEN 1',
+            'WHEN ' . $documentExpr . ' LIKE ' . $nextParam($docPrefix) . ' THEN 2',
+            'WHEN ' . $phoneExpr . ' = ' . $nextParam($phoneExact) . ' OR ' . $mobileExpr . ' = ' . $nextParam($phoneExact) . ' THEN 3',
+            'WHEN ' . $phoneExpr . ' LIKE ' . $nextParam($phonePrefix) . ' OR ' . $mobileExpr . ' LIKE ' . $nextParam($phonePrefix) . ' THEN 4',
+            'WHEN ' . $nameExpr . ' LIKE ' . $nextParam($loginPrefix) . ' THEN 5',
+            'WHEN ' . $nameTokenRank . ' THEN 6',
+        ];
+
+        if ($emailExpr !== null) {
+            $orderParts[] = 'WHEN ' . $emailExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 7';
+            $orderParts[] = 'WHEN ' . $addressExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 8';
+            $orderParts[] = 'WHEN ' . $neighborhoodExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 9';
+            $orderParts[] = 'WHEN ' . $cityExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 10';
+        } else {
+            $orderParts[] = 'WHEN ' . $addressExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 7';
+            $orderParts[] = 'WHEN ' . $neighborhoodExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 8';
+            $orderParts[] = 'WHEN ' . $cityExpr . ' LIKE ' . $nextParam($termLike) . ' THEN 9';
+        }
+
+        $rows = $this->fetchAll(
+            'SELECT
+                c.id,
+                c.uuid_cliente,
+                c.nome,
+                c.login,
+                c.cpf_cnpj,
+                c.fone,
+                c.celular,
+                c.bairro,
+                c.cidade,
+                c.estado,
+                c.cep,
+                c.venc,
+                c.plano,
+                c.cli_ativado,
+                c.bloqueado,
+                c.endereco,
+                c.numero,
+                c.complemento,
+                c.cadastro,
+                c.last_update,
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM radacct ra
+                    WHERE LOWER(ra.username) = LOWER(c.login)
+                    AND ra.acctstoptime IS NULL
+                    LIMIT 1
+                ) THEN 1 ELSE 0 END AS online_now,
+                COALESCE(NULLIF(p.nome, ""), NULLIF(c.plano, "")) AS plano_nome,
+                p.valor AS plano_valor,
+                p.tecnologia AS plano_tecnologia
+             FROM sis_cliente c
+             LEFT JOIN sis_plano p
+                ON LOWER(p.nome) = LOWER(c.plano)
+                OR p.uuid_plano = c.plano
+             WHERE (' . implode(' OR ', $conditions) . ')
+             ORDER BY
+                CASE ' . implode(' ', $orderParts) . ' ELSE 99 END,
+                c.nome ASC
+             LIMIT ' . (int) $limit . '
+             OFFSET ' . (int) $offset,
+            $params
+        );
+
+        return array_map(
+            fn (array $row): array => $this->normalizeClientProfileRow($row),
+            $rows
+        );
+    }
+
     public function listPlans(int $limit = 300): array
     {
         $limit = max(1, min(500, $limit));
@@ -577,6 +762,82 @@ final class MkAuthDatabase
         return (int) $statement->fetchColumn();
     }
 
+    private function normalizeSearchText(string $value): string
+    {
+        $value = mb_strtolower(trim(preg_replace('/\s+/', ' ', $value) ?? $value), 'UTF-8');
+        if (function_exists('iconv')) {
+            $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
+            if (is_string($converted) && $converted !== '') {
+                $value = $converted;
+            }
+        }
+
+        $value = preg_replace('/[^a-z0-9._ -]+/', ' ', $value) ?? $value;
+
+        return trim(preg_replace('/\s+/', ' ', $value) ?? $value);
+    }
+
+    private function searchTokens(string $normalizedTerm): array
+    {
+        $tokens = preg_split('/\s+/', trim($normalizedTerm)) ?: [];
+        $tokens = array_values(array_unique(array_filter(
+            array_map(static fn (string $token): string => trim($token), $tokens),
+            static fn (string $token): bool => strlen($token) >= 2
+        )));
+
+        return array_slice($tokens, 0, 5);
+    }
+
+    private function normalizedSqlText(string $field): string
+    {
+        $expression = 'LOWER(COALESCE(' . $field . ', ""))';
+        $replacements = [
+            'á' => 'a', 'à' => 'a', 'ã' => 'a', 'â' => 'a', 'ä' => 'a',
+            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'í' => 'i', 'ì' => 'i', 'î' => 'i', 'ï' => 'i',
+            'ó' => 'o', 'ò' => 'o', 'õ' => 'o', 'ô' => 'o', 'ö' => 'o',
+            'ú' => 'u', 'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+            'ç' => 'c',
+        ];
+
+        foreach ($replacements as $from => $to) {
+            $expression = 'REPLACE(' . $expression . ', "' . $from . '", "' . $to . '")';
+        }
+
+        return $expression;
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        static $cache = [];
+        $key = strtolower($table . '.' . $column);
+
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
+        }
+
+        try {
+            $row = $this->fetchOne(
+                'SELECT 1
+                 FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = :table_name
+                   AND column_name = :column_name
+                 LIMIT 1',
+                [
+                    'table_name' => $table,
+                    'column_name' => $column,
+                ]
+            );
+        } catch (\Throwable) {
+            $row = null;
+        }
+
+        $cache[$key] = $row !== null;
+
+        return $cache[$key];
+    }
+
     private function arrayGetCaseInsensitive(array $array, string $key): mixed
     {
         if (array_key_exists($key, $array)) {
@@ -643,6 +904,60 @@ final class MkAuthDatabase
             'email' => $email,
             'autorizacao_anatel' => $anatelProcess,
             'processo_scm' => $anatelProcess,
+        ];
+    }
+
+    private function normalizeClientProfileRow(array $row): array
+    {
+        $document = preg_replace('/\D+/', '', (string) ($row['cpf_cnpj'] ?? '')) ?? '';
+        $phone = trim((string) ($row['celular'] ?? $row['fone'] ?? ''));
+        $planName = trim((string) ($row['plano_nome'] ?? $row['plano'] ?? ''));
+        $planTechnology = trim((string) ($row['plano_tecnologia'] ?? ''));
+        $blocked = strtolower(trim((string) ($row['bloqueado'] ?? 'nao')));
+        $active = strtolower(trim((string) ($row['cli_ativado'] ?? '')));
+        $online = !empty($row['online_now']);
+
+        $status = 'desconhecido';
+        if ($blocked === 'sim') {
+            $status = 'bloqueado';
+        } elseif ($active === '' && $online) {
+            $status = 'desconectado';
+        } elseif (in_array($active, ['s', 'sim', '1', 'true', 'yes'], true)) {
+            $status = $online ? 'ativo' : 'desconectado';
+        } elseif (trim((string) ($row['login'] ?? '')) !== '') {
+            $status = 'cadastrado';
+        }
+
+        return [
+            'id' => (int) ($row['id'] ?? 0),
+            'uuid_cliente' => (string) ($row['uuid_cliente'] ?? ''),
+            'nome' => trim((string) ($row['nome'] ?? '')),
+            'login' => trim((string) ($row['login'] ?? '')),
+            'cpf_cnpj' => $document,
+            'fone' => $phone,
+            'celular' => trim((string) ($row['celular'] ?? '')),
+            'bairro' => trim((string) ($row['bairro'] ?? '')),
+            'cidade' => trim((string) ($row['cidade'] ?? '')),
+            'estado' => trim((string) ($row['estado'] ?? '')),
+            'cep' => trim((string) ($row['cep'] ?? '')),
+            'email' => trim((string) ($row['email'] ?? '')),
+            'endereco' => trim((string) ($row['endereco'] ?? '')),
+            'numero' => trim((string) ($row['numero'] ?? '')),
+            'complemento' => trim((string) ($row['complemento'] ?? '')),
+            'venc' => trim((string) ($row['venc'] ?? '')),
+            'plano' => $planName,
+            'plano_nome' => $planName,
+            'contrato' => trim((string) ($row['contrato'] ?? '')),
+            'user_mac' => trim((string) ($row['user_mac'] ?? '')),
+            'user_ip' => trim((string) ($row['user_ip'] ?? '')),
+            'plano_valor' => trim((string) ($row['plano_valor'] ?? '')),
+            'plano_tecnologia' => $planTechnology,
+            'cli_ativado' => (string) ($row['cli_ativado'] ?? ''),
+            'bloqueado' => (string) ($row['bloqueado'] ?? ''),
+            'online_now' => $online,
+            'status' => $status,
+            'cadastro' => trim((string) ($row['cadastro'] ?? '')),
+            'last_update' => trim((string) ($row['last_update'] ?? '')),
         ];
     }
 

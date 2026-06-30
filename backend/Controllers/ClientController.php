@@ -47,6 +47,174 @@ final class ClientController
     ) {
     }
 
+    public function index(Request $request): Response
+    {
+        $query = trim((string) $request->query('q', $request->input('q', '')));
+        $searchMode = $this->detectClientSearchMode($query);
+        $results = [];
+
+        if ($query !== '') {
+            try {
+                $results = $this->mkauthDatabase->searchClients($query, 50);
+            } catch (\Throwable $exception) {
+                Flash::set('error', 'Nao foi possivel consultar o MkAuth agora. Tente novamente.');
+            }
+        }
+
+        try {
+            $recentRegistrations = $this->localRepository->recentClientRegistrations(8);
+        } catch (\Throwable) {
+            $recentRegistrations = [];
+        }
+
+        $html = $this->view->render('clients/index', [
+            'pageTitle' => 'Clientes',
+            'currentPath' => $request->path(),
+            'basePath' => $request->basePath(),
+            'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'user' => $this->resolveViewUser(),
+            'flash' => Flash::get(),
+            'query' => $query,
+            'searchMode' => $searchMode,
+            'results' => $this->buildClientHubSearchResults($results),
+            'recentRegistrations' => $this->buildRecentClientItems($recentRegistrations),
+            'canCreateClient' => $this->canCreateClient(),
+            'canSearchClients' => $this->canSearchClients(),
+        ]);
+
+        return Response::html($html);
+    }
+
+    public function search(Request $request): Response
+    {
+        $query = trim((string) $request->query('q', $request->input('q', '')));
+
+        if ($query === '' || mb_strlen($query) < 3) {
+            return Response::json([
+                'status' => 'success',
+                'query' => $query,
+                'results' => [],
+            ]);
+        }
+
+        try {
+            $results = $this->mkauthDatabase->searchClients($query, 10);
+        } catch (\Throwable $exception) {
+            return Response::json([
+                'status' => 'success',
+                'query' => $query,
+                'results' => [],
+            ]);
+        }
+
+        $payload = [];
+        foreach ($this->buildClientHubSearchResults($results) as $item) {
+            $payload[] = [
+                'name' => (string) ($item['name'] ?? ''),
+                'login' => (string) ($item['login'] ?? ''),
+                'document' => (string) ($item['document'] ?? ''),
+                'phone' => (string) ($item['phone'] ?? ''),
+                'plan' => (string) ($item['plan'] ?? ''),
+                'city' => trim((string) ($item['city'] ?? '')),
+                'url' => (string) ($item['detail_url'] ?? ''),
+            ];
+        }
+
+        return Response::json([
+            'status' => 'success',
+            'query' => $query,
+            'results' => $payload,
+        ]);
+    }
+
+    public function detail(Request $request): Response
+    {
+        $login = $this->sanitizeLogin((string) $request->query('login', $request->input('login', '')));
+
+        if ($login === '') {
+            Flash::set('error', 'Informe o login do cliente para abrir o detalhe.');
+            return Response::redirect('/clientes');
+        }
+
+        try {
+            $clientProfile = $this->mkauthDatabase->findClientProfile($login);
+        } catch (\Throwable $exception) {
+            $clientProfile = null;
+            Flash::set('warning', 'Nao foi possivel consultar o MkAuth agora. Mostrando apenas dados locais.');
+        }
+
+        try {
+            $contract = $this->contractRepository->findByLogin($login);
+        } catch (\Throwable) {
+            $contract = null;
+        }
+
+        try {
+            $registrations = $this->localRepository->findClientRegistrationsByLogin($login, 10);
+            $registration = $registrations[0] ?? null;
+            $checkpoints = $this->localRepository->findInstallationCheckpointsByLogin($login, 10);
+        } catch (\Throwable) {
+            $registration = null;
+            $checkpoints = [];
+        }
+
+        try {
+            $acceptance = is_array($contract) && isset($contract['id'])
+                ? $this->contractAcceptanceRepository->findLatestByContractId((int) $contract['id'])
+                : null;
+        } catch (\Throwable) {
+            $acceptance = null;
+        }
+
+        try {
+            $financialTask = is_array($contract) && isset($contract['id'])
+                ? $this->financialTaskRepository->findByContractId((int) $contract['id'])
+                : null;
+        } catch (\Throwable) {
+            $financialTask = null;
+        }
+
+        try {
+            $auditLogs = $this->localRepository->auditLogsForContract(
+                is_array($contract) && isset($contract['id']) ? (int) $contract['id'] : null,
+                is_array($acceptance) && isset($acceptance['id']) ? (int) $acceptance['id'] : null,
+                is_array($financialTask) && isset($financialTask['id']) ? (int) $financialTask['id'] : null,
+                is_array($registration) && isset($registration['id']) ? (int) $registration['id'] : null,
+                100
+            );
+        } catch (\Throwable) {
+            $auditLogs = [];
+        }
+
+        $detail = $this->buildClientDetail(
+            $login,
+            is_array($clientProfile) ? $clientProfile : [],
+            is_array($contract) ? $contract : [],
+            is_array($registration) ? $registration : [],
+            is_array($acceptance) ? $acceptance : [],
+            is_array($financialTask) ? $financialTask : [],
+            is_array($checkpoints) ? $checkpoints : [],
+            is_array($auditLogs) ? $auditLogs : []
+        );
+
+        $html = $this->view->render('clients/detail', [
+            'pageTitle' => 'Cliente',
+            'currentPath' => $request->path(),
+            'basePath' => $request->basePath(),
+            'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'user' => $this->resolveViewUser(),
+            'flash' => Flash::get(),
+            'detail' => $detail,
+            'canCreateClient' => $this->canCreateClient(),
+            'canSearchClients' => $this->canSearchClients(),
+            'canManageContracts' => $this->canManageContracts(),
+            'canManageFinancial' => $this->canManageFinancial(),
+            'canManageSettings' => $this->canManageSettings(),
+        ]);
+
+        return Response::html($html);
+    }
+
     public function create(Request $request): Response
     {
         $cities = $this->loadCities();
@@ -1021,7 +1189,7 @@ final class ClientController
         }
 
         if ($type === 'login') {
-            $value = $this->sanitizeLogin($value);
+            $value = $this->normalizeLoginInput($value);
         } else {
             $value = preg_replace('/\D+/', '', $value) ?? '';
         }
@@ -1096,11 +1264,334 @@ final class ClientController
         return $access['is_manager'] || $access['is_admin'] || !empty($access['can_access_contracts']);
     }
 
+    private function canCreateClient(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_create_client']);
+    }
+
+    private function canSearchClients(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_search_clients']);
+    }
+
+    private function canManageFinancial(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_manage_financial']);
+    }
+
+    private function canManageSettings(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_manage_settings']);
+    }
+
+    private function buildClientHubSearchResults(array $rows): array
+    {
+        $results = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $login = $this->sanitizeLogin((string) ($row['login'] ?? ''));
+            if ($login === '') {
+                continue;
+            }
+
+            $cpfCnpj = trim((string) ($row['cpf_cnpj'] ?? ''));
+            $phone = trim((string) ($row['celular'] ?? $row['fone'] ?? ''));
+            $planValue = trim((string) ($row['plano_nome'] ?? $row['plano'] ?? ''));
+            $results[] = [
+                'name' => (string) ($row['nome'] ?? '-'),
+                'login' => $login,
+                'document' => $cpfCnpj !== '' ? $cpfCnpj : '-',
+                'phone' => $phone !== '' ? $phone : '-',
+                'plan' => $planValue !== '' ? $planValue : '-',
+                'status' => $this->resolveClientStatusLabel($row),
+                'city' => trim((string) ($row['cidade'] ?? '')),
+                'neighborhood' => trim((string) ($row['bairro'] ?? '')),
+                'due_day' => trim((string) ($row['venc'] ?? '')),
+                'technology' => trim((string) ($row['plano_tecnologia'] ?? '')),
+                'email' => trim((string) ($row['email'] ?? '')),
+                'address' => trim((string) ($row['endereco'] ?? '')),
+                'contract' => trim((string) ($row['contrato'] ?? '')),
+                'onu' => trim((string) ($row['onu'] ?? $row['olt'] ?? '')),
+                'mac' => trim((string) ($row['mac'] ?? $row['user_mac'] ?? '')),
+                'detail_url' => Url::to('/clientes/detalhe?login=' . rawurlencode($login)),
+            ];
+        }
+
+        return $results;
+    }
+
+    private function buildRecentClientItems(array $rows): array
+    {
+        $items = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $login = $this->sanitizeLogin((string) ($row['login'] ?? $row['mkauth_login'] ?? ''));
+            if ($login === '') {
+                continue;
+            }
+
+            $items[] = [
+                'name' => (string) ($row['client_name'] ?? $row['nome'] ?? 'Cliente'),
+                'login' => $login,
+                'plan' => (string) ($row['plan_name'] ?? $row['plano'] ?? '-'),
+                'status' => (string) ($row['status'] ?? 'registrado'),
+                'updated_at' => (string) ($row['updated_at'] ?? $row['created_at'] ?? '-'),
+                'detail_url' => Url::to('/clientes/detalhe?login=' . rawurlencode($login)),
+            ];
+        }
+
+        return $items;
+    }
+
+    private function buildClientDetail(
+        string $login,
+        array $clientProfile,
+        array $contract,
+        array $registration,
+        array $acceptance,
+        array $financialTask,
+        array $checkpoints,
+        array $auditLogs
+    ): array {
+        try {
+            $contracts = $this->contractRepository->listByLogin($login, 20);
+        } catch (\Throwable) {
+            $contracts = [];
+        }
+
+        if ($contract !== [] && $contracts === []) {
+            $contracts[] = $contract;
+        }
+
+        $primaryContract = $contract !== [] ? $contract : ($contracts[0] ?? []);
+        $acceptanceRecords = [];
+
+        if (is_array($primaryContract) && isset($primaryContract['id'])) {
+            try {
+                $acceptanceRecords = $this->contractAcceptanceRepository->listByContractId((int) $primaryContract['id']);
+            } catch (\Throwable) {
+                $acceptanceRecords = [];
+            }
+        }
+
+        $timeline = $this->buildClientTimeline(
+            $registration,
+            $checkpoints,
+            $contracts,
+            $acceptanceRecords,
+            $financialTask,
+            $auditLogs
+        );
+
+        $address = trim(implode(', ', array_filter([
+            trim((string) ($clientProfile['endereco'] ?? $primaryContract['endereco'] ?? '')),
+            trim((string) ($clientProfile['numero'] ?? $primaryContract['numero'] ?? '')),
+            trim((string) ($clientProfile['complemento'] ?? $primaryContract['complemento'] ?? '')),
+            trim((string) ($clientProfile['bairro'] ?? $primaryContract['bairro'] ?? '')),
+            trim((string) ($clientProfile['cidade'] ?? $primaryContract['cidade'] ?? '')),
+            trim((string) ($clientProfile['estado'] ?? $primaryContract['estado'] ?? '')),
+            trim((string) ($clientProfile['cep'] ?? $primaryContract['cep'] ?? '')),
+        ], static fn (string $value): bool => $value !== '')));
+
+        $profile = [
+            'name' => trim((string) ($clientProfile['nome'] ?? $primaryContract['nome_cliente'] ?? $registration['client_name'] ?? '-')),
+            'login' => $login,
+            'document' => trim((string) ($clientProfile['cpf_cnpj'] ?? $registration['cpf_cnpj'] ?? '')) ?: '-',
+            'phone' => trim((string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $primaryContract['telefone_cliente'] ?? '')) ?: '-',
+            'email' => ($email = trim((string) ($clientProfile['email'] ?? ''))) !== '' ? $email : '-',
+            'address' => $address !== '' ? $address : '-',
+            'plan' => trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? $registration['plan_name'] ?? '-')),
+            'status' => $this->resolveClientStatusLabel($clientProfile),
+            'due_day' => trim((string) ($clientProfile['venc'] ?? '-')),
+            'technology' => trim((string) ($clientProfile['plano_tecnologia'] ?? '-')),
+        ];
+
+        return [
+            'login' => $login,
+            'profile' => $profile,
+            'clientProfile' => $clientProfile,
+            'contract' => is_array($primaryContract) ? $primaryContract : [],
+            'contracts' => array_values(array_map(fn (array $item): array => $this->normalizeContractSummary($item), $contracts)),
+            'acceptance' => $acceptance,
+            'acceptanceHistory' => is_array($acceptanceRecords) ? $acceptanceRecords : [],
+            'financialTask' => $financialTask,
+            'registration' => $registration,
+            'checkpoints' => $checkpoints,
+            'auditLogs' => $auditLogs,
+            'timeline' => $timeline,
+            'source' => [
+                'mkauth' => $clientProfile !== [],
+                'local' => $registration !== [] || $checkpoints !== [] || $contracts !== [],
+            ],
+        ];
+    }
+
+    private function buildClientTimeline(
+        array $registration,
+        array $checkpoints,
+        array $contracts,
+        array $acceptances,
+        array $financialTask,
+        array $auditLogs
+    ): array {
+        $events = [];
+
+        if ($registration !== []) {
+            $events[] = [
+                'group' => 'Cadastro local',
+                'label' => 'Registro MkAuth/local',
+                'description' => (string) ($registration['client_name'] ?? ''),
+                'time' => (string) ($registration['created_at'] ?? ''),
+            ];
+        }
+
+        foreach ($checkpoints as $checkpoint) {
+            if (!is_array($checkpoint)) {
+                continue;
+            }
+            $events[] = [
+                'group' => 'Instalacao',
+                'label' => 'Checkpoint',
+                'description' => (string) ($checkpoint['status'] ?? 'awaiting_connection'),
+                'time' => (string) ($checkpoint['updated_at'] ?? $checkpoint['created_at'] ?? ''),
+            ];
+        }
+
+        foreach ($contracts as $contractItem) {
+            if (!is_array($contractItem)) {
+                continue;
+            }
+            $events[] = [
+                'group' => 'Contrato',
+                'label' => 'Contrato ' . (string) ($contractItem['id'] ?? '-'),
+                'description' => (string) ($contractItem['status_financeiro'] ?? '-'),
+                'time' => (string) ($contractItem['updated_at'] ?? $contractItem['created_at'] ?? ''),
+            ];
+        }
+
+        foreach ($acceptances as $acceptanceItem) {
+            if (!is_array($acceptanceItem)) {
+                continue;
+            }
+            $events[] = [
+                'group' => 'Aceite',
+                'label' => 'Aceite ' . (string) ($acceptanceItem['status'] ?? '-'),
+                'description' => 'Protocolo ' . (string) ($acceptanceItem['protocolo'] ?? ($acceptanceItem['id'] ?? '-')),
+                'time' => (string) ($acceptanceItem['accepted_at'] ?? $acceptanceItem['created_at'] ?? ''),
+            ];
+        }
+
+        if ($financialTask !== []) {
+            $events[] = [
+                'group' => 'Financeiro',
+                'label' => 'Pendencia financeira',
+                'description' => (string) ($financialTask['status'] ?? 'pendente'),
+                'time' => (string) ($financialTask['updated_at'] ?? $financialTask['created_at'] ?? ''),
+            ];
+        }
+
+        foreach ($auditLogs as $log) {
+            if (!is_array($log)) {
+                continue;
+            }
+            $events[] = [
+                'group' => 'Auditoria',
+                'label' => (string) ($log['action'] ?? 'evento'),
+                'description' => trim((string) ($log['entity_type'] ?? '')) . ' · ' . trim((string) ($log['entity_id'] ?? '')),
+                'time' => (string) ($log['created_at'] ?? ''),
+            ];
+        }
+
+        usort($events, static function (array $a, array $b): int {
+            return strcmp((string) ($b['time'] ?? ''), (string) ($a['time'] ?? ''));
+        });
+
+        return array_slice($events, 0, 50);
+    }
+
+    private function normalizeContractSummary(array $contract): array
+    {
+        return [
+            'id' => (int) ($contract['id'] ?? 0),
+            'login' => (string) ($contract['mkauth_login'] ?? ''),
+            'name' => (string) ($contract['nome_cliente'] ?? '-'),
+            'status_financeiro' => (string) ($contract['status_financeiro'] ?? '-'),
+            'tipo_adesao' => (string) ($contract['tipo_adesao'] ?? '-'),
+            'valor_adesao' => (float) ($contract['valor_adesao'] ?? 0),
+            'parcelas_adesao' => (int) ($contract['parcelas_adesao'] ?? 0),
+            'valor_parcela_adesao' => (float) ($contract['valor_parcela_adesao'] ?? 0),
+            'created_at' => (string) ($contract['created_at'] ?? ''),
+            'updated_at' => (string) ($contract['updated_at'] ?? ''),
+        ];
+    }
+
+    private function detectClientSearchMode(string $query): string
+    {
+        $query = trim($query);
+
+        if ($query === '') {
+            return 'none';
+        }
+
+        $digits = preg_replace('/\D+/', '', $query) ?? '';
+
+        if ($digits !== '' && in_array(strlen($digits), [11, 14], true)) {
+            return 'document';
+        }
+
+        if ($digits !== '' && strlen($digits) >= 8) {
+            return 'phone_or_document';
+        }
+
+        if (str_contains($query, ' ')) {
+            return 'name';
+        }
+
+        if (strlen($query) <= 24) {
+            return 'login';
+        }
+
+        return 'name';
+    }
+
+    private function resolveClientStatusLabel(array $row): string
+    {
+        if (trim((string) ($row['status'] ?? '')) !== '') {
+            return (string) $row['status'];
+        }
+
+        if (!empty($row['bloqueado']) && strtolower((string) $row['bloqueado']) !== 'nao') {
+            return 'bloqueado';
+        }
+
+        if (!empty($row['cli_ativado']) && strtolower((string) $row['cli_ativado']) !== 'sim') {
+            return 'inativo';
+        }
+
+        return $row !== [] ? 'ativo' : '-';
+    }
+
     private function collectFormData(Request $request): array
     {
         $commercial = $this->contractCommercialConfig();
         $document = preg_replace('/\D+/', '', (string) $request->input('cpf_cnpj', '')) ?? '';
-        $login = $this->sanitizeLogin((string) $request->input('login', ''));
+        $login = $this->normalizeLoginInput((string) $request->input('login', ''));
         $person = $this->inferPersonFromDocument($document);
         $installType = strtolower(trim((string) $request->input('tipo_instalacao', 'fibra')));
         $installType = in_array($installType, ['fibra', 'radio'], true) ? $installType : 'fibra';
@@ -1244,7 +1735,7 @@ final class ClientController
         if (trim((string) $data['login']) === '') {
             $errors[] = 'Informe o login do cliente.';
         } elseif (!$this->isValidLogin((string) $data['login'])) {
-            $errors[] = 'Login invalido. Use apenas letras minusculas, numeros, underscore ou hifen, sem acentos ou espacos.';
+            $errors[] = 'Login invalido. Use letras minusculas, numeros, ponto, hifen ou underscore.';
         }
 
         if (!in_array((string) ($data['tipo_instalacao'] ?? ''), ['fibra', 'radio'], true)) {
@@ -1310,8 +1801,8 @@ final class ClientController
             $errors[] = 'Telefone invalido. Use DDD + numero com 10 ou 11 digitos.';
         }
 
-        $originalLogin = $this->sanitizeLogin((string) ($originalData['login'] ?? ''));
-        $currentLogin = $this->sanitizeLogin((string) $data['login']);
+        $originalLogin = $this->normalizeLoginInput((string) ($originalData['login'] ?? ''));
+        $currentLogin = $this->normalizeLoginInput((string) $data['login']);
 
         if (!$editingCheckpoint || $originalLogin !== $currentLogin) {
             if ($this->clientFieldExists('login', (string) $data['login'])) {
@@ -1555,6 +2046,12 @@ final class ClientController
 
         if ($value === '') {
             return false;
+        }
+
+        if ($type === 'login') {
+            $value = $this->normalizeLoginInput($value);
+        } else {
+            $value = preg_replace('/\D+/', '', $value) ?? '';
         }
 
         try {
@@ -2221,15 +2718,67 @@ final class ClientController
         return (bool) preg_match('/^[a-z0-9_.-]+$/', $login);
     }
 
-    private function sanitizeLogin(string $login): string
+    private function normalizeLoginInput(string $login): string
     {
         $login = trim($login);
         $login = $this->removeAccents($login);
         $login = strtolower($login);
-        $login = preg_replace('/[^a-z0-9_.-]+/', '_', $login) ?? '';
-        $login = preg_replace('/_+/', '_', $login) ?? $login;
 
-        return trim($login, '_');
+        return $login;
+    }
+
+    private function maskDocument(string $document): string
+    {
+        $digits = preg_replace('/\D+/', '', $document) ?? '';
+
+        if ($digits === '') {
+            return '-';
+        }
+
+        if (strlen($digits) <= 6) {
+            return $digits;
+        }
+
+        return substr($digits, 0, 3) . '.' . substr($digits, 3, 3) . '.***-**';
+    }
+
+    private function maskPhone(string $phone): string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        if ($digits === '') {
+            return '-';
+        }
+
+        if (strlen($digits) <= 4) {
+            return $digits;
+        }
+
+        return '(' . substr($digits, 0, 2) . ') ' . substr($digits, 2, 5) . '-****';
+    }
+
+    private function formatPublicPhone(string $phone): string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        if ($digits === '') {
+            return '-';
+        }
+
+        if (strlen($digits) === 11) {
+            return '(' . substr($digits, 0, 2) . ') ' . substr($digits, 2, 5) . '-' . substr($digits, 7, 4);
+        }
+
+        if (strlen($digits) === 10) {
+            return '(' . substr($digits, 0, 2) . ') ' . substr($digits, 2, 4) . '-' . substr($digits, 6, 4);
+        }
+
+        return $digits;
+    }
+
+    private function sanitizeLogin(string $login): string
+    {
+        return $this->normalizeLoginInput($login);
     }
 
     private function removeAccents(string $value): string

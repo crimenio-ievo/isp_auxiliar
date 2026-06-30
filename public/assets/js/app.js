@@ -774,13 +774,212 @@ function buildAppUrl(path) {
     return `${appBasePath}${normalizedPath}`;
 }
 
+const clientSearchForm = document.querySelector('[data-client-search-form]');
+const clientSearchInput = document.querySelector('[data-client-search-input]');
+const clientSearchPanel = document.querySelector('[data-client-search-panel]');
+const clientSearchStatus = document.querySelector('[data-client-search-status]');
+const clientSearchResults = document.querySelector('[data-client-search-results]');
+let clientSearchTimer = null;
+let clientSearchAbortController = null;
+let clientSearchPayload = [];
+let clientSearchLoading = false;
+
+function setClientSearchLoading(isLoading, query = '') {
+    clientSearchLoading = Boolean(isLoading);
+
+    if (!clientSearchPanel || !clientSearchStatus) {
+        return;
+    }
+
+    clientSearchPanel.classList.toggle('is-loading', clientSearchLoading);
+    clientSearchPanel.setAttribute('aria-busy', clientSearchLoading ? 'true' : 'false');
+
+    if (clientSearchLoading) {
+        clientSearchStatus.textContent = query ? `Buscando "${query}"...` : 'Buscando...';
+    }
+}
+
+function closeClientSearchSuggestions() {
+    clientSearchPayload = [];
+
+    if (!clientSearchPanel || !clientSearchResults || !clientSearchStatus) {
+        return;
+    }
+
+    clientSearchPanel.hidden = true;
+    clientSearchPanel.classList.remove('is-loading');
+    clientSearchPanel.setAttribute('aria-busy', 'false');
+    clientSearchStatus.textContent = 'Digite ao menos 3 caracteres para pesquisar clientes.';
+    clientSearchResults.innerHTML = '';
+}
+
+function renderClientSearchSuggestions(results = [], query = '') {
+    if (!clientSearchPanel || !clientSearchStatus || !clientSearchResults) {
+        return;
+    }
+
+    const normalizedQuery = String(query || '').trim();
+    clientSearchResults.innerHTML = '';
+    clientSearchPayload = Array.isArray(results) ? results.slice(0, 10) : [];
+
+    if (!normalizedQuery || normalizedQuery.length < 3) {
+        closeClientSearchSuggestions();
+        return;
+    }
+
+    clientSearchPanel.hidden = false;
+    clientSearchPanel.classList.remove('is-loading');
+    clientSearchPanel.setAttribute('aria-busy', 'false');
+
+    if (clientSearchPayload.length === 0) {
+        clientSearchStatus.textContent = 'Nenhum resultado encontrado.';
+        clientSearchResults.innerHTML = '<div class="client-search-empty">Nenhum resultado para essa busca.</div>';
+        return;
+    }
+
+    clientSearchStatus.textContent = `Mostrando ${clientSearchPayload.length} resultado${clientSearchPayload.length === 1 ? '' : 's'}.`;
+
+    clientSearchPayload.forEach((item, index) => {
+        const link = document.createElement('a');
+        link.className = 'client-search-result';
+        link.href = String(item.url || '#');
+        link.dataset.clientSearchIndex = String(index);
+
+        const title = document.createElement('strong');
+        title.textContent = String(item.name || 'Cliente');
+
+        const meta = document.createElement('div');
+        meta.className = 'client-search-result__meta';
+        meta.textContent = [
+            `Login: ${String(item.login || '-')}`,
+            `CPF: ${String(item.document || '-')}`,
+            `Telefone: ${String(item.phone || '-')}`,
+            `Cidade: ${String(item.city || '-')}`,
+            `Plano: ${String(item.plan || '-')}`,
+            `Status: ${String(item.status || '-')}`,
+            item.address ? `Endereco: ${String(item.address)}` : '',
+            item.email ? `E-mail: ${String(item.email)}` : '',
+            item.contract ? `Contrato: ${String(item.contract)}` : '',
+            item.onu ? `ONU: ${String(item.onu)}` : '',
+            item.mac ? `MAC: ${String(item.mac)}` : '',
+        ].filter((part) => part && part !== 'CPF: -' && part !== 'Telefone: -' && part !== 'Cidade: -' && part !== 'Plano: -' && part !== 'Status: -').join(' · ');
+
+        link.appendChild(title);
+        link.appendChild(meta);
+        clientSearchResults.appendChild(link);
+    });
+}
+
+function openFirstClientSearchResult() {
+    const firstResult = clientSearchPayload[0];
+
+    if (!firstResult || !firstResult.url) {
+        return false;
+    }
+
+    window.location.href = String(firstResult.url);
+    return true;
+}
+
+async function fetchClientSearchSuggestions(query) {
+    const normalizedQuery = String(query || '').trim();
+
+    if (!clientSearchPanel || !clientSearchStatus || !clientSearchResults) {
+        return;
+    }
+
+    if (normalizedQuery.length < 3) {
+        closeClientSearchSuggestions();
+        return;
+    }
+
+    clientSearchPayload = [];
+
+    if (clientSearchAbortController) {
+        clientSearchAbortController.abort();
+    }
+
+    clientSearchAbortController = new AbortController();
+    clientSearchPanel.hidden = false;
+    setClientSearchLoading(true, normalizedQuery);
+    clientSearchResults.innerHTML = '';
+
+    try {
+        const response = await fetch(buildAppUrl(`/clientes/buscar?q=${encodeURIComponent(normalizedQuery)}`), {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal: clientSearchAbortController.signal,
+        });
+        const payload = await response.json().catch(() => ({ results: [] }));
+
+        if (!response.ok || payload.status !== 'success') {
+            renderClientSearchSuggestions([], normalizedQuery);
+            return;
+        }
+
+        renderClientSearchSuggestions(Array.isArray(payload.results) ? payload.results : [], normalizedQuery);
+    } catch (error) {
+        if (error && error.name === 'AbortError') {
+            return;
+        }
+
+        renderClientSearchSuggestions([], normalizedQuery);
+    }
+}
+
+if (clientSearchInput instanceof HTMLInputElement) {
+    clientSearchInput.addEventListener('input', () => {
+        clientSearchPayload = [];
+
+        if (clientSearchTimer) {
+            window.clearTimeout(clientSearchTimer);
+        }
+
+        const value = clientSearchInput.value;
+        clientSearchTimer = window.setTimeout(() => {
+            void fetchClientSearchSuggestions(value);
+        }, 300);
+    });
+
+    clientSearchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            if (clientSearchAbortController) {
+                clientSearchAbortController.abort();
+            }
+            closeClientSearchSuggestions();
+            clientSearchInput.blur();
+            return;
+        }
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            if (!openFirstClientSearchResult()) {
+                void fetchClientSearchSuggestions(clientSearchInput.value);
+            }
+        }
+    });
+
+    clientSearchInput.addEventListener('focus', () => {
+        if (clientSearchInput.value.trim().length >= 3) {
+            void fetchClientSearchSuggestions(clientSearchInput.value);
+        }
+    });
+}
+
+if (clientSearchForm instanceof HTMLFormElement) {
+    clientSearchForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        void fetchClientSearchSuggestions(clientSearchInput instanceof HTMLInputElement ? clientSearchInput.value : '');
+    });
+}
+
 function normalizeLoginValue(value) {
     return (value || '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
-        .replace(/[^a-z0-9_.-]+/g, '_')
-        .replace(/^_+|_+$/g, '');
+        .trim();
 }
 
 function formatPhoneValue(value) {
@@ -2198,7 +2397,7 @@ applyLiveValidation(loginInput, (value) => {
 
     return /^[a-z0-9_.-]+$/.test(normalized)
         ? { valid: true, message: '' }
-        : { valid: false, message: 'Login invalido.' };
+        : { valid: false, message: 'Login invalido. Use letras minusculas, numeros, ponto, hifen ou underscore.' };
 }, normalizeLoginValue);
 applyLiveValidation(systemLoginInput, (value) => {
     const normalized = String(value || '').trim().toLowerCase();

@@ -844,6 +844,74 @@ final class LocalRepository
         );
     }
 
+    public function recentClientRegistrations(int $limit = 20): array
+    {
+        $providerId = $this->currentProviderId();
+
+        if ($providerId === null || !$this->isAvailable()) {
+            return [];
+        }
+
+        $limit = max(1, min(500, $limit));
+
+        return $this->database->fetchAll(
+            'SELECT *
+             FROM client_registrations
+             WHERE provider_id = :provider_id
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ' . (int) $limit,
+            ['provider_id' => $providerId]
+        );
+    }
+
+    public function findClientRegistrationsByLogin(string $login, int $limit = 20): array
+    {
+        $providerId = $this->currentProviderId();
+        $login = $this->normalizeLogin($login);
+
+        if ($providerId === null || !$this->isAvailable() || $login === '') {
+            return [];
+        }
+
+        $limit = max(1, min(500, $limit));
+
+        return $this->database->fetchAll(
+            'SELECT *
+             FROM client_registrations
+             WHERE provider_id = :provider_id AND LOWER(mkauth_login) = LOWER(:login)
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ' . (int) $limit,
+            [
+                'provider_id' => $providerId,
+                'login' => $login,
+            ]
+        );
+    }
+
+    public function findInstallationCheckpointsByLogin(string $login, int $limit = 20): array
+    {
+        $providerId = $this->currentProviderId();
+        $login = $this->normalizeLogin($login);
+
+        if ($providerId === null || !$this->isAvailable() || $login === '') {
+            return [];
+        }
+
+        $limit = max(1, min(500, $limit));
+
+        return $this->database->fetchAll(
+            'SELECT *
+             FROM installation_checkpoints
+             WHERE provider_id = :provider_id AND LOWER(mkauth_login) = LOWER(:login)
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ' . (int) $limit,
+            [
+                'provider_id' => $providerId,
+                'login' => $login,
+            ]
+        );
+    }
+
     public function updateInstallationCheckpoint(string $token, array $record): void
     {
         if (!$this->isAvailable()) {

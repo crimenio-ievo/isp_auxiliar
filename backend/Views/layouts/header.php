@@ -22,7 +22,7 @@ $roleLabel = match ($role) {
     <?php endif; ?>
 
     <div class="topbar__brand">
-        <p class="topbar__eyebrow">Painel administrativo</p>
+        <p class="topbar__eyebrow">Central operacional</p>
         <strong><?= htmlspecialchars($appName ?? 'ISP Auxiliar', ENT_QUOTES, 'UTF-8'); ?></strong>
     </div>
 
