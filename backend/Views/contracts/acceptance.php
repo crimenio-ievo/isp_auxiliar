@@ -38,6 +38,8 @@ $centralAssinanteUrl = trim((string) ($centralAssinanteUrl ?? ($context['central
 $centralAssinanteUrl = $centralAssinanteUrl !== '' ? $centralAssinanteUrl : 'https://sistema.ievo.com.br/central';
 $status = (string) ($acceptance['status'] ?? '');
 $isAccepted = $status === 'aceito';
+$remoteSignatureRequired = $status === 'assinatura_pendente';
+$remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
 $isExpired = str_contains((string) ($context['error'] ?? ''), 'expirou');
 $hasError = !empty($context['error']) || !empty($errorMessage);
 $acceptedAt = trim((string) ($acceptance['accepted_at'] ?? ''));
@@ -113,6 +115,20 @@ ob_start();
                     <strong>Este link expirou e não pode ser concluído.</strong>
                     <small>Solicite um novo envio ao atendimento.</small>
                 </div>
+            <?php elseif ($remoteSignatureRequired): ?>
+                <div class="status-card status-card--warning" style="margin-top: 16px;">
+                    <strong>Assinatura remota pendente.</strong>
+                    <small>O titular não assinou no local. Conclua agora com a assinatura eletrônica e a validação do documento.</small>
+                    <?php if ($remoteSignatureReason !== ''): ?>
+                        <small>Motivo informado: <?= htmlspecialchars($remoteSignatureReason, ENT_QUOTES, 'UTF-8'); ?></small>
+                    <?php endif; ?>
+                </div>
+                <?php if (!empty($errorMessage)): ?>
+                    <div class="status-card status-card--warning" style="margin-top: 16px;">
+                        <strong><?= htmlspecialchars((string) $errorMessage, ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <small>Se necessário, solicite um novo link de aceite ao atendimento.</small>
+                    </div>
+                <?php endif; ?>
             <?php elseif (!empty($errorMessage)): ?>
                 <div class="status-card status-card--warning" style="margin-top: 16px;">
                     <strong><?= htmlspecialchars((string) $errorMessage, ENT_QUOTES, 'UTF-8'); ?></strong>
@@ -217,6 +233,7 @@ ob_start();
                     method="post"
                     action="<?= htmlspecialchars(Url::to('/aceite/' . rawurlencode((string) $token) . '/confirmar'), ENT_QUOTES, 'UTF-8'); ?>"
                     data-acceptance-form
+                    data-signature-required="<?= $remoteSignatureRequired ? '1' : '0'; ?>"
                     data-document-validation-required="<?= $documentValidationRequired ? '1' : '0'; ?>"
                     data-document-validation-digits="<?= htmlspecialchars((string) $documentValidationDigits, ENT_QUOTES, 'UTF-8'); ?>"
                 >
@@ -242,10 +259,23 @@ ob_start();
                             <small class="field-help" data-acceptance-document-help>Digite apenas os primeiros dígitos para confirmar a identidade documentada.</small>
                         </label>
                     <?php endif; ?>
-                    <div class="rotate-tip" style="margin-top: 12px;">
-                        <strong>Assinatura já registrada na instalação.</strong>
-                        <span>O aceite público usa a assinatura existente, sem solicitar novo desenho.</span>
-                    </div>
+
+                    <?php if ($remoteSignatureRequired): ?>
+                        <div class="signature-pad" data-signature-pad style="margin-top: 12px;">
+                            <p class="section-heading__eyebrow">Assinatura eletrônica</p>
+                            <canvas class="signature-pad__canvas" data-signature-canvas width="960" height="300"></canvas>
+                            <input type="hidden" name="assinatura_cliente" data-signature-input value="">
+                            <div class="signature-pad__actions">
+                                <button class="button button--ghost" type="button" data-signature-clear>Limpar assinatura</button>
+                                <small class="field-help" data-signature-help>Desenhe sua assinatura para concluir o aceite remoto.</small>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <div class="rotate-tip" style="margin-top: 12px;">
+                            <strong>Assinatura já registrada na instalação.</strong>
+                            <span>O aceite público usa a assinatura existente, sem solicitar novo desenho.</span>
+                        </div>
+                    <?php endif; ?>
 
                     <button type="submit" class="button button--full">ACEITO OS TERMOS</button>
                 </form>

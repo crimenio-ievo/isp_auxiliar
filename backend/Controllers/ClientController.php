@@ -314,7 +314,7 @@ final class ClientController
             return Response::redirect('/clientes/novo?draft=' . rawurlencode($draftId));
         }
 
-        Flash::set('success', 'Dados iniciais e fotos salvos. Agora confirme o aceite e registre a assinatura.');
+        Flash::set('success', 'Dados iniciais e fotos salvos. Agora confirme o aceite e conclua a assinatura local ou remota.');
 
         $redirect = '/clientes/novo/aceite?draft=' . rawurlencode($draftId);
         if ($editingCheckpoint) {
@@ -1833,12 +1833,18 @@ final class ClientController
     private function validateAcceptance(array $data, Request $request): array
     {
         $errors = [];
+        $remoteSignature = $this->normalizeBoolean((string) ($data['assinatura_remota'] ?? '0'));
+        $remoteReason = trim((string) ($data['assinatura_remota_motivo'] ?? ''));
 
         if (strtolower(trim((string) ($data['aceite_cliente'] ?? 'nao'))) !== 'sim') {
             $errors[] = 'Confirme o aceite do cliente antes de concluir.';
         }
 
-        if (trim((string) ($data['assinatura_cliente'] ?? '')) === '') {
+        if ($remoteSignature) {
+            if ($remoteReason === '') {
+                $errors[] = 'Informe o motivo da ausência da assinatura para concluir o aceite remoto.';
+            }
+        } elseif (trim((string) ($data['assinatura_cliente'] ?? '')) === '') {
             $errors[] = 'Registre a assinatura do cliente antes de concluir.';
         }
 
@@ -1850,6 +1856,8 @@ final class ClientController
         return [
             'aceite_cliente' => $request->input('aceite_cliente', 'nao'),
             'assinatura_cliente' => (string) $request->input('assinatura_cliente', ''),
+            'assinatura_remota' => $request->input('assinatura_remota', '0'),
+            'assinatura_remota_motivo' => (string) $request->input('assinatura_remota_motivo', ''),
             'observacao_aceite' => (string) $request->input('observacao_aceite', ''),
         ];
     }
@@ -2315,6 +2323,8 @@ final class ClientController
         $summary = '';
         $savedItems = [];
         $signature = trim((string) ($data['assinatura_cliente'] ?? ''));
+        $remoteSignature = $this->normalizeBoolean((string) ($data['assinatura_remota'] ?? '0'));
+        $remoteReason = trim((string) ($data['assinatura_remota_motivo'] ?? ''));
         $acceptance = strtolower(trim((string) ($data['aceite_cliente'] ?? 'nao')));
         $login = trim((string) ($data['login'] ?? 'cliente'));
         $folderName = trim((string) ($evidenceRef ?? '')) !== ''
@@ -2359,6 +2369,11 @@ final class ClientController
             'ip' => (string) $request->server('REMOTE_ADDR', ''),
             'user_agent' => (string) $request->header('User-Agent', ''),
             'acceptance' => $acceptance,
+            'signature_mode' => $remoteSignature ? 'remote' : 'local',
+            'remote_signature' => [
+                'enabled' => $remoteSignature,
+                'reason' => $remoteReason,
+            ],
             'observacao_aceite' => (string) ($data['observacao_aceite'] ?? ''),
             'files' => $savedItems,
         ];
@@ -3049,6 +3064,7 @@ final class ClientController
         $label = match ($status) {
             'aceito' => 'aceite aceito',
             'enviado' => 'aceite enviado',
+            'assinatura_pendente' => 'assinatura pendente',
             'expirado' => 'aceite expirado',
             'cancelado' => 'aceite cancelado',
             default => 'aceite pendente',
@@ -3413,14 +3429,17 @@ final class ClientController
         $expiresAt = (new \DateTimeImmutable())->modify('+' . $ttlHours . ' hours')->format('Y-m-d H:i:s');
         $plainToken = bin2hex(random_bytes(16));
         $technician = $this->resolveTechnicianIdentity();
+        $remoteSignature = $this->normalizeBoolean((string) ($data['assinatura_remota'] ?? '0'));
+        $remoteReason = trim((string) ($data['assinatura_remota_motivo'] ?? ''));
         $acceptanceData = [
             'contract_id' => $contractId,
             'technician_name' => $technician['name'],
             'technician_login' => $technician['login'],
             'token' => $plainToken,
             'token_expires_at' => $expiresAt,
-            'status' => 'criado',
+            'status' => $remoteSignature ? 'assinatura_pendente' : 'criado',
             'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'remote_signature_reason' => $remoteSignature ? $remoteReason : null,
             'whatsapp_message_id' => null,
             'sent_at' => null,
             'accepted_at' => null,

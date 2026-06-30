@@ -58,6 +58,8 @@ const signatureInput = document.querySelector('[data-signature-input]');
 const signatureClearButton = document.querySelector('[data-signature-clear]');
 const signatureHelp = document.querySelector('[data-signature-help]');
 const acceptanceSelect = document.querySelector('[data-acceptance-select]');
+const remoteSignatureSelect = document.querySelector('[data-remote-signature-select]');
+const remoteSignatureReason = document.querySelector('[data-remote-signature-reason]');
 const photoInput = document.querySelector('[data-install-photos]');
 const photoPickButton = document.querySelector('[data-photo-pick]');
 const photoCameraButton = document.querySelector('[data-photo-camera]');
@@ -1871,12 +1873,22 @@ function updateAcceptanceVisibility() {
     }
 
     const accepted = Boolean(acceptanceSelect.checked);
-    signaturePad.classList.toggle('is-required', accepted);
+    const remoteSignatureEnabled = Boolean(remoteSignatureSelect && remoteSignatureSelect.checked);
+    const signatureRequired = accepted && !remoteSignatureEnabled;
+    signaturePad.classList.toggle('is-required', signatureRequired);
+
+    if (remoteSignatureReason instanceof HTMLTextAreaElement) {
+        remoteSignatureReason.required = remoteSignatureEnabled;
+    }
 
     if (signatureHelp) {
-        signatureHelp.textContent = accepted
-            ? 'Assinatura obrigatória: conclua o desenho para liberar o envio.'
-            : 'Quando o aceite for Sim, a assinatura se torna obrigatória.';
+        if (remoteSignatureEnabled) {
+            signatureHelp.textContent = 'Assinatura local dispensada. O aceite será concluído no link público.';
+        } else {
+            signatureHelp.textContent = accepted
+                ? 'Assinatura obrigatória: conclua o desenho para liberar o envio.'
+                : 'Quando o aceite for Sim, a assinatura se torna obrigatória.';
+        }
     }
 }
 
@@ -2449,6 +2461,9 @@ if (systemLoginInput) {
 
 if (acceptanceSelect) {
     acceptanceSelect.addEventListener('change', updateAcceptanceVisibility);
+    if (remoteSignatureSelect) {
+        remoteSignatureSelect.addEventListener('change', updateAcceptanceVisibility);
+    }
     updateAcceptanceVisibility();
 }
 
@@ -2465,6 +2480,7 @@ autosaveForms.forEach((form) => {
 if (acceptanceForm) {
     const acceptanceDocumentRequired = acceptanceForm.dataset.documentValidationRequired === '1';
     const acceptanceDocumentDigits = Math.max(1, Number.parseInt(acceptanceForm.dataset.documentValidationDigits || '3', 10) || 3);
+    const publicSignatureRequired = acceptanceForm.dataset.signatureRequired === '1';
 
     if (acceptanceDocumentInput) {
         acceptanceDocumentInput.addEventListener('input', () => {
@@ -2499,6 +2515,14 @@ if (acceptanceForm) {
             return;
         }
 
+        const remoteSignatureEnabled = Boolean(remoteSignatureSelect && remoteSignatureSelect.checked);
+        if (remoteSignatureEnabled && remoteSignatureReason && String(remoteSignatureReason.value || '').trim() === '') {
+            event.preventDefault();
+            remoteSignatureReason.focus({ preventScroll: true });
+            remoteSignatureReason.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
         if (acceptanceDocumentRequired && acceptanceDocumentInput) {
             const sanitized = String(acceptanceDocumentInput.value || '').replace(/\D+/g, '').slice(0, acceptanceDocumentDigits);
 
@@ -2514,6 +2538,21 @@ if (acceptanceForm) {
             }
 
             acceptanceDocumentInput.value = sanitized;
+        }
+
+        if ((publicSignatureRequired || (signatureInput && signaturePad && !remoteSignatureEnabled)) && signatureInput) {
+            const hasSignature = String(signatureInput.value || '').trim() !== '';
+            if (!hasSignature) {
+                event.preventDefault();
+                if (signatureHelp) {
+                    signatureHelp.textContent = 'Desenhe a assinatura antes de concluir.';
+                    signatureHelp.dataset.tone = 'warning';
+                }
+                if (signatureCanvas instanceof HTMLElement) {
+                    signatureCanvas.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
         }
     });
 }

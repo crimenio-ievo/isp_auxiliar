@@ -28,6 +28,16 @@ $returnTo = '/contratos/detalhe?id=' . $contractId;
 $evotrixLastLog = is_array($evotrixStatus['last'] ?? null) ? $evotrixStatus['last'] : [];
 $emailLastLog = is_array($emailStatus['last'] ?? null) ? $emailStatus['last'] : [];
 $mkAuthLastLog = is_array($mkAuthTicketStatus['last'] ?? null) ? $mkAuthTicketStatus['last'] : [];
+$acceptanceStatus = (string) ($acceptance['status'] ?? $acceptance['acceptance_status'] ?? 'criado');
+$acceptanceStatusLabel = match ($acceptanceStatus) {
+    'assinatura_pendente' => 'Assinatura pendente',
+    'enviado' => 'Enviado',
+    'aceito' => 'Aceito',
+    'expirado' => 'Expirado',
+    'cancelado' => 'Cancelado',
+    default => 'Criado',
+};
+$remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
 $whatsappRequestId = bin2hex(random_bytes(16));
 $emailRequestId = bin2hex(random_bytes(16));
 $financialRequestId = bin2hex(random_bytes(16));
@@ -176,7 +186,7 @@ ob_start();
         </div>
         <div class="summary-item">
             <span>Status do aceite</span>
-            <strong><span class="pill pill--muted"><?= htmlspecialchars((string) ($acceptance['status'] ?? $acceptance['acceptance_status'] ?? 'criado'), ENT_QUOTES, 'UTF-8'); ?></span></strong>
+            <strong><span class="pill pill--muted"><?= htmlspecialchars($acceptanceStatusLabel, ENT_QUOTES, 'UTF-8'); ?></span></strong>
         </div>
         <div class="summary-item">
             <span>Tipo de adesão</span>
@@ -186,6 +196,12 @@ ob_start();
             <span>Tipo de aceite</span>
             <strong><?= htmlspecialchars((string) ($contract['tipo_aceite'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
         </div>
+        <?php if ($remoteSignatureReason !== ''): ?>
+            <div class="summary-item summary-item--span-2">
+                <span>Motivo da assinatura remota</span>
+                <strong><?= htmlspecialchars($remoteSignatureReason, ENT_QUOTES, 'UTF-8'); ?></strong>
+            </div>
+        <?php endif; ?>
     </div>
 
     <div class="hero-actions" style="margin-top: 18px;">
@@ -450,21 +466,21 @@ ob_start();
     </article>
 
     <article class="card" id="logs">
-        <div class="section-heading">
-            <p class="section-heading__eyebrow">Logs</p>
-            <h2>Notificações e auditoria</h2>
-        </div>
+            <div class="section-heading">
+                <p class="section-heading__eyebrow">Logs</p>
+                <h2>Notificações e auditoria</h2>
+            </div>
 
-        <div class="summary-grid" style="margin-bottom: 18px;">
-            <div class="summary-item">
-                <span>Link futuro</span>
-                <strong><?= htmlspecialchars($simulatedAcceptanceLink, ENT_QUOTES, 'UTF-8'); ?></strong>
+            <div class="summary-grid" style="margin-bottom: 18px;">
+                <div class="summary-item">
+                    <span>Link futuro</span>
+                    <strong><?= htmlspecialchars($simulatedAcceptanceLink, ENT_QUOTES, 'UTF-8'); ?></strong>
+                </div>
+                <div class="summary-item">
+                    <span>Aceite</span>
+                    <strong><span class="pill pill--muted"><?= htmlspecialchars($acceptanceStatusLabel, ENT_QUOTES, 'UTF-8'); ?></span></strong>
+                </div>
             </div>
-            <div class="summary-item">
-                <span>Aceite</span>
-                <strong><span class="pill pill--muted"><?= htmlspecialchars((string) ($acceptance['status'] ?? $acceptance['acceptance_status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></strong>
-            </div>
-        </div>
 
         <div class="log-list">
             <?php if ($notificationLogs !== []): ?>

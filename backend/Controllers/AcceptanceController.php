@@ -175,6 +175,9 @@ final class AcceptanceController
             return Response::redirect('/aceite/' . rawurlencode($token));
         }
 
+        $acceptanceStatus = (string) ($acceptance['status'] ?? '');
+        $remoteSignatureRequired = $acceptanceStatus === 'assinatura_pendente';
+        $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
         $documentValidation = is_array($context['documentValidation'] ?? null) ? $context['documentValidation'] : [];
         $documentInput = preg_replace('/\D+/', '', (string) $request->input('document_prefix', '')) ?? '';
         $requiredDigits = max(1, (int) ($documentValidation['digits_required'] ?? $this->documentValidationDigits()));
@@ -214,6 +217,22 @@ final class AcceptanceController
             return Response::redirect('/aceite/' . rawurlencode($token));
         }
 
+        $signatureDataUrl = trim((string) $request->input('assinatura_cliente', ''));
+        $acceptanceId = (int) $acceptance['id'];
+        $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
+        if ($remoteSignatureRequired) {
+            if ($signatureDataUrl === '') {
+                Flash::set('error', 'Desenhe a assinatura para concluir o aceite remoto.');
+                return Response::redirect('/aceite/' . rawurlencode($token));
+            }
+
+            $signaturePath = $this->saveSignatureFile($acceptanceId, $signatureDataUrl);
+            if ($signaturePath === null) {
+                Flash::set('error', 'A assinatura informada nao pôde ser salva.');
+                return Response::redirect('/aceite/' . rawurlencode($token));
+            }
+        }
+
         $validationMatched = null;
         $validationResult = $documentAvailable ? 'not_required' : 'not_possible';
         if ($documentAvailable && $documentRequired) {
@@ -226,9 +245,7 @@ final class AcceptanceController
         $userAgent = (string) $request->header('User-Agent', '');
         $termBody = $this->buildContractTermBody($contract);
         $termHash = hash('sha256', $termBody);
-        $acceptanceId = (int) $acceptance['id'];
         $displayedData = $context['publicDetails'] ?? [];
-        $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
 
         $evidence = [
             'displayed_data' => $displayedData,
@@ -236,6 +253,7 @@ final class AcceptanceController
             'acceptance' => [
                 'id' => $acceptanceId,
                 'contract_id' => (int) ($acceptance['contract_id'] ?? $contract['id'] ?? 0),
+                'previous_status' => $acceptanceStatus,
                 'status' => 'aceito',
                 'accepted_at' => $acceptedAt,
                 'ip_address' => $ipAddress,
@@ -243,6 +261,10 @@ final class AcceptanceController
                 'termo_versao' => (string) ($acceptance['termo_versao'] ?? $this->config->get('contracts.term_version', '2026.1')),
                 'termo_hash' => $termHash,
             ],
+            'previous_status' => $acceptanceStatus,
+            'final_status' => 'aceito',
+            'remote_signature_required' => $remoteSignatureRequired,
+            'remote_signature_reason' => $remoteSignatureReason,
             'accepted_at' => $acceptedAt,
             'ip_address' => $ipAddress,
             'user_agent' => $userAgent,
@@ -257,8 +279,11 @@ final class AcceptanceController
                 'document_validation_possible' => $documentAvailable,
                 'matched' => $validationMatched,
                 'result' => $validationResult,
+                'checkbox_confirmed' => true,
+                'document_validated' => $documentAvailable && $documentRequired ? $validationMatched : null,
             ],
             'document_full' => $documentAvailable ? $fullDocument : null,
+            'signature_mode' => $remoteSignatureRequired ? 'remote' : 'local',
             'signature_path' => $signaturePath,
         ];
 
@@ -333,7 +358,7 @@ final class AcceptanceController
         }
 
         $status = (string) ($acceptance['status'] ?? '');
-        if (!in_array($status, ['criado', 'enviado', 'aceito'], true)) {
+        if (!in_array($status, ['criado', 'enviado', 'assinatura_pendente', 'aceito'], true)) {
             return ['error' => 'Este aceite nao esta disponivel para conclusao.', 'acceptance' => $acceptance, 'contract' => $contract];
         }
 

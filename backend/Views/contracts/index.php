@@ -12,6 +12,17 @@ $emailConfig = is_array($emailConfig ?? null) ? $emailConfig : [];
 $currentTab = (string) ($currentTab ?? 'resumo');
 $canManageContracts = !empty($canManageContracts);
 $moneyValue = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
+$acceptanceStatusLabel = static function (string $status): string {
+    return match ($status) {
+        'assinatura_pendente' => 'Assinatura pendente',
+        'criado' => 'Criado',
+        'enviado' => 'Enviado',
+        'aceito' => 'Aceito',
+        'expirado' => 'Expirado',
+        'cancelado' => 'Cancelado',
+        default => $status !== '' ? ucfirst($status) : '-',
+    };
+};
 $emailPasswordConfigured = trim((string) ($emailConfig['smtp_password'] ?? '')) !== '';
 $tabLink = static function (string $tab) use ($currentTab): string {
     $active = $currentTab === $tab ? ' is-active' : '';
@@ -273,7 +284,7 @@ ob_start();
                             <td><?= htmlspecialchars((string) ($contract['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?= htmlspecialchars((string) ($contract['tipo_adesao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><span class="pill"><?= htmlspecialchars((string) ($contract['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                            <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($contract['acceptance_status'] ?? 'criado'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                            <td><span class="pill pill--muted"><?= htmlspecialchars($acceptanceStatusLabel((string) ($contract['acceptance_status'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span></td>
                             <td>
                                 <div class="inline-actions">
                                     <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId), ENT_QUOTES, 'UTF-8'); ?>">Visualizar contrato</a>
@@ -323,7 +334,7 @@ ob_start();
                         <tr>
                             <td><?= htmlspecialchars((string) ($acceptance['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?= htmlspecialchars((string) ($acceptance['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($acceptance['acceptance_status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                            <td><span class="pill pill--muted"><?= htmlspecialchars($acceptanceStatusLabel((string) ($acceptance['acceptance_status'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span></td>
                             <td><span class="pill"><?= htmlspecialchars((string) ($acceptance['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
                             <td><?= htmlspecialchars((string) ($acceptance['token_expires_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                             <td>
