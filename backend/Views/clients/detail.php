@@ -30,6 +30,9 @@ ob_start();
     <div class="hero-actions">
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>">Voltar para clientes</a>
         <?php if (!empty($canCreateClient)): ?>
+            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Upgrade / Migração</a>
+        <?php endif; ?>
+        <?php if (!empty($canCreateClient)): ?>
             <a class="button" href="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>">Novo cliente</a>
         <?php endif; ?>
     </div>

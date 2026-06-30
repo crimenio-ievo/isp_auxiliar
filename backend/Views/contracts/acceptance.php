@@ -12,6 +12,7 @@ $customerDetails = is_array($publicDetails['cliente'] ?? null) ? $publicDetails[
 $installationDetails = is_array($publicDetails['instalacao'] ?? null) ? $publicDetails['instalacao'] : [];
 $planDetails = is_array($publicDetails['plano'] ?? null) ? $publicDetails['plano'] : [];
 $contractDetails = is_array($publicDetails['contrato'] ?? null) ? $publicDetails['contrato'] : [];
+$upgradeDetails = is_array($publicDetails['upgrade'] ?? null) ? $publicDetails['upgrade'] : [];
 $providerName = trim((string) ($providerName ?? $appName ?? 'nossa equipe'));
 $contractTitle = $providerName === 'nossa equipe'
     ? 'Contrato digital da nossa equipe'
@@ -47,6 +48,17 @@ $protocol = trim((string) ($acceptance['token_hash'] ?? ''));
 $protocol = $protocol !== '' ? strtoupper(substr($protocol, 0, 12)) : ('ACEITE-' . str_pad((string) ((int) ($acceptance['id'] ?? 0)), 6, '0', STR_PAD_LEFT));
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
+$upgradeMode = (string) ($contractDetails['tipo_aceite'] ?? '') === 'upgrade_migracao';
+$upgradeCurrentPlan = trim((string) ($upgradeDetails['current_plan'] ?? ''));
+$upgradeCurrentTechnology = trim((string) ($upgradeDetails['current_technology'] ?? ''));
+$upgradeNewPlan = trim((string) ($upgradeDetails['new_plan'] ?? ''));
+$upgradeNewTechnology = trim((string) ($upgradeDetails['new_technology'] ?? ''));
+$upgradeBenefit = trim((string) ($upgradeDetails['benefit_description'] ?? ''));
+$upgradeBenefitValue = isset($upgradeDetails['benefit_value']) ? 'R$ ' . number_format((float) $upgradeDetails['benefit_value'], 2, ',', '.') : '-';
+$upgradeMonthlyValue = isset($upgradeDetails['new_monthly_value']) ? 'R$ ' . number_format((float) $upgradeDetails['new_monthly_value'], 2, ',', '.') : '-';
+$upgradeFidelity = max(1, (int) ($upgradeDetails['fidelity_months'] ?? 12));
+$upgradePenalty = isset($upgradeDetails['multa_proporcional']) ? 'R$ ' . number_format((float) $upgradeDetails['multa_proporcional'], 2, ',', '.') : 'R$ 0,00';
+$upgradeObservation = trim((string) ($upgradeDetails['observacao'] ?? ''));
 $hideFooter = $isAccepted;
 $alreadyAcceptedView = $isAccepted && empty($successMessage);
 
@@ -177,6 +189,26 @@ ob_start();
                 <div class="summary-item summary-item--span-2"><span>Observações</span><strong><?= htmlspecialchars(trim(implode(' · ', array_filter([(string) ($contractDetails['observacao_adesao'] ?? ''), (string) ($installationDetails['observacao'] ?? '')], static fn (string $value): bool => trim($value) !== ''))) ?: '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 <div class="summary-item summary-item--span-2"><span>Versão do termo</span><strong><?= htmlspecialchars((string) ($publicDetails['termo_versao'] ?? ($acceptance['termo_versao'] ?? '2026.1')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             </div>
+
+            <?php if ($upgradeMode): ?>
+                <div class="status-card status-card--warning" style="margin-top: 18px;">
+                    <strong>Upgrade / Migração</strong>
+                    <small>Depois da assinatura, a alteração no MkAuth será aplicada manualmente pela operação.</small>
+                </div>
+
+                <div class="summary-grid" style="margin-top: 16px;">
+                    <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars($upgradeCurrentPlan !== '' ? $upgradeCurrentPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars($upgradeCurrentTechnology !== '' ? $upgradeCurrentTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars($upgradeNewPlan !== '' ? $upgradeNewPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Nova tecnologia</span><strong><?= htmlspecialchars($upgradeNewTechnology !== '' ? $upgradeNewTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars($upgradeBenefit !== '' ? $upgradeBenefit : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Valor do benefício</span><strong><?= htmlspecialchars($upgradeBenefitValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars($upgradeMonthlyValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) $upgradeFidelity, ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
+                    <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars($upgradePenalty, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Observação do upgrade</span><strong><?= htmlspecialchars($upgradeObservation !== '' ? $upgradeObservation : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                </div>
+            <?php endif; ?>
         </div>
     </article>
 

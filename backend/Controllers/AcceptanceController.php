@@ -738,6 +738,7 @@ final class AcceptanceController
 
     private function buildContractTermBody(array $contract): string
     {
+        $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
         $nome = (string) ($contract['nome_cliente'] ?? '');
         $login = (string) ($contract['mkauth_login'] ?? '');
         $telefone = (string) ($contract['telefone_cliente'] ?? '');
@@ -755,6 +756,44 @@ final class AcceptanceController
         $technicianName = trim((string) ($contract['technician_name'] ?? ''));
         $technicianLogin = trim((string) ($contract['technician_login'] ?? ''));
         $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
+
+        if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
+            $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
+            $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
+            $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
+            $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
+            $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
+            $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
+            $monthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
+            $fidelityMonths = max(1, (int) ($upgradeSnapshot['fidelity_months'] ?? $fidelidade));
+            $penaltyValue = number_format((float) ($upgradeSnapshot['multa_proporcional'] ?? ($contract['multa_total'] ?? 0)), 2, ',', '.');
+            $observation = trim((string) ($upgradeSnapshot['observacao'] ?? $observacao));
+
+            return trim(implode("\n", [
+                $contractTitle,
+                'Cliente: ' . $nome,
+                'Login: ' . $login,
+                'Técnico responsável: ' . ($technicianName !== '' ? $technicianName : 'Equipe técnica'),
+                'Login do técnico: ' . ($technicianLogin !== '' ? $technicianLogin : '-'),
+                'Telefone: ' . $telefone,
+                'Tipo de aceite: upgrade_migracao',
+                'Plano atual: ' . ($currentPlan !== '' ? $currentPlan : '-'),
+                'Tecnologia atual: ' . ($currentTechnology !== '' ? $currentTechnology : '-'),
+                'Novo plano: ' . ($newPlan !== '' ? $newPlan : '-'),
+                'Nova tecnologia: ' . ($newTechnology !== '' ? $newTechnology : '-'),
+                'Benefício concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-'),
+                'Valor do benefício: R$ ' . $benefitValue,
+                'Novo valor mensal: R$ ' . $monthlyValue,
+                'Fidelidade: ' . $fidelityMonths . ' meses',
+                'Multa proporcional: R$ ' . $penaltyValue,
+                'Observação: ' . ($observation !== '' ? $observation : '-'),
+                '',
+                'Após a assinatura remota, a alteração no MkAuth será executada manualmente pelo operador.',
+                'O aceite eletrônico deste termo é realizado por link enviado ao telefone cadastrado, com registro de IP, data, hora e dispositivo.',
+                'A cópia do termo e os documentos de cobrança podem ser consultados pela Central do Assinante:',
+                $centralAssinanteUrl,
+            ]));
+        }
 
         return trim(implode("\n", [
             $contractTitle,
@@ -800,7 +839,19 @@ final class AcceptanceController
             'tipo_aceite' => (string) ($contract['tipo_aceite'] ?? ''),
             'observacao_adesao' => (string) ($contract['observacao_adesao'] ?? ''),
             'status_financeiro' => (string) ($contract['status_financeiro'] ?? ''),
+            'upgrade_snapshot' => $this->extractUpgradeSnapshot($contract),
         ];
+    }
+
+    private function extractUpgradeSnapshot(array $contract): array
+    {
+        $raw = trim((string) ($contract['upgrade_snapshot_json'] ?? ''));
+        if ($raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function maskDocument(string $document): string
@@ -937,6 +988,7 @@ final class AcceptanceController
                 'observacao_adesao' => (string) ($contract['observacao_adesao'] ?? '-'),
                 'equipamentos_comodato' => $equipmentNotes !== '' ? $equipmentNotes : '-',
             ],
+            'upgrade' => $this->extractUpgradeSnapshot($contract),
             'termo_versao' => (string) ($contract['termo_versao'] ?? $this->config->get('contracts.term_version', '2026.1')),
         ];
     }

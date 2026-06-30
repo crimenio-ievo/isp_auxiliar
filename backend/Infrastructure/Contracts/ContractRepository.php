@@ -22,9 +22,9 @@ final class ContractRepository
     {
         $this->database->execute(
             'INSERT INTO client_contracts
-                (client_id, mkauth_login, technician_name, technician_login, nome_cliente, telefone_cliente, tipo_adesao, valor_adesao, parcelas_adesao, valor_parcela_adesao, vencimento_primeira_parcela, fidelidade_meses, beneficio_valor, multa_total, tipo_aceite, observacao_adesao, status_financeiro, created_at, updated_at)
+                (client_id, mkauth_login, technician_name, technician_login, nome_cliente, telefone_cliente, tipo_adesao, valor_adesao, parcelas_adesao, valor_parcela_adesao, vencimento_primeira_parcela, fidelidade_meses, beneficio_valor, multa_total, tipo_aceite, observacao_adesao, upgrade_snapshot_json, status_financeiro, created_at, updated_at)
              VALUES
-                (:client_id, :mkauth_login, :technician_name, :technician_login, :nome_cliente, :telefone_cliente, :tipo_adesao, :valor_adesao, :parcelas_adesao, :valor_parcela_adesao, :vencimento_primeira_parcela, :fidelidade_meses, :beneficio_valor, :multa_total, :tipo_aceite, :observacao_adesao, :status_financeiro, NOW(), NOW())',
+                (:client_id, :mkauth_login, :technician_name, :technician_login, :nome_cliente, :telefone_cliente, :tipo_adesao, :valor_adesao, :parcelas_adesao, :valor_parcela_adesao, :vencimento_primeira_parcela, :fidelidade_meses, :beneficio_valor, :multa_total, :tipo_aceite, :observacao_adesao, :upgrade_snapshot_json, :status_financeiro, NOW(), NOW())',
             $this->normalizeData($data)
         );
 
@@ -85,6 +85,7 @@ final class ContractRepository
                  multa_total = :multa_total,
                  tipo_aceite = :tipo_aceite,
                  observacao_adesao = :observacao_adesao,
+                 upgrade_snapshot_json = :upgrade_snapshot_json,
                  status_financeiro = :status_financeiro,
                  updated_at = NOW()
              WHERE id = :id',
@@ -132,6 +133,7 @@ final class ContractRepository
             'multa_total' => $this->normalizeAmount($data['multa_total'] ?? '0.00'),
             'tipo_aceite' => (string) ($data['tipo_aceite'] ?? 'nova_instalacao'),
             'observacao_adesao' => (string) ($data['observacao_adesao'] ?? ''),
+            'upgrade_snapshot_json' => $this->normalizeNullableString($data['upgrade_snapshot_json'] ?? null),
             'status_financeiro' => (string) ($data['status_financeiro'] ?? 'pendente_lancamento'),
         ];
     }

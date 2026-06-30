@@ -76,6 +76,24 @@ $displayPhone = trim((string) ($acceptance['telefone_enviado'] ?? $contract['tel
 $currentPhone = trim((string) ($contract['telefone_cliente'] ?? $checkpoint['telefone_cliente'] ?? $acceptance['telefone_enviado'] ?? ''));
 $originalPhone = trim((string) ($checkpoint['telefone_original'] ?? $currentPhone));
 $contractEmailOriginal = (string) ($emailContext['email_original'] ?? '');
+$typeLabel = static function (string $value): string {
+    return match ($value) {
+        'nova_instalacao' => 'Nova instalação',
+        'regularizacao_contrato' => 'Regularização',
+        'alteracao_plano' => 'Alteração de plano',
+        'renovacao_fidelidade' => 'Renovação de fidelidade',
+        'aceite_promocao' => 'Aceite promocional',
+        'upgrade_migracao' => 'Upgrade / Migração',
+        default => $value !== '' ? $value : '-',
+    };
+};
+$upgradeSnapshot = [];
+if (trim((string) ($contract['upgrade_snapshot_json'] ?? '')) !== '') {
+    $decodedUpgradeSnapshot = json_decode((string) $contract['upgrade_snapshot_json'], true);
+    if (is_array($decodedUpgradeSnapshot)) {
+        $upgradeSnapshot = $decodedUpgradeSnapshot;
+    }
+}
 
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
@@ -194,7 +212,7 @@ ob_start();
         </div>
         <div class="summary-item">
             <span>Tipo de aceite</span>
-            <strong><?= htmlspecialchars((string) ($contract['tipo_aceite'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
+            <strong><?= htmlspecialchars($typeLabel((string) ($contract['tipo_aceite'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></strong>
         </div>
         <?php if ($remoteSignatureReason !== ''): ?>
             <div class="summary-item summary-item--span-2">
@@ -203,6 +221,21 @@ ob_start();
             </div>
         <?php endif; ?>
     </div>
+
+    <?php if ($typeLabel((string) ($contract['tipo_aceite'] ?? '')) === 'Upgrade / Migração' && $upgradeSnapshot !== []): ?>
+        <div class="summary-grid" style="margin-top: 18px;">
+            <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Nova tecnologia</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['new_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['benefit_description'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Valor do benefício</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['benefit_value'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['new_monthly_value'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['fidelity_months'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
+            <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['multa_proporcional'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item summary-item--span-2"><span>Observação</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['observacao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+        </div>
+    <?php endif; ?>
 
     <div class="hero-actions" style="margin-top: 18px;">
         <a class="button button--ghost" href="#financeiro">Ver pendência financeira</a>
