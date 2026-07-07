@@ -841,35 +841,43 @@ function renderClientSearchSuggestions(results = [], query = '') {
 
     clientSearchStatus.textContent = `Mostrando ${clientSearchPayload.length} resultado${clientSearchPayload.length === 1 ? '' : 's'}.`;
 
-    clientSearchPayload.forEach((item, index) => {
-        const link = document.createElement('a');
-        link.className = 'client-search-result';
-        link.href = String(item.url || '#');
-        link.dataset.clientSearchIndex = String(index);
+    clientSearchResults.innerHTML = clientSearchPayload.map((item, index) => {
+        const name = String(item.name || 'Cliente');
+        const login = String(item.login || '-');
+        const plan = String(item.plan || '-');
+        const city = String(item.city || '-');
+        const neighborhood = String(item.neighborhood || '').trim();
+        const phone = String(item.phone || '-');
+        const statusLabel = String(item.status_label || item.status || 'Outro');
+        const statusClass = String(item.status_class || 'client-status-other');
+        const statusNote = String(item.status_note || '').trim();
+        const cardClass = String(item.card_class || 'client-result-card');
+        const locality = [neighborhood, city].filter((part) => part).join(' / ');
+        const locationText = locality || '-';
 
-        const title = document.createElement('strong');
-        title.textContent = String(item.name || 'Cliente');
-
-        const meta = document.createElement('div');
-        meta.className = 'client-search-result__meta';
-        meta.textContent = [
-            `Login: ${String(item.login || '-')}`,
-            `CPF: ${String(item.document || '-')}`,
-            `Telefone: ${String(item.phone || '-')}`,
-            `Cidade: ${String(item.city || '-')}`,
-            `Plano: ${String(item.plan || '-')}`,
-            `Status: ${String(item.status || '-')}`,
-            item.address ? `Endereco: ${String(item.address)}` : '',
-            item.email ? `E-mail: ${String(item.email)}` : '',
-            item.contract ? `Contrato: ${String(item.contract)}` : '',
-            item.onu ? `ONU: ${String(item.onu)}` : '',
-            item.mac ? `MAC: ${String(item.mac)}` : '',
-        ].filter((part) => part && part !== 'CPF: -' && part !== 'Telefone: -' && part !== 'Cidade: -' && part !== 'Plano: -' && part !== 'Status: -').join(' · ');
-
-        link.appendChild(title);
-        link.appendChild(meta);
-        clientSearchResults.appendChild(link);
-    });
+        return `
+            <article class="${cardClass}" data-client-search-index="${index}">
+                <div class="client-result-card__header">
+                    <div class="client-result-card__identity">
+                        <div class="client-result-card__headline">
+                            <h3 class="client-result-card__name">${escapeHtml(name)}</h3>
+                            <span class="client-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span>
+                        </div>
+                    </div>
+                    <div class="client-result-card__status client-result-card__status--compact">
+                        <a class="button button--ghost button--small" href="${escapeHtml(String(item.url || '#'))}">Ver</a>
+                    </div>
+                </div>
+                <div class="client-result-card__summary">
+                    <span>${escapeHtml(login)}</span>
+                    <span>${escapeHtml(plan)}</span>
+                    <span>${escapeHtml(locationText)}</span>
+                    <span>${escapeHtml(phone)}</span>
+                </div>
+                ${statusClass === 'client-status-blocked' && statusNote ? `<div class="client-result-card__note">${escapeHtml(statusNote)}</div>` : ''}
+            </article>
+        `;
+    }).join('');
 }
 
 function openFirstClientSearchResult() {
@@ -881,6 +889,15 @@ function openFirstClientSearchResult() {
 
     window.location.href = String(firstResult.url);
     return true;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 async function fetchClientSearchSuggestions(query) {

@@ -15,17 +15,13 @@ $timeline = is_array($detail['timeline'] ?? null) ? $detail['timeline'] : [];
 $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
 $source = is_array($detail['source'] ?? null) ? $detail['source'] : [];
 $login = (string) ($detail['login'] ?? $profile['login'] ?? '');
-
 ob_start();
 ?>
 <section class="page-header">
     <div>
         <p class="section-heading__eyebrow">Clientes</p>
         <h1><?= htmlspecialchars((string) ($profile['name'] ?? 'Cliente'), ENT_QUOTES, 'UTF-8'); ?></h1>
-        <p class="page-description">
-            Login <?= htmlspecialchars($login !== '' ? $login : '-', ENT_QUOTES, 'UTF-8'); ?> ·
-            Status <?= htmlspecialchars((string) ($profile['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>
-        </p>
+        <p class="page-description">Resumo operacional do cliente no MkAuth e no histórico local.</p>
     </div>
     <div class="hero-actions">
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>">Voltar para clientes</a>
@@ -53,6 +49,15 @@ ob_start();
         <div class="summary-item">
             <span>Nome</span>
             <strong><?= htmlspecialchars((string) ($profile['name'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>Status</span>
+            <?php $statusVisual = is_array($profile['status_visual'] ?? null) ? $profile['status_visual'] : []; ?>
+            <strong>
+                <span class="client-status-badge <?= htmlspecialchars((string) ($statusVisual['class'] ?? 'client-status-other'), ENT_QUOTES, 'UTF-8'); ?>">
+                    <?= htmlspecialchars((string) ($statusVisual['label'] ?? $profile['status'] ?? 'Outro'), ENT_QUOTES, 'UTF-8'); ?>
+                </span>
+            </strong>
         </div>
         <div class="summary-item">
             <span>Documento</span>

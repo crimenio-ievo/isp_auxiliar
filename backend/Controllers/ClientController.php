@@ -109,13 +109,27 @@ final class ClientController
 
         $payload = [];
         foreach ($this->buildClientHubSearchResults($results) as $item) {
+            $statusVisual = is_array($item['status_visual'] ?? null) ? $item['status_visual'] : [];
             $payload[] = [
                 'name' => (string) ($item['name'] ?? ''),
                 'login' => (string) ($item['login'] ?? ''),
                 'document' => (string) ($item['document'] ?? ''),
                 'phone' => (string) ($item['phone'] ?? ''),
                 'plan' => (string) ($item['plan'] ?? ''),
+                'technology' => (string) ($item['technology'] ?? ''),
                 'city' => trim((string) ($item['city'] ?? '')),
+                'neighborhood' => trim((string) ($item['neighborhood'] ?? '')),
+                'status' => (string) ($item['status'] ?? ''),
+                'status_class' => (string) ($statusVisual['class'] ?? 'client-status-other'),
+                'status_label' => (string) ($statusVisual['label'] ?? 'Outro'),
+                'status_note' => trim((string) ($statusVisual['note'] ?? '')),
+                'card_class' => in_array((string) ($statusVisual['class'] ?? ''), ['client-status-blocked', 'client-status-cancelled'], true)
+                    ? 'client-result-card ' . (
+                        (string) ($statusVisual['class'] ?? '') === 'client-status-blocked'
+                            ? 'client-result-card--blocked'
+                            : 'client-result-card--cancelled'
+                    )
+                    : 'client-result-card',
                 'url' => (string) ($item['detail_url'] ?? ''),
             ];
         }
@@ -1374,13 +1388,15 @@ final class ClientController
             $cpfCnpj = trim((string) ($row['cpf_cnpj'] ?? ''));
             $phone = trim((string) ($row['celular'] ?? $row['fone'] ?? ''));
             $planValue = trim((string) ($row['plano_nome'] ?? $row['plano'] ?? ''));
+            $statusVisual = $this->resolveClientStatusVisual($row);
             $results[] = [
                 'name' => (string) ($row['nome'] ?? '-'),
                 'login' => $login,
                 'document' => $cpfCnpj !== '' ? $cpfCnpj : '-',
                 'phone' => $phone !== '' ? $phone : '-',
                 'plan' => $planValue !== '' ? $planValue : '-',
-                'status' => $this->resolveClientStatusLabel($row),
+                'status' => (string) ($statusVisual['label'] ?? 'Outro'),
+                'status_visual' => $statusVisual,
                 'city' => trim((string) ($row['cidade'] ?? '')),
                 'neighborhood' => trim((string) ($row['bairro'] ?? '')),
                 'due_day' => trim((string) ($row['venc'] ?? '')),
@@ -1474,6 +1490,8 @@ final class ClientController
             trim((string) ($clientProfile['cep'] ?? $primaryContract['cep'] ?? '')),
         ], static fn (string $value): bool => $value !== '')));
 
+        $statusVisual = $this->resolveClientStatusVisual($clientProfile);
+
         $profile = [
             'name' => trim((string) ($clientProfile['nome'] ?? $primaryContract['nome_cliente'] ?? $registration['client_name'] ?? '-')),
             'login' => $login,
@@ -1482,7 +1500,8 @@ final class ClientController
             'email' => ($email = trim((string) ($clientProfile['email'] ?? ''))) !== '' ? $email : '-',
             'address' => $address !== '' ? $address : '-',
             'plan' => trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? $registration['plan_name'] ?? '-')),
-            'status' => $this->resolveClientStatusLabel($clientProfile),
+            'status' => (string) ($statusVisual['label'] ?? 'Outro'),
+            'status_visual' => $statusVisual,
             'due_day' => trim((string) ($clientProfile['venc'] ?? '-')),
             'technology' => trim((string) ($clientProfile['plano_tecnologia'] ?? '-')),
         ];
@@ -1637,19 +1656,102 @@ final class ClientController
 
     private function resolveClientStatusLabel(array $row): string
     {
-        if (trim((string) ($row['status'] ?? '')) !== '') {
-            return (string) $row['status'];
+        $visual = $this->resolveClientStatusVisual($row);
+
+        return (string) ($visual['label'] ?? '-');
+    }
+
+    private function resolveClientStatusVisual(array $row): array
+    {
+        $rawStatus = strtolower(trim((string) ($row['status'] ?? '')));
+        $blocked = strtolower(trim((string) ($row['bloqueado'] ?? '')));
+        $active = strtolower(trim((string) ($row['cli_ativado'] ?? '')));
+        $statusCut = strtolower(trim((string) ($row['status_corte'] ?? '')));
+        $blockType = strtolower(trim((string) ($row['tipobloq'] ?? '')));
+        $blockedAt = trim((string) ($row['data_bloq'] ?? ''));
+        $deactivatedAt = trim((string) ($row['data_desativacao'] ?? ''));
+
+        $cancelledValues = ['cancelado', 'cancelled', 'canceled', 'c'];
+        $blockedValues = ['bloqueado', 'suspenso', 'suspension', 'b', 's'];
+        $activeValues = ['ativo', 'active', 'liberado', 'online', 'a'];
+
+        if (in_array($rawStatus, $cancelledValues, true)) {
+            return [
+                'label' => 'Cancelado',
+                'slug' => 'cancelled',
+                'class' => 'client-status-cancelled',
+                'raw' => $rawStatus,
+                'note' => $deactivatedAt !== '' ? 'Desativado em ' . $this->formatDateShort($deactivatedAt) : 'Cliente cancelado',
+            ];
         }
 
-        if (!empty($row['bloqueado']) && strtolower((string) $row['bloqueado']) !== 'nao') {
-            return 'bloqueado';
+        if (
+            ($active !== '' && !in_array($active, ['s', 'sim', '1', 'true', 'yes', 'on'], true))
+            || ($blocked !== '' && !in_array($blocked, ['nao', 'não', 'n', '0', 'false', 'off'], true) && !in_array($blocked, ['sim', 's', '1', 'true', 'yes', 'on'], true))
+            || $deactivatedAt !== ''
+        ) {
+            return [
+                'label' => 'Cancelado',
+                'slug' => 'cancelled',
+                'class' => 'client-status-cancelled',
+                'raw' => $rawStatus !== '' ? $rawStatus : ($active !== '' ? $active : $blocked),
+                'note' => $deactivatedAt !== '' ? 'Desativado em ' . $this->formatDateShort($deactivatedAt) : 'Cliente cancelado',
+            ];
         }
 
-        if (!empty($row['cli_ativado']) && strtolower((string) $row['cli_ativado']) !== 'sim') {
-            return 'inativo';
+        if (
+            in_array($rawStatus, $blockedValues, true)
+            || in_array($blocked, ['sim', 's', '1', 'true', 'yes', 'on'], true)
+            || $statusCut === 'bloq'
+        ) {
+            return [
+                'label' => 'Suspenso/Bloqueado',
+                'slug' => 'blocked',
+                'class' => 'client-status-blocked',
+                'raw' => $rawStatus !== '' ? $rawStatus : ($blocked !== '' ? $blocked : $active),
+                'note' => trim(implode(' · ', array_filter([
+                    $blockType === 'aut' ? 'Bloqueio automático' : ($blockType !== '' ? 'Bloqueio manual' : ''),
+                    $blockedAt !== '' ? 'Desde ' . $this->formatDateShort($blockedAt) : '',
+                ]))) ?: 'Cliente bloqueado',
+            ];
         }
 
-        return $row !== [] ? 'ativo' : '-';
+        if (
+            in_array($rawStatus, $activeValues, true)
+            || in_array($active, ['s', 'sim', '1', 'true', 'yes', 'on'], true)
+            || ($blocked === 'nao' && $statusCut !== 'bloq')
+        ) {
+            return [
+                'label' => 'Ativo',
+                'slug' => 'active',
+                'class' => 'client-status-active',
+                'raw' => $rawStatus !== '' ? $rawStatus : ($active !== '' ? $active : $blocked),
+                'note' => 'Cliente ativo',
+            ];
+        }
+
+        return [
+            'label' => 'Outro',
+            'slug' => 'other',
+            'class' => 'client-status-other',
+            'raw' => $rawStatus !== '' ? $rawStatus : ($blocked !== '' ? $blocked : ($active !== '' ? $active : '-')),
+            'note' => 'Estado indefinido',
+        ];
+    }
+
+    private function formatDateShort(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '-';
+        }
+
+        try {
+            $date = new \DateTimeImmutable($value);
+            return $date->format('d/m/Y');
+        } catch (\Throwable) {
+            return $value;
+        }
     }
 
     private function collectFormData(Request $request): array

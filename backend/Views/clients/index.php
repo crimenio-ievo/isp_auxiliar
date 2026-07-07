@@ -77,51 +77,55 @@ ob_start();
             <h2>Clientes encontrados</h2>
         </div>
 
-        <div class="table-wrap">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Cliente</th>
-                        <th>Login</th>
-                        <th>Documento</th>
-                        <th>Telefone</th>
-                        <th>Plano</th>
-                        <th>Status</th>
-                        <th>Bairro / Cidade</th>
-                        <th>Ação</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($results as $result): ?>
-                        <tr>
-                            <td data-label="Cliente"><?= htmlspecialchars((string) ($result['name'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Login"><?= htmlspecialchars((string) ($result['login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Documento"><?= htmlspecialchars((string) ($result['document'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Telefone"><?= htmlspecialchars((string) ($result['phone'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Plano"><?= htmlspecialchars((string) ($result['plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Status"><span class="pill"><?= htmlspecialchars((string) ($result['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                            <td data-label="Bairro / Cidade">
-                                <?php
-                                $locationParts = array_values(array_filter([
-                                    trim((string) ($result['neighborhood'] ?? '')),
-                                    trim((string) ($result['city'] ?? '')),
-                                ], static fn (string $value): bool => $value !== ''));
-                                ?>
-                                <?= htmlspecialchars($locationParts !== [] ? implode(' / ', $locationParts) : '-', ENT_QUOTES, 'UTF-8'); ?>
-                            </td>
-                            <td data-label="Ação">
-                                <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) ($result['detail_url'] ?? '#'), ENT_QUOTES, 'UTF-8'); ?>">Ver cliente</a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <?php if ($results === []): ?>
-                        <tr>
-                            <td colspan="8">Nenhum cliente encontrado. Tente outro nome, login, documento ou telefone.</td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
+        <?php if ($results !== []): ?>
+            <div class="client-results-grid">
+                <?php foreach ($results as $result): ?>
+                    <?php
+                    $statusVisual = is_array($result['status_visual'] ?? null) ? $result['status_visual'] : [];
+                    $statusClass = (string) ($statusVisual['class'] ?? 'client-status-other');
+                    $statusNote = trim((string) ($statusVisual['note'] ?? ''));
+                    $cardClass = 'client-result-card';
+                    if ($statusClass === 'client-status-blocked') {
+                        $cardClass .= ' client-result-card--blocked';
+                    } elseif ($statusClass === 'client-status-cancelled') {
+                        $cardClass .= ' client-result-card--cancelled';
+                    }
+                    $locationParts = array_values(array_filter([
+                        trim((string) ($result['neighborhood'] ?? '')),
+                        trim((string) ($result['city'] ?? '')),
+                    ], static fn (string $value): bool => $value !== ''));
+                    ?>
+                    <article class="<?= htmlspecialchars($cardClass, ENT_QUOTES, 'UTF-8'); ?>">
+                        <div class="client-result-card__header">
+                            <div class="client-result-card__identity">
+                                <div class="client-result-card__headline">
+                                    <h3 class="client-result-card__name">
+                                        <?= htmlspecialchars((string) ($result['name'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>
+                                    </h3>
+                                    <span class="client-status-badge <?= htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>" title="<?= htmlspecialchars((string) ($statusVisual['raw'] ?? $result['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>">
+                                        <?= htmlspecialchars((string) ($statusVisual['label'] ?? $result['status'] ?? 'Outro'), ENT_QUOTES, 'UTF-8'); ?>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="client-result-card__status client-result-card__status--compact">
+                                <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) ($result['detail_url'] ?? '#'), ENT_QUOTES, 'UTF-8'); ?>">Ver</a>
+                            </div>
+                        </div>
+                        <div class="client-result-card__summary">
+                            <span><?= htmlspecialchars((string) ($result['login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span>
+                            <span><?= htmlspecialchars((string) ($result['plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span>
+                            <span><?= htmlspecialchars($locationParts !== [] ? implode(' / ', $locationParts) : '-', ENT_QUOTES, 'UTF-8'); ?></span>
+                            <span><?= htmlspecialchars((string) ($result['phone'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span>
+                        </div>
+                        <?php if ($statusClass === 'client-status-blocked' && $statusNote !== ''): ?>
+                            <div class="client-result-card__note"><?= htmlspecialchars($statusNote, ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <p class="page-description" style="margin-top: 16px;">Nenhum cliente encontrado. Tente outro nome, login, documento ou telefone.</p>
+        <?php endif; ?>
     </section>
 <?php endif; ?>
 
