@@ -22,9 +22,9 @@ final class ContractAcceptanceRepository
     {
         $this->database->execute(
             'INSERT INTO contract_acceptances
-                (contract_id, technician_name, technician_login, token_hash, token_expires_at, status, telefone_enviado, whatsapp_message_id, sent_at, accepted_at, ip_address, user_agent, termo_versao, termo_hash, pdf_path, evidence_json_path, created_at, updated_at)
+                (contract_id, technician_name, technician_login, token_hash, token_expires_at, status, telefone_enviado, remote_signature_reason, whatsapp_message_id, sent_at, accepted_at, ip_address, user_agent, termo_versao, termo_hash, pdf_path, evidence_json_path, created_at, updated_at)
              VALUES
-                (:contract_id, :technician_name, :technician_login, :token_hash, :token_expires_at, :status, :telefone_enviado, :whatsapp_message_id, :sent_at, :accepted_at, :ip_address, :user_agent, :termo_versao, :termo_hash, :pdf_path, :evidence_json_path, NOW(), NOW())',
+                (:contract_id, :technician_name, :technician_login, :token_hash, :token_expires_at, :status, :telefone_enviado, :remote_signature_reason, :whatsapp_message_id, :sent_at, :accepted_at, :ip_address, :user_agent, :termo_versao, :termo_hash, :pdf_path, :evidence_json_path, NOW(), NOW())',
             $this->normalizeData($data)
         );
 
@@ -66,6 +66,7 @@ final class ContractAcceptanceRepository
                  token_expires_at = :token_expires_at,
                  status = :status,
                  telefone_enviado = :telefone_enviado,
+                 remote_signature_reason = :remote_signature_reason,
                  whatsapp_message_id = :whatsapp_message_id,
                  sent_at = :sent_at,
                  accepted_at = :accepted_at,
@@ -104,7 +105,10 @@ final class ContractAcceptanceRepository
     {
         return $this->database->execute(
             'UPDATE contract_acceptances
-             SET status = "enviado",
+             SET status = CASE
+                    WHEN status IN ("aceito", "assinatura_pendente") THEN status
+                    ELSE "enviado"
+                 END,
                  whatsapp_message_id = :whatsapp_message_id,
                  sent_at = :sent_at,
                  updated_at = NOW()
@@ -166,6 +170,7 @@ final class ContractAcceptanceRepository
             'token_expires_at' => (string) ($data['token_expires_at'] ?? date('Y-m-d H:i:s')),
             'status' => (string) ($data['status'] ?? 'criado'),
             'telefone_enviado' => trim((string) ($data['telefone_enviado'] ?? '')),
+            'remote_signature_reason' => $this->normalizeNullableString($data['remote_signature_reason'] ?? null),
             'whatsapp_message_id' => $data['whatsapp_message_id'] ?? null,
             'sent_at' => $data['sent_at'] ?? null,
             'accepted_at' => $data['accepted_at'] ?? null,

@@ -1027,7 +1027,7 @@ final class ContractController
 
         $limit = max(1, min(50, $limit));
         $filters = $this->normalizeListFiltersFromArray($filters);
-        $conditions = ['a.status IN ("criado", "enviado", "expirado")'];
+        $conditions = ['a.status IN ("criado", "enviado", "assinatura_pendente", "expirado")'];
         $params = [];
 
         if ($filters['financeiro'] !== '') {
@@ -1054,6 +1054,7 @@ final class ContractController
                     a.token_expires_at,
                     a.status AS acceptance_status,
                     a.telefone_enviado,
+                    a.remote_signature_reason,
                     a.whatsapp_message_id,
                     a.sent_at,
                     a.accepted_at,
@@ -1432,7 +1433,7 @@ final class ContractController
 
         try {
             $row = $this->database->fetchOne(
-                'SELECT COUNT(*) AS total FROM contract_acceptances WHERE status IN ("criado", "enviado", "expirado")'
+                'SELECT COUNT(*) AS total FROM contract_acceptances WHERE status IN ("criado", "enviado", "assinatura_pendente", "expirado")'
             );
 
             return (int) ($row['total'] ?? 0);
@@ -1526,6 +1527,7 @@ final class ContractController
             '',
             'criado',
             'enviado',
+            'assinatura_pendente',
             'aceito',
             'expirado',
             'cancelado',

@@ -15,7 +15,7 @@ $versionInfo = defined('APP_VERSION_INFO') && is_array(APP_VERSION_INFO)
     ];
 ?>
 <footer class="footer">
-    <p>ISP Auxiliar em PHP puro. Base inicial pensada para celular, manutencao simples e crescimento por camadas.</p>
+    <p>ISP Auxiliar · suporte ao cadastro, aceite e acompanhamento operacional.</p>
     <p class="footer__version">
         <?= htmlspecialchars((string) ($versionInfo['app_name'] ?? 'ISP Auxiliar'), ENT_QUOTES, 'UTF-8'); ?>
         v<?= htmlspecialchars((string) ($versionInfo['app_version'] ?? '0.1.0'), ENT_QUOTES, 'UTF-8'); ?>

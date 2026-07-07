@@ -58,6 +58,8 @@ const signatureInput = document.querySelector('[data-signature-input]');
 const signatureClearButton = document.querySelector('[data-signature-clear]');
 const signatureHelp = document.querySelector('[data-signature-help]');
 const acceptanceSelect = document.querySelector('[data-acceptance-select]');
+const remoteSignatureSelect = document.querySelector('[data-remote-signature-select]');
+const remoteSignatureReason = document.querySelector('[data-remote-signature-reason]');
 const photoInput = document.querySelector('[data-install-photos]');
 const photoPickButton = document.querySelector('[data-photo-pick]');
 const photoCameraButton = document.querySelector('[data-photo-camera]');
@@ -774,13 +776,229 @@ function buildAppUrl(path) {
     return `${appBasePath}${normalizedPath}`;
 }
 
+const clientSearchForm = document.querySelector('[data-client-search-form]');
+const clientSearchInput = document.querySelector('[data-client-search-input]');
+const clientSearchPanel = document.querySelector('[data-client-search-panel]');
+const clientSearchStatus = document.querySelector('[data-client-search-status]');
+const clientSearchResults = document.querySelector('[data-client-search-results]');
+let clientSearchTimer = null;
+let clientSearchAbortController = null;
+let clientSearchPayload = [];
+let clientSearchLoading = false;
+
+function setClientSearchLoading(isLoading, query = '') {
+    clientSearchLoading = Boolean(isLoading);
+
+    if (!clientSearchPanel || !clientSearchStatus) {
+        return;
+    }
+
+    clientSearchPanel.classList.toggle('is-loading', clientSearchLoading);
+    clientSearchPanel.setAttribute('aria-busy', clientSearchLoading ? 'true' : 'false');
+
+    if (clientSearchLoading) {
+        clientSearchStatus.textContent = query ? `Buscando "${query}"...` : 'Buscando...';
+    }
+}
+
+function closeClientSearchSuggestions() {
+    clientSearchPayload = [];
+
+    if (!clientSearchPanel || !clientSearchResults || !clientSearchStatus) {
+        return;
+    }
+
+    clientSearchPanel.hidden = true;
+    clientSearchPanel.classList.remove('is-loading');
+    clientSearchPanel.setAttribute('aria-busy', 'false');
+    clientSearchStatus.textContent = 'Digite ao menos 3 caracteres para pesquisar clientes.';
+    clientSearchResults.innerHTML = '';
+}
+
+function renderClientSearchSuggestions(results = [], query = '') {
+    if (!clientSearchPanel || !clientSearchStatus || !clientSearchResults) {
+        return;
+    }
+
+    const normalizedQuery = String(query || '').trim();
+    clientSearchResults.innerHTML = '';
+    clientSearchPayload = Array.isArray(results) ? results.slice(0, 10) : [];
+
+    if (!normalizedQuery || normalizedQuery.length < 3) {
+        closeClientSearchSuggestions();
+        return;
+    }
+
+    clientSearchPanel.hidden = false;
+    clientSearchPanel.classList.remove('is-loading');
+    clientSearchPanel.setAttribute('aria-busy', 'false');
+
+    if (clientSearchPayload.length === 0) {
+        clientSearchStatus.textContent = 'Nenhum resultado encontrado.';
+        clientSearchResults.innerHTML = '<div class="client-search-empty">Nenhum resultado para essa busca.</div>';
+        return;
+    }
+
+    clientSearchStatus.textContent = `Mostrando ${clientSearchPayload.length} resultado${clientSearchPayload.length === 1 ? '' : 's'}.`;
+
+    clientSearchResults.innerHTML = clientSearchPayload.map((item, index) => {
+        const name = String(item.name || 'Cliente');
+        const login = String(item.login || '-');
+        const plan = String(item.plan || '-');
+        const city = String(item.city || '-');
+        const neighborhood = String(item.neighborhood || '').trim();
+        const phone = String(item.phone || '-');
+        const statusLabel = String(item.status_label || item.status || 'Outro');
+        const statusClass = String(item.status_class || 'client-status-other');
+        const statusNote = String(item.status_note || '').trim();
+        const cardClass = String(item.card_class || 'client-result-card');
+        const locality = [neighborhood, city].filter((part) => part).join(' / ');
+        const locationText = locality || '-';
+
+        return `
+            <article class="${cardClass}" data-client-search-index="${index}">
+                <div class="client-result-card__header">
+                    <div class="client-result-card__identity">
+                        <div class="client-result-card__headline">
+                            <h3 class="client-result-card__name">${escapeHtml(name)}</h3>
+                            <span class="client-status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span>
+                        </div>
+                    </div>
+                    <div class="client-result-card__status client-result-card__status--compact">
+                        <a class="button button--ghost button--small" href="${escapeHtml(String(item.url || '#'))}">Ver</a>
+                    </div>
+                </div>
+                <div class="client-result-card__summary">
+                    <span>${escapeHtml(login)}</span>
+                    <span>${escapeHtml(plan)}</span>
+                    <span>${escapeHtml(locationText)}</span>
+                    <span>${escapeHtml(phone)}</span>
+                </div>
+                ${statusClass === 'client-status-blocked' && statusNote ? `<div class="client-result-card__note">${escapeHtml(statusNote)}</div>` : ''}
+            </article>
+        `;
+    }).join('');
+}
+
+function openFirstClientSearchResult() {
+    const firstResult = clientSearchPayload[0];
+
+    if (!firstResult || !firstResult.url) {
+        return false;
+    }
+
+    window.location.href = String(firstResult.url);
+    return true;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+async function fetchClientSearchSuggestions(query) {
+    const normalizedQuery = String(query || '').trim();
+
+    if (!clientSearchPanel || !clientSearchStatus || !clientSearchResults) {
+        return;
+    }
+
+    if (normalizedQuery.length < 3) {
+        closeClientSearchSuggestions();
+        return;
+    }
+
+    clientSearchPayload = [];
+
+    if (clientSearchAbortController) {
+        clientSearchAbortController.abort();
+    }
+
+    clientSearchAbortController = new AbortController();
+    clientSearchPanel.hidden = false;
+    setClientSearchLoading(true, normalizedQuery);
+    clientSearchResults.innerHTML = '';
+
+    try {
+        const response = await fetch(buildAppUrl(`/clientes/buscar?q=${encodeURIComponent(normalizedQuery)}`), {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal: clientSearchAbortController.signal,
+        });
+        const payload = await response.json().catch(() => ({ results: [] }));
+
+        if (!response.ok || payload.status !== 'success') {
+            renderClientSearchSuggestions([], normalizedQuery);
+            return;
+        }
+
+        renderClientSearchSuggestions(Array.isArray(payload.results) ? payload.results : [], normalizedQuery);
+    } catch (error) {
+        if (error && error.name === 'AbortError') {
+            return;
+        }
+
+        renderClientSearchSuggestions([], normalizedQuery);
+    }
+}
+
+if (clientSearchInput instanceof HTMLInputElement) {
+    clientSearchInput.addEventListener('input', () => {
+        clientSearchPayload = [];
+
+        if (clientSearchTimer) {
+            window.clearTimeout(clientSearchTimer);
+        }
+
+        const value = clientSearchInput.value;
+        clientSearchTimer = window.setTimeout(() => {
+            void fetchClientSearchSuggestions(value);
+        }, 300);
+    });
+
+    clientSearchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            if (clientSearchAbortController) {
+                clientSearchAbortController.abort();
+            }
+            closeClientSearchSuggestions();
+            clientSearchInput.blur();
+            return;
+        }
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            if (!openFirstClientSearchResult()) {
+                void fetchClientSearchSuggestions(clientSearchInput.value);
+            }
+        }
+    });
+
+    clientSearchInput.addEventListener('focus', () => {
+        if (clientSearchInput.value.trim().length >= 3) {
+            void fetchClientSearchSuggestions(clientSearchInput.value);
+        }
+    });
+}
+
+if (clientSearchForm instanceof HTMLFormElement) {
+    clientSearchForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        void fetchClientSearchSuggestions(clientSearchInput instanceof HTMLInputElement ? clientSearchInput.value : '');
+    });
+}
+
 function normalizeLoginValue(value) {
     return (value || '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
-        .replace(/[^a-z0-9_.-]+/g, '_')
-        .replace(/^_+|_+$/g, '');
+        .trim();
 }
 
 function formatPhoneValue(value) {
@@ -1453,6 +1671,278 @@ if (contractCommercialForm) {
     updateCommercialSection(true);
 }
 
+const upgradeForm = document.querySelector('[data-upgrade-form]');
+
+if (upgradeForm) {
+    const planSelect = upgradeForm.querySelector('[data-upgrade-plan-select]');
+    const currentTechnologyInput = upgradeForm.querySelector('[data-upgrade-current-technology]');
+    const currentTechnologyFamilyInput = upgradeForm.querySelector('[data-upgrade-current-technology-family]');
+    const currentMonthlyValueInput = upgradeForm.querySelector('[data-upgrade-current-monthly-value]');
+    const newTechnologyHiddenInput = upgradeForm.querySelector('input[name="nova_tecnologia"]');
+    const newTechnologyDisplayInput = upgradeForm.querySelector('[data-upgrade-new-technology-display]');
+    const benefitDescriptionInput = upgradeForm.querySelector('[data-upgrade-benefit-description]');
+    const benefitValueInput = upgradeForm.querySelector('[data-upgrade-benefit-value]');
+    const monthlyValueInput = upgradeForm.querySelector('[data-upgrade-monthly-value]');
+    const fidelityInput = upgradeForm.querySelector('[data-upgrade-fidelity]');
+    const monthlyDisplay = upgradeForm.querySelector('[data-upgrade-monthly-display]');
+    const benefitFlagsInput = upgradeForm.querySelector('[data-upgrade-benefit-flags]');
+    const benefitSummary = upgradeForm.querySelector('[data-upgrade-benefit-summary]');
+    const benefitOtherWrapper = upgradeForm.querySelector('[data-upgrade-other-benefit-wrapper]');
+    const benefitOtherTextInput = upgradeForm.querySelector('[data-upgrade-benefit-other-text]');
+    const benefitOtherTextValueInput = upgradeForm.querySelector('[data-upgrade-benefit-other-text-value]');
+    const benefitCheckboxes = Array.from(upgradeForm.querySelectorAll('[data-upgrade-benefit-checkbox]'));
+
+    const normalizeTechnologyFamily = (value) => {
+        const text = String(value || '').trim().toLowerCase();
+        if (text === 'fibra' || text.includes('fibra') || text === 'f') {
+            return 'fibra';
+        }
+        if (text === 'radio' || text.includes('radio') || text.includes('rádio') || text === 'r') {
+            return 'radio';
+        }
+        return '';
+    };
+
+    const currentTechnologyFamily = () => {
+        const fromField = normalizeTechnologyFamily(currentTechnologyFamilyInput?.value || '');
+        if (fromField) {
+            return fromField;
+        }
+
+        return normalizeTechnologyFamily(currentTechnologyInput?.value || '');
+    };
+
+    const readCurrentMonthlyValue = () => parseMoneyFieldValue(String(currentMonthlyValueInput?.value || '0'));
+    const buildBenefitFlags = () => {
+        const flags = {};
+
+        for (const checkbox of benefitCheckboxes) {
+            const flag = String(checkbox?.dataset?.upgradeBenefitCheckbox || '').trim();
+            if (!flag) {
+                continue;
+            }
+
+            flags[flag] = Boolean(checkbox.checked);
+        }
+
+        return flags;
+    };
+
+    const shouldAutoSet = (element) => {
+        if (!(element instanceof HTMLElement)) {
+            return true;
+        }
+
+        return element.dataset.manualTouched !== '1';
+    };
+
+    const setBenefitFlags = (flags) => {
+        const normalized = flags && typeof flags === 'object' ? flags : {};
+
+        for (const checkbox of benefitCheckboxes) {
+            const flag = String(checkbox?.dataset?.upgradeBenefitCheckbox || '').trim();
+            if (!flag) {
+                continue;
+            }
+
+            if (!shouldAutoSet(checkbox)) {
+                continue;
+            }
+
+            checkbox.checked = Boolean(normalized[flag]);
+        }
+    };
+
+    const buildBenefitDescription = (flags, otherText = '') => {
+        const activeFlags = Object.values(flags || {}).filter((value) => Boolean(value));
+
+        if (activeFlags.length === 2 && flags.radio_to_fiber && flags.adhesion_waiver) {
+            return 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação';
+        }
+
+        if (activeFlags.length === 2 && flags.plan_upgrade && flags.adhesion_waiver) {
+            return 'upgrade de plano, com isenção da taxa de adesão/instalação';
+        }
+
+        const parts = [];
+
+        if (flags.radio_to_fiber) {
+            parts.push('migração de tecnologia de rádio para fibra óptica');
+        }
+
+        if (flags.adhesion_waiver) {
+            parts.push('isenção da taxa de adesão/instalação');
+        }
+
+        if (flags.plan_upgrade) {
+            parts.push('upgrade de plano');
+        }
+
+        if (flags.retention) {
+            parts.push('condição comercial especial para retenção do cliente');
+        }
+
+        if (flags.other_benefit) {
+            const text = String(otherText || '').trim();
+            parts.push(text || 'outro benefício');
+        }
+
+        const filtered = parts.filter((value) => String(value || '').trim() !== '');
+        if (filtered.length === 0) {
+            return '';
+        }
+
+        if (filtered.length === 1) {
+            return filtered[0];
+        }
+
+        const last = filtered.pop();
+        return `${filtered.join(', ')} e ${last}`;
+    };
+
+    const renderBenefitSummary = (monthlyValueText, benefitDescriptionText) => {
+        if (!benefitSummary) {
+            return;
+        }
+
+        const monthlyLabel = monthlyValueText ? `Novo valor mensal: ${monthlyValueText}` : 'Novo valor mensal: -';
+        const benefitLabel = benefitDescriptionText ? `Benefício: ${benefitDescriptionText}` : 'Benefício: -';
+        benefitSummary.textContent = `${monthlyLabel} | ${benefitLabel}`;
+    };
+
+    const applyUpgradeDefaults = () => {
+        if (!planSelect) {
+            return;
+        }
+
+        const selectedOption = planSelect.selectedOptions[0];
+        const installType = String(selectedOption?.dataset.upgradeInstallType || '').toLowerCase();
+        const optionTechnology = String(selectedOption?.dataset.upgradeTechnology || '').trim();
+        const monthlyValue = String(selectedOption?.dataset.upgradeMonthlyValue || selectedOption?.dataset.monthlyValue || '').trim();
+        const selectedTechnology = optionTechnology || (installType === 'radio' ? 'Rádio' : (installType === 'fibra' ? 'Fibra' : ''));
+        const currentFamily = currentTechnologyFamily();
+        const currentMonthly = readCurrentMonthlyValue();
+        const newMonthly = parseMoneyFieldValue(monthlyValue);
+        const selectedPlan = String(planSelect.value || '').trim();
+        const currentPlan = String(upgradeForm.querySelector('input[name="plano_atual"]')?.value || '').trim();
+        const newFamily = normalizeTechnologyFamily(selectedTechnology);
+        const movingFromRadioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
+        const isRetention = selectedPlan !== '' && selectedPlan !== currentPlan && newMonthly > 0 && currentMonthly > 0 && newMonthly < currentMonthly && !movingFromRadioToFiber;
+        const isUpgrade = selectedPlan !== '' && selectedPlan !== currentPlan && newMonthly >= currentMonthly && !movingFromRadioToFiber;
+        const suggestionFlags = {
+            radio_to_fiber: movingFromRadioToFiber,
+            adhesion_waiver: movingFromRadioToFiber,
+            plan_upgrade: isUpgrade,
+            retention: isRetention,
+            other_benefit: false,
+        };
+        const otherBenefitCheckbox = benefitCheckboxes.find((checkbox) => checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit') || null;
+        const otherBenefitChecked = Boolean(otherBenefitCheckbox && otherBenefitCheckbox.checked);
+        const flags = {
+            radio_to_fiber: Boolean(buildBenefitFlags().radio_to_fiber),
+            adhesion_waiver: Boolean(buildBenefitFlags().adhesion_waiver),
+            plan_upgrade: Boolean(buildBenefitFlags().plan_upgrade),
+            retention: Boolean(buildBenefitFlags().retention),
+            other_benefit: otherBenefitChecked,
+        };
+
+        if (newTechnologyHiddenInput) {
+            newTechnologyHiddenInput.value = selectedTechnology;
+        }
+
+        if (newTechnologyDisplayInput) {
+            newTechnologyDisplayInput.value = selectedTechnology;
+        }
+
+        if (monthlyValueInput && monthlyValue !== '') {
+            monthlyValueInput.value = formatMoneyFieldValue(parseMoneyFieldValue(monthlyValue));
+        }
+
+        const formattedMonthly = formatMoneyFieldValue(newMonthly || 0);
+        if (monthlyDisplay) {
+            monthlyDisplay.textContent = `R$ ${formattedMonthly}`;
+        }
+
+        if (benefitCheckboxes.length > 0) {
+            for (const checkbox of benefitCheckboxes) {
+                const flag = String(checkbox?.dataset?.upgradeBenefitCheckbox || '').trim();
+                if (!flag || checkbox.dataset.manualTouched === '1') {
+                    continue;
+                }
+
+                checkbox.checked = Boolean(suggestionFlags[flag]);
+            }
+        }
+
+        const currentFlags = buildBenefitFlags();
+        const currentOtherBenefitCheckbox = benefitCheckboxes.find((checkbox) => checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit') || null;
+        const currentOtherBenefitChecked = Boolean(currentOtherBenefitCheckbox && currentOtherBenefitCheckbox.checked);
+
+        if (benefitOtherWrapper) {
+            benefitOtherWrapper.hidden = !currentOtherBenefitChecked;
+        }
+        if (benefitOtherTextInput && !currentOtherBenefitChecked) {
+            benefitOtherTextInput.value = '';
+        }
+        if (benefitOtherTextValueInput) {
+            benefitOtherTextValueInput.value = currentOtherBenefitChecked ? String(benefitOtherTextInput?.value || '').trim() : '';
+        }
+
+        const otherText = String(benefitOtherTextInput?.value || '').trim();
+        const benefitDescription = buildBenefitDescription(currentFlags, otherText);
+
+        if (benefitDescriptionInput) {
+            benefitDescriptionInput.value = benefitDescription;
+        }
+
+        if (benefitFlagsInput) {
+            benefitFlagsInput.value = JSON.stringify(currentFlags);
+        }
+
+        if (benefitValueInput && shouldAutoSet(benefitValueInput)) {
+            benefitValueInput.value = formatMoneyFieldValue(1200);
+        }
+
+        if (fidelityInput) {
+            fidelityInput.value = '12';
+        }
+
+        renderBenefitSummary(formattedMonthly ? `R$ ${formattedMonthly}` : '', benefitDescription);
+    };
+
+    if (planSelect) {
+        planSelect.addEventListener('change', applyUpgradeDefaults);
+    }
+
+    for (const checkbox of benefitCheckboxes) {
+        checkbox.addEventListener('change', () => {
+            checkbox.dataset.manualTouched = '1';
+            if (checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit' && benefitOtherWrapper) {
+                benefitOtherWrapper.hidden = !checkbox.checked;
+            }
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (benefitOtherTextInput) {
+        benefitOtherTextInput.addEventListener('input', () => {
+            if (benefitOtherTextValueInput) {
+                benefitOtherTextValueInput.value = String(benefitOtherTextInput.value || '').trim();
+            }
+            benefitOtherTextInput.dataset.manualTouched = '1';
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (benefitValueInput) {
+        benefitValueInput.addEventListener('input', () => {
+            benefitValueInput.dataset.manualTouched = '1';
+        });
+    }
+
+    applyUpgradeDefaults();
+}
+
 const addressNumberInput = document.querySelector('[data-address-number-input]');
 
 if (addressNumberInput instanceof HTMLInputElement) {
@@ -1672,12 +2162,22 @@ function updateAcceptanceVisibility() {
     }
 
     const accepted = Boolean(acceptanceSelect.checked);
-    signaturePad.classList.toggle('is-required', accepted);
+    const remoteSignatureEnabled = Boolean(remoteSignatureSelect && remoteSignatureSelect.checked);
+    const signatureRequired = accepted && !remoteSignatureEnabled;
+    signaturePad.classList.toggle('is-required', signatureRequired);
+
+    if (remoteSignatureReason instanceof HTMLTextAreaElement) {
+        remoteSignatureReason.required = remoteSignatureEnabled;
+    }
 
     if (signatureHelp) {
-        signatureHelp.textContent = accepted
-            ? 'Assinatura obrigatória: conclua o desenho para liberar o envio.'
-            : 'Quando o aceite for Sim, a assinatura se torna obrigatória.';
+        if (remoteSignatureEnabled) {
+            signatureHelp.textContent = 'Assinatura local dispensada. O aceite será concluído no link público.';
+        } else {
+            signatureHelp.textContent = accepted
+                ? 'Assinatura obrigatória: conclua o desenho para liberar o envio.'
+                : 'Quando o aceite for Sim, a assinatura se torna obrigatória.';
+        }
     }
 }
 
@@ -2198,7 +2698,7 @@ applyLiveValidation(loginInput, (value) => {
 
     return /^[a-z0-9_.-]+$/.test(normalized)
         ? { valid: true, message: '' }
-        : { valid: false, message: 'Login invalido.' };
+        : { valid: false, message: 'Login invalido. Use letras minusculas, numeros, ponto, hifen ou underscore.' };
 }, normalizeLoginValue);
 applyLiveValidation(systemLoginInput, (value) => {
     const normalized = String(value || '').trim().toLowerCase();
@@ -2250,6 +2750,9 @@ if (systemLoginInput) {
 
 if (acceptanceSelect) {
     acceptanceSelect.addEventListener('change', updateAcceptanceVisibility);
+    if (remoteSignatureSelect) {
+        remoteSignatureSelect.addEventListener('change', updateAcceptanceVisibility);
+    }
     updateAcceptanceVisibility();
 }
 
@@ -2266,6 +2769,7 @@ autosaveForms.forEach((form) => {
 if (acceptanceForm) {
     const acceptanceDocumentRequired = acceptanceForm.dataset.documentValidationRequired === '1';
     const acceptanceDocumentDigits = Math.max(1, Number.parseInt(acceptanceForm.dataset.documentValidationDigits || '3', 10) || 3);
+    const publicSignatureRequired = acceptanceForm.dataset.signatureRequired === '1';
 
     if (acceptanceDocumentInput) {
         acceptanceDocumentInput.addEventListener('input', () => {
@@ -2300,6 +2804,14 @@ if (acceptanceForm) {
             return;
         }
 
+        const remoteSignatureEnabled = Boolean(remoteSignatureSelect && remoteSignatureSelect.checked);
+        if (remoteSignatureEnabled && remoteSignatureReason && String(remoteSignatureReason.value || '').trim() === '') {
+            event.preventDefault();
+            remoteSignatureReason.focus({ preventScroll: true });
+            remoteSignatureReason.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
         if (acceptanceDocumentRequired && acceptanceDocumentInput) {
             const sanitized = String(acceptanceDocumentInput.value || '').replace(/\D+/g, '').slice(0, acceptanceDocumentDigits);
 
@@ -2315,6 +2827,21 @@ if (acceptanceForm) {
             }
 
             acceptanceDocumentInput.value = sanitized;
+        }
+
+        if ((publicSignatureRequired || (signatureInput && signaturePad && !remoteSignatureEnabled)) && signatureInput) {
+            const hasSignature = String(signatureInput.value || '').trim() !== '';
+            if (!hasSignature) {
+                event.preventDefault();
+                if (signatureHelp) {
+                    signatureHelp.textContent = 'Desenhe a assinatura antes de concluir.';
+                    signatureHelp.dataset.tone = 'warning';
+                }
+                if (signatureCanvas instanceof HTMLElement) {
+                    signatureCanvas.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
         }
     });
 }

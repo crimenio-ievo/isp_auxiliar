@@ -9,6 +9,17 @@ $filters = is_array($filters ?? null) ? $filters : [];
 $financeiro = (string) ($filters['financeiro'] ?? '');
 $aceite = (string) ($filters['aceite'] ?? '');
 $adesao = (string) ($filters['adesao'] ?? '');
+$acceptanceStatusLabel = static function (string $status): string {
+    return match ($status) {
+        'assinatura_pendente' => 'Assinatura pendente',
+        'criado' => 'Criado',
+        'enviado' => 'Enviado',
+        'aceito' => 'Aceito',
+        'expirado' => 'Expirado',
+        'cancelado' => 'Cancelado',
+        default => $status !== '' ? ucfirst($status) : '-',
+    };
+};
 
 $buildQuery = static function (array $params): string {
     $filtered = array_filter(
@@ -122,7 +133,7 @@ ob_start();
                         <td><?= htmlspecialchars((string) ($contract['parcelas_adesao'] ?? '1'), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td>R$ <?= htmlspecialchars(number_format((float) ($contract['valor_adesao'] ?? 0), 2, ',', '.'), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><span class="pill"><?= htmlspecialchars((string) ($contract['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                        <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($contract['acceptance_status'] ?? 'criado'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                        <td><span class="pill pill--muted"><?= htmlspecialchars($acceptanceStatusLabel((string) ($contract['acceptance_status'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span></td>
                         <td>
                             <div class="inline-actions">
                                 <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $contractId), ENT_QUOTES, 'UTF-8'); ?>">Visualizar contrato</a>

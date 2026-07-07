@@ -140,7 +140,7 @@ ob_start();
             <label class="field">
                 <span>Login</span>
                 <input type="text" name="login" placeholder="primeiroNome_local" value="<?= $fieldValue('login'); ?>" data-login-input required>
-                <small class="field-help" data-live-feedback="login">O sistema vai normalizar para minusculas, sem acento e sem espacos.</small>
+                <small class="field-help" data-live-feedback="login">Use letras minusculas, numeros, ponto, hifen ou underscore. Espacos e simbolos sao rejeitados.</small>
             </label>
 
             <label class="field">

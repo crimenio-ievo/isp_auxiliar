@@ -10,18 +10,18 @@ $access = is_array($user['access'] ?? null) ? $user['access'] : [];
 $canManageSettings = AccessControl::can($access, 'configuracoes');
 $canAccessContracts = AccessControl::can($access, 'contratos');
 $navigationItems = [
-    ['/dashboard', 'Dashboard'],
-    ['/clientes/novo', 'Novo Cliente'],
-    ['/instalacoes', 'Instalações'],
-    ['/logs', 'Logs'],
+    ['/dashboard', 'Home', 'HM'],
+    ['/clientes', 'Clientes', 'CL'],
 ];
 
 if ($canAccessContracts) {
-    array_splice($navigationItems, 1, 0, [['/contratos', 'Contratos e Aceites']]);
+    $navigationItems[] = ['/contratos', 'Contratos', 'CT'];
 }
 
+$navigationItems[] = ['/logs', 'Logs', 'LG'];
+
 if ($canManageSettings) {
-    $navigationItems[] = ['/configuracoes', 'Configurações'];
+    $navigationItems[] = ['/configuracoes', 'Configurações', 'CF'];
 }
 ?>
 <aside class="sidebar" data-sidebar>
@@ -34,17 +34,29 @@ if ($canManageSettings) {
     </div>
 
     <nav class="sidebar__nav" aria-label="Menu principal">
-        <?php foreach ($navigationItems as [$href, $label]): ?>
-            <?php $isActive = $currentPath === $href || ($href === '/contratos' && str_starts_with($currentPath, '/contratos')); ?>
+        <p class="sidebar__section-label">Navegação</p>
+        <?php foreach ($navigationItems as [$href, $label, $icon]): ?>
+            <?php
+            $isActive = $currentPath === $href
+                || ($href === '/clientes' && str_starts_with($currentPath, '/clientes'))
+                || ($href === '/contratos' && str_starts_with($currentPath, '/contratos'))
+                || ($href === '/logs' && str_starts_with($currentPath, '/logs'))
+                || ($href === '/configuracoes' && str_starts_with($currentPath, '/configuracoes'));
+            ?>
             <a class="nav-link<?= $isActive ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to($href), ENT_QUOTES, 'UTF-8'); ?>">
-                <?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
+                <span class="nav-link__icon" aria-hidden="true"><?= htmlspecialchars($icon, ENT_QUOTES, 'UTF-8'); ?></span>
+                <span><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></span>
             </a>
         <?php endforeach; ?>
+        <a class="nav-link nav-link--logout" href="<?= htmlspecialchars(Url::to('/logout'), ENT_QUOTES, 'UTF-8'); ?>">
+            <span class="nav-link__icon" aria-hidden="true">SR</span>
+            <span>Sair</span>
+        </a>
     </nav>
 
     <div class="sidebar__footer">
-        <p>Operação vinculada ao MkAuth e às evidências locais do ISP Auxiliar.</p>
-        <a class="button button--ghost button--full" href="<?= htmlspecialchars(Url::to('/logout'), ENT_QUOTES, 'UTF-8'); ?>">Sair</a>
+        <strong>Ambiente operacional</strong>
+        <p>MkAuth e evidências locais conectados ao fluxo de atendimento.</p>
     </div>
 </aside>
 

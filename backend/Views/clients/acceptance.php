@@ -138,7 +138,7 @@ ob_start();
 
         <div class="status-card">
             <span>Etapa final do técnico</span>
-            <strong>Confira os dados, registre a assinatura e envie para o MkAuth.</strong>
+            <strong>Confira os dados, registre a assinatura local ou marque a assinatura remota.</strong>
             <small>Depois disso, a próxima tela ficará dedicada apenas à validação da conexão Radius.</small>
         </div>
 
@@ -202,6 +202,25 @@ ob_start();
                 </label>
                 <small class="field-help">Esse registro confirma a concordância com os dados, instalação e evidências anexadas.</small>
             </div>
+
+            <div class="field field--span-2">
+                <span>Assinatura remota</span>
+                <label class="acceptance-check" data-remote-signature-choice>
+                    <input type="checkbox" name="assinatura_remota" value="1" data-remote-signature-select>
+                    <span class="acceptance-check__box" aria-hidden="true"></span>
+                    <span class="acceptance-check__content">
+                        <strong>Titular não assinou no local / assinatura remota</strong>
+                        <small>Use esta opção quando o cliente vai concluir o aceite pelo link público.</small>
+                    </span>
+                </label>
+                <small class="field-help">Ao marcar esta opção, a assinatura local deixa de ser obrigatória neste passo.</small>
+            </div>
+
+            <label class="field field--span-2">
+                <span>Motivo da ausência da assinatura</span>
+                <textarea rows="3" name="assinatura_remota_motivo" placeholder="Explique por que a assinatura ficou para o link público." data-remote-signature-reason></textarea>
+                <small class="field-help">Obrigatório quando a assinatura remota for selecionada.</small>
+            </label>
 
             <label class="field field--span-2">
                 <span>Assinatura na tela</span>

@@ -9,6 +9,17 @@ $filters = is_array($filters ?? null) ? $filters : [];
 $financeiro = (string) ($filters['financeiro'] ?? '');
 $aceite = (string) ($filters['aceite'] ?? '');
 $adesao = (string) ($filters['adesao'] ?? '');
+$statusLabel = static function (string $status): string {
+    return match ($status) {
+        'assinatura_pendente' => 'Assinatura pendente',
+        'criado' => 'Criado',
+        'enviado' => 'Enviado',
+        'aceito' => 'Aceito',
+        'expirado' => 'Expirado',
+        'cancelado' => 'Cancelado',
+        default => $status !== '' ? ucfirst($status) : '-',
+    };
+};
 
 ob_start();
 ?>
@@ -49,6 +60,7 @@ ob_start();
                 <option value="">Todos</option>
                 <option value="criado" <?= $aceite === 'criado' ? 'selected' : ''; ?>>Criado</option>
                 <option value="enviado" <?= $aceite === 'enviado' ? 'selected' : ''; ?>>Enviado</option>
+                <option value="assinatura_pendente" <?= $aceite === 'assinatura_pendente' ? 'selected' : ''; ?>>Assinatura pendente</option>
                 <option value="aceito" <?= $aceite === 'aceito' ? 'selected' : ''; ?>>Aceito</option>
                 <option value="expirado" <?= $aceite === 'expirado' ? 'selected' : ''; ?>>Expirado</option>
                 <option value="cancelado" <?= $aceite === 'cancelado' ? 'selected' : ''; ?>>Cancelado</option>
@@ -90,6 +102,7 @@ ob_start();
                     <th>Cliente</th>
                     <th>Login</th>
                     <th>Status</th>
+                    <th>Motivo</th>
                     <th>Financeiro</th>
                     <th>Tipo</th>
                     <th>Expira em</th>
@@ -104,11 +117,13 @@ ob_start();
                         $tokenHash = trim((string) ($acceptance['token_hash'] ?? ''));
                         $linkToken = $tokenHash !== '' ? $tokenHash : (string) ($acceptanceId > 0 ? $acceptanceId : $contractId);
                         $simulatedLink = Url::to('/aceite/' . rawurlencode($linkToken));
+                        $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
                     ?>
                     <tr>
                         <td><?= htmlspecialchars((string) ($acceptance['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><?= htmlspecialchars((string) ($acceptance['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td><span class="pill pill--muted"><?= htmlspecialchars((string) ($acceptance['acceptance_status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                        <td><span class="pill pill--muted"><?= htmlspecialchars($statusLabel((string) ($acceptance['acceptance_status'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                        <td><?= htmlspecialchars($remoteSignatureReason !== '' ? $remoteSignatureReason : '-', ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><span class="pill"><?= htmlspecialchars((string) ($acceptance['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
                         <td><?= htmlspecialchars((string) ($acceptance['tipo_adesao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><?= htmlspecialchars((string) ($acceptance['token_expires_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
@@ -124,7 +139,7 @@ ob_start();
                 <?php endforeach; ?>
                 <?php if ($acceptances === []): ?>
                     <tr>
-                        <td colspan="7">Nenhum aceite pendente encontrado neste momento.</td>
+                        <td colspan="8">Nenhum aceite pendente encontrado neste momento.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

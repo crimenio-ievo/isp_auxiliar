@@ -33,4 +33,10 @@ $email = [
 
 $email = array_replace($email, array_intersect_key($emailOverrides, $email));
 
+$appEnv = strtolower(trim((string) Env::get('APP_ENV', 'production')));
+if ($appEnv !== 'production') {
+    $email['dry_run'] = true;
+    $email['allow_only_test_email'] = true;
+}
+
 return $email;

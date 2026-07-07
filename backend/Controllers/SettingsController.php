@@ -343,12 +343,16 @@ final class SettingsController
             throw new \RuntimeException('Diretorio local de configuracoes sem permissão de escrita.');
         }
 
-        $written = file_put_contents(
-            $path,
-            json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
-        );
+        $payload = json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        $temporaryPath = $path . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+        $written = file_put_contents($temporaryPath, $payload);
 
         if ($written === false) {
+            throw new \RuntimeException('Nao foi possivel salvar o arquivo local de configuracoes.');
+        }
+
+        if (!@rename($temporaryPath, $path)) {
+            @unlink($temporaryPath);
             throw new \RuntimeException('Nao foi possivel salvar o arquivo local de configuracoes.');
         }
     }

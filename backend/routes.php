@@ -40,6 +40,11 @@ return static function (Router $router): void {
     $router->post('/aceite/{token}/confirmar', [AcceptanceController::class, 'confirm'], 'acceptance.confirm');
     $router->get('/aceite/{token}/termo', [AcceptanceController::class, 'term'], 'acceptance.term');
     $router->post('/aceite/{token}/termo', [AcceptanceController::class, 'term'], 'acceptance.term.submit');
+    $router->get('/clientes', [ClientController::class, 'index'], 'clients.index');
+    $router->get('/clientes/buscar', [ClientController::class, 'search'], 'clients.search');
+    $router->get('/clientes/detalhe', [ClientController::class, 'detail'], 'clients.detail');
+    $router->get('/clientes/upgrade', [ClientController::class, 'upgrade'], 'clients.upgrade');
+    $router->post('/clientes/upgrade', [ClientController::class, 'storeUpgrade'], 'clients.upgrade.store');
     $router->get('/clientes/novo', [ClientController::class, 'create'], 'clients.create');
     $router->post('/clientes/novo', [ClientController::class, 'store'], 'clients.store');
     $router->post('/clientes/rascunho/limpar', [ClientController::class, 'clearDraft'], 'clients.draft.clear');
