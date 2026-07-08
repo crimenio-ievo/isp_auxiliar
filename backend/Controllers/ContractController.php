@@ -1662,9 +1662,21 @@ final class ContractController
             (string) ($contract['technician_login'] ?? ''),
         ];
 
+        $genericNames = [
+            'administrador local',
+            'admin local',
+            'administrador',
+            'local',
+            'operador',
+            'usuario',
+            'usuário',
+            'equipe técnica',
+            'equipe tecnica',
+        ];
+
         foreach ($candidates as $candidate) {
             $candidate = trim($candidate);
-            if ($candidate !== '') {
+            if ($candidate !== '' && !in_array(strtolower($candidate), $genericNames, true)) {
                 return $candidate;
             }
         }
@@ -1677,7 +1689,7 @@ final class ContractController
 
         $userLogin = trim((string) ($user['login'] ?? ''));
 
-        return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+        return $userLogin !== '' ? $userLogin : 'Equipe iEvo Technology';
     }
 
     private function resolveCentralAssinanteUrl(): string

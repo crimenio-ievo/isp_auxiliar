@@ -91,6 +91,11 @@ const localDiciSelect = document.querySelector('[data-local-dici-select]');
 const planSelect = document.querySelector('[data-plan-select]');
 const planHelp = document.querySelector('[data-plan-help]');
 const contractCommercialForm = document.querySelector('[data-contract-commercial-form]');
+const digitalContractModal = document.querySelector('[data-digital-contract-modal]');
+const digitalContractConfirmButton = document.querySelector('[data-digital-contract-confirm]');
+const digitalContractCancelButtons = document.querySelectorAll('[data-digital-contract-cancel]');
+let pendingDigitalContractForm = null;
+let digitalContractSubmitting = false;
 let signatureContext = null;
 let isDrawing = false;
 let hasSignatureStroke = false;
@@ -119,6 +124,117 @@ function safeJsonParse(value, fallback = null) {
 function getDraftStorageKey(form) {
     return form?.dataset?.draftKey || '';
 }
+
+function normalizeDigitalContractValue(value, fallback = '-') {
+    const normalized = String(value || '').trim();
+    return normalized === '' || normalized === '-' ? fallback : normalized;
+}
+
+function setDigitalContractText(selector, value, fallback = '-') {
+    const target = digitalContractModal?.querySelector(selector);
+    if (target) {
+        target.textContent = normalizeDigitalContractValue(value, fallback);
+    }
+}
+
+function openDigitalContractModal(button) {
+    if (!digitalContractModal) {
+        return;
+    }
+
+    pendingDigitalContractForm = button.closest('form');
+    digitalContractSubmitting = false;
+    if (digitalContractConfirmButton instanceof HTMLButtonElement) {
+        digitalContractConfirmButton.disabled = false;
+        digitalContractConfirmButton.textContent = 'Confirmar envio do contrato';
+    }
+
+    setDigitalContractText('[data-digital-contract-client-name]', button.dataset.clientName || '-');
+    setDigitalContractText('[data-digital-contract-client-document]', button.dataset.clientDocument || '-');
+    setDigitalContractText('[data-digital-contract-client-phone]', button.dataset.clientPhone || '-', 'Não cadastrado');
+    setDigitalContractText('[data-digital-contract-client-email]', button.dataset.clientEmail || '-', 'Não cadastrado');
+
+    const pendingMessage = digitalContractModal.querySelector('[data-digital-contract-pending-message]');
+    if (pendingMessage instanceof HTMLElement) {
+        pendingMessage.hidden = button.dataset.contractPending !== '1';
+    }
+
+    setDigitalContractText(
+        '[data-digital-contract-action]',
+        button.dataset.contractAction === 'reutilizado'
+            ? 'Já existe aceite pendente. O mesmo link será reenviado/reutilizado.'
+            : 'Será gerado um novo link de aceite digital para assinatura.'
+    );
+
+    digitalContractModal.hidden = false;
+    document.body.classList.add('modal-open');
+
+    if (digitalContractConfirmButton instanceof HTMLButtonElement) {
+        digitalContractConfirmButton.focus({ preventScroll: true });
+    }
+}
+
+function closeDigitalContractModal() {
+    if (!digitalContractModal) {
+        return;
+    }
+
+    digitalContractModal.hidden = true;
+    document.body.classList.remove('modal-open');
+    pendingDigitalContractForm = null;
+    digitalContractSubmitting = false;
+    if (digitalContractConfirmButton instanceof HTMLButtonElement) {
+        digitalContractConfirmButton.disabled = false;
+        digitalContractConfirmButton.textContent = 'Confirmar envio do contrato';
+    }
+}
+
+document.querySelectorAll('[data-digital-contract-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+        openDigitalContractModal(button);
+    });
+});
+
+digitalContractCancelButtons.forEach((button) => {
+    button.addEventListener('click', closeDigitalContractModal);
+});
+
+if (digitalContractModal) {
+    digitalContractModal.addEventListener('click', (event) => {
+        if (event.target === digitalContractModal) {
+            closeDigitalContractModal();
+        }
+    });
+}
+
+if (digitalContractConfirmButton instanceof HTMLButtonElement) {
+    digitalContractConfirmButton.addEventListener('click', () => {
+        if (digitalContractSubmitting) {
+            return;
+        }
+
+        if (!(pendingDigitalContractForm instanceof HTMLFormElement)) {
+            closeDigitalContractModal();
+            return;
+        }
+
+        digitalContractSubmitting = true;
+        const confirmInput = pendingDigitalContractForm.querySelector('[data-digital-contract-confirm-input]');
+        if (confirmInput instanceof HTMLInputElement) {
+            confirmInput.value = '1';
+        }
+
+        digitalContractConfirmButton.disabled = true;
+        digitalContractConfirmButton.textContent = 'Enviando...';
+        pendingDigitalContractForm.submit();
+    });
+}
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && digitalContractModal && !digitalContractModal.hidden) {
+        closeDigitalContractModal();
+    }
+});
 
 function readDraftStorage(form) {
     const key = getDraftStorageKey(form);

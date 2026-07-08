@@ -49,6 +49,7 @@ $protocol = $protocol !== '' ? strtoupper(substr($protocol, 0, 12)) : ('ACEITE-'
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
 $upgradeMode = (string) ($contractDetails['tipo_aceite'] ?? '') === 'upgrade_migracao';
+$digitalContractMode = (string) ($contractDetails['tipo_aceite'] ?? '') === 'contrato_digital';
 $upgradeCurrentPlan = trim((string) ($upgradeDetails['current_plan'] ?? ''));
 $upgradeCurrentTechnology = trim((string) ($upgradeDetails['current_technology'] ?? ''));
 $upgradeNewPlan = trim((string) ($upgradeDetails['new_plan'] ?? ''));
@@ -65,6 +66,12 @@ $upgradePenalty = $upgradeHasWaiver
     ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
     : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
 $upgradeObservation = trim((string) ($upgradeDetails['observacao'] ?? ''));
+$digitalPlan = trim((string) ($planDetails['nome'] ?? ''));
+$digitalMonthlyValue = ($planDetails['valor_mensal'] ?? null) !== null ? 'R$ ' . number_format((float) $planDetails['valor_mensal'], 2, ',', '.') : '-';
+$digitalFidelity = max(1, (int) ($contractDetails['fidelidade_meses'] ?? $contract['fidelidade_meses'] ?? 12));
+$digitalSummary = $digitalPlan !== '' && $digitalPlan !== '-'
+    ? 'Assinatura do contrato digital do plano ' . $digitalPlan . '.'
+    : 'Assinatura do contrato digital vigente.';
 $hideFooter = $isAccepted;
 $alreadyAcceptedView = $isAccepted && empty($successMessage);
 
@@ -136,7 +143,7 @@ ob_start();
             <?php elseif ($remoteSignatureRequired): ?>
                 <div class="status-card status-card--warning" style="margin-top: 16px;">
                     <strong>Assinatura remota pendente.</strong>
-                    <small>O titular não assinou no local. Conclua agora com a assinatura eletrônica e a validação do documento.</small>
+                    <small><?= $digitalContractMode ? 'Conclua agora a assinatura eletrônica do contrato digital e a validação do documento.' : 'O titular não assinou no local. Conclua agora com a assinatura eletrônica e a validação do documento.'; ?></small>
                     <?php if ($remoteSignatureReason !== ''): ?>
                         <small>Motivo informado: <?= htmlspecialchars($remoteSignatureReason, ENT_QUOTES, 'UTF-8'); ?></small>
                     <?php endif; ?>
@@ -173,46 +180,57 @@ ob_start();
                 </div>
             <?php endif; ?>
 
-            <div class="summary-grid">
-                <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Login</span><strong><?= htmlspecialchars((string) ($customerDetails['login'] ?? $contract['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>CPF/CNPJ</span><strong><?= htmlspecialchars((string) ($customerDetails['cpf_cnpj'] ?? $maskedDocument), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Telefone</span><strong><?= htmlspecialchars((string) ($customerDetails['telefone'] ?? $contract['telefone_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item summary-item--span-2"><span>Endereço de instalação</span><strong><?= htmlspecialchars(trim((string) ($installationDetails['endereco'] ?? '') . ' ' . (string) ($installationDetails['bairro'] ?? '') . ' ' . (string) ($installationDetails['cidade'] ?? '') . ' / ' . (string) ($installationDetails['estado'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>CEP</span><strong><?= htmlspecialchars((string) ($installationDetails['cep'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Coordenadas</span><strong><?= htmlspecialchars((string) ($installationDetails['coordenadas'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Plano contratado</span><strong><?= htmlspecialchars((string) ($planDetails['nome'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Valor mensal</span><strong><?= htmlspecialchars(($planDetails['valor_mensal'] ?? null) !== null ? 'R$ ' . $formatMoney($planDetails['valor_mensal']) : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Vencimento</span><strong><?= htmlspecialchars((string) ($installationDetails['vencimento'] ?? $contract['vencimento_primeira_parcela'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Tipo de adesão</span><strong><?= htmlspecialchars((string) ($contractDetails['tipo_adesao'] ?? $contract['tipo_adesao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Valor da adesão</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($contractDetails['valor_adesao'] ?? ($contract['valor_adesao'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Parcelas</span><strong><?= htmlspecialchars((string) ($contractDetails['parcelas_adesao'] ?? $contract['parcelas_adesao'] ?? 1), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Valor parcela</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($contractDetails['valor_parcela_adesao'] ?? ($contract['valor_parcela_adesao'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Vencimento 1ª parcela</span><strong><?= htmlspecialchars($formatDate((string) ($contractDetails['vencimento_primeira_parcela'] ?? $contract['vencimento_primeira_parcela'] ?? null)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($contractDetails['fidelidade_meses'] ?? $contract['fidelidade_meses'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
-                <div class="summary-item"><span>Autorizado por</span><strong><?= htmlspecialchars((string) ($contractDetails['beneficio_concedido_por'] ?? $contract['beneficio_concedido_por'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item summary-item--span-2"><span>Equipamentos / comodato</span><strong><?= htmlspecialchars((string) ($contractDetails['equipamentos_comodato'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item summary-item--span-2"><span>Observações</span><strong><?= htmlspecialchars(trim(implode(' · ', array_filter([(string) ($contractDetails['observacao_adesao'] ?? ''), (string) ($installationDetails['observacao'] ?? '')], static fn (string $value): bool => trim($value) !== ''))) ?: '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                <div class="summary-item summary-item--span-2"><span>Versão do termo</span><strong><?= htmlspecialchars((string) ($publicDetails['termo_versao'] ?? ($acceptance['termo_versao'] ?? '2026.1')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-            </div>
-
             <?php if ($upgradeMode): ?>
                 <div class="status-card status-card--warning" style="margin-top: 18px;">
                     <strong>Upgrade / Migração</strong>
                     <small>Depois da assinatura, a alteração no MkAuth será aplicada manualmente pela operação.</small>
                 </div>
 
-                <div class="summary-grid" style="margin-top: 16px;">
-                    <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars($upgradeCurrentPlan !== '' ? $upgradeCurrentPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars($upgradeCurrentTechnology !== '' ? $upgradeCurrentTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                <div class="summary-grid acceptance-upgrade-summary" style="margin-top: 16px;">
+                    <div class="summary-item summary-item--span-2"><span>Cliente</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Resumo da alteração</span><strong><?= htmlspecialchars(trim(($upgradeCurrentPlan !== '' ? $upgradeCurrentPlan : 'Plano atual') . ' → ' . ($upgradeNewPlan !== '' ? $upgradeNewPlan : 'novo plano')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars($upgradeNewPlan !== '' ? $upgradeNewPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Nova tecnologia</span><strong><?= htmlspecialchars($upgradeNewTechnology !== '' ? $upgradeNewTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars($upgradeBenefit !== '' ? $upgradeBenefit : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Valor da taxa de adesão/instalação isentada</span><strong><?= htmlspecialchars($upgradeBenefitValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars($upgradeMonthlyValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars($upgradeMonthlyValue !== '-' ? $upgradeMonthlyValue : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Benefício / isenção</span><strong><?= htmlspecialchars($upgradeBenefit !== '' ? $upgradeBenefit : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) $upgradeFidelity, ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
-                    <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars($upgradePenalty, ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item summary-item--span-2"><span>Observação do upgrade</span><strong><?= htmlspecialchars($upgradeObservation !== '' ? $upgradeObservation : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Termo</span><strong>Leia o termo completo ao lado.</strong></div>
+                </div>
+            <?php elseif ($digitalContractMode): ?>
+                <div class="status-card status-card--warning" style="margin-top: 18px;">
+                    <strong>Assinatura de contrato digital</strong>
+                    <small>Este aceite formaliza o contrato atual do cliente. Nenhuma alteração operacional será aplicada automaticamente.</small>
+                </div>
+
+                <div class="summary-grid acceptance-upgrade-summary" style="margin-top: 16px;">
+                    <div class="summary-item summary-item--span-2"><span>Cliente</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Resumo</span><strong><?= htmlspecialchars($digitalSummary, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars($digitalPlan !== '' ? $digitalPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Valor mensal</span><strong><?= htmlspecialchars($digitalMonthlyValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) $digitalFidelity, ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Termo</span><strong>Leia o termo completo ao lado antes de assinar.</strong></div>
+                </div>
+            <?php else: ?>
+                <div class="summary-grid">
+                    <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Login</span><strong><?= htmlspecialchars((string) ($customerDetails['login'] ?? $contract['mkauth_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>CPF/CNPJ</span><strong><?= htmlspecialchars((string) ($customerDetails['cpf_cnpj'] ?? $maskedDocument), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Telefone</span><strong><?= htmlspecialchars((string) ($customerDetails['telefone'] ?? $contract['telefone_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Endereço de instalação</span><strong><?= htmlspecialchars(trim((string) ($installationDetails['endereco'] ?? '') . ' ' . (string) ($installationDetails['bairro'] ?? '') . ' ' . (string) ($installationDetails['cidade'] ?? '') . ' / ' . (string) ($installationDetails['estado'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>CEP</span><strong><?= htmlspecialchars((string) ($installationDetails['cep'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Coordenadas</span><strong><?= htmlspecialchars((string) ($installationDetails['coordenadas'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Plano contratado</span><strong><?= htmlspecialchars((string) ($planDetails['nome'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Valor mensal</span><strong><?= htmlspecialchars(($planDetails['valor_mensal'] ?? null) !== null ? 'R$ ' . $formatMoney($planDetails['valor_mensal']) : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Vencimento</span><strong><?= htmlspecialchars((string) ($installationDetails['vencimento'] ?? $contract['vencimento_primeira_parcela'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Tipo de adesão</span><strong><?= htmlspecialchars((string) ($contractDetails['tipo_adesao'] ?? $contract['tipo_adesao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Valor da adesão</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($contractDetails['valor_adesao'] ?? ($contract['valor_adesao'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Parcelas</span><strong><?= htmlspecialchars((string) ($contractDetails['parcelas_adesao'] ?? $contract['parcelas_adesao'] ?? 1), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Valor parcela</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($contractDetails['valor_parcela_adesao'] ?? ($contract['valor_parcela_adesao'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Vencimento 1ª parcela</span><strong><?= htmlspecialchars($formatDate((string) ($contractDetails['vencimento_primeira_parcela'] ?? $contract['vencimento_primeira_parcela'] ?? null)), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($contractDetails['fidelidade_meses'] ?? $contract['fidelidade_meses'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
+                    <div class="summary-item"><span>Autorizado por</span><strong><?= htmlspecialchars((string) ($contractDetails['beneficio_concedido_por'] ?? $contract['beneficio_concedido_por'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Equipamentos / comodato</span><strong><?= htmlspecialchars((string) ($contractDetails['equipamentos_comodato'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Observações</span><strong><?= htmlspecialchars(trim(implode(' · ', array_filter([(string) ($contractDetails['observacao_adesao'] ?? ''), (string) ($installationDetails['observacao'] ?? '')], static fn (string $value): bool => trim($value) !== ''))) ?: '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Versão do termo</span><strong><?= htmlspecialchars((string) ($publicDetails['termo_versao'] ?? ($acceptance['termo_versao'] ?? '2026.1')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 </div>
             <?php endif; ?>
         </div>
@@ -230,11 +248,22 @@ ob_start();
                 <span>O aceite continua registrado mesmo em modo paisagem.</span>
             </div>
 
-            <div class="acceptance-term">
-                <p><strong>Versão do termo:</strong> <?= htmlspecialchars((string) ($acceptance['termo_versao'] ?? '2026.1'), ENT_QUOTES, 'UTF-8'); ?></p>
-                <p><strong>Validade:</strong> link de uso único com expiração controlada.</p>
-                <p><?= nl2br(htmlspecialchars($termBody !== '' ? $termBody : 'Termo indisponível.', ENT_QUOTES, 'UTF-8')); ?></p>
-            </div>
+            <?php if ($upgradeMode || $digitalContractMode): ?>
+                <details class="acceptance-term-details" open>
+                    <summary>Leia o termo completo</summary>
+                    <div class="acceptance-term" style="margin-top: 12px;">
+                        <p><strong>Versão do termo:</strong> <?= htmlspecialchars((string) ($acceptance['termo_versao'] ?? '2026.1'), ENT_QUOTES, 'UTF-8'); ?></p>
+                        <p><strong>Validade:</strong> link de uso único com expiração controlada.</p>
+                        <p><?= nl2br(htmlspecialchars($termBody !== '' ? $termBody : 'Termo indisponível.', ENT_QUOTES, 'UTF-8')); ?></p>
+                    </div>
+                </details>
+            <?php else: ?>
+                <div class="acceptance-term">
+                    <p><strong>Versão do termo:</strong> <?= htmlspecialchars((string) ($acceptance['termo_versao'] ?? '2026.1'), ENT_QUOTES, 'UTF-8'); ?></p>
+                    <p><strong>Validade:</strong> link de uso único com expiração controlada.</p>
+                    <p><?= nl2br(htmlspecialchars($termBody !== '' ? $termBody : 'Termo indisponível.', ENT_QUOTES, 'UTF-8')); ?></p>
+                </div>
+            <?php endif; ?>
 
             <?php if (!$remoteSignatureRequired && $signaturePath !== '' && $signatureRef !== ''): ?>
                 <div class="contract-signature-preview" style="margin-top: 18px;">

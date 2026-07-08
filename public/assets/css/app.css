@@ -1396,6 +1396,54 @@ textarea {
     display: none;
 }
 
+.contract-send-modal[hidden] {
+    display: none;
+}
+
+.contract-send-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.42);
+}
+
+.contract-send-modal__dialog {
+    width: min(680px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    border-radius: 22px;
+    background: var(--surface, #fff);
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.contract-send-modal__header,
+.contract-send-modal__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.contract-send-modal__footer {
+    justify-content: flex-end;
+    border-top: 1px solid var(--border, #e5e7eb);
+    border-bottom: 0;
+}
+
+.contract-send-modal__header h2 {
+    margin: 0;
+}
+
+.contract-send-modal__body {
+    padding: 20px;
+}
+
 .map-modal {
     position: fixed;
     inset: 0;

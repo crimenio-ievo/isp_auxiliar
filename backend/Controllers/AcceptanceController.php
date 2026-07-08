@@ -404,12 +404,29 @@ final class AcceptanceController
         }
 
         $checkpointData = $this->extractCheckpointData($checkpoint);
-        $planSnapshot = $this->resolvePlanSnapshot((string) ($checkpointData['plano'] ?? $registration['plan_name'] ?? $contract['plan_name'] ?? ''));
+        $clientProfile = null;
+        if (!empty($contract['mkauth_login'])) {
+            try {
+                $clientProfile = $this->mkauthDatabase->findClientProfile((string) $contract['mkauth_login']);
+            } catch (\Throwable) {
+                $clientProfile = null;
+            }
+        }
+
+        $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
+        $planSnapshot = $this->resolvePlanSnapshot((string) (
+            $checkpointData['plano']
+            ?? $registration['plan_name']
+            ?? $clientProfile['plano_nome']
+            ?? $clientProfile['plano']
+            ?? $contract['plan_name']
+            ?? ''
+        ));
         $documentDigits = $this->documentValidationDigits();
-        $documentRaw = preg_replace('/\D+/', '', (string) ($registration['cpf_cnpj'] ?? $checkpointData['cpf_cnpj'] ?? '')) ?? '';
+        $documentRaw = preg_replace('/\D+/', '', (string) ($registration['cpf_cnpj'] ?? $checkpointData['cpf_cnpj'] ?? ($clientProfile['cpf_cnpj'] ?? ''))) ?? '';
         $documentMasked = $this->maskDocument($documentRaw);
         $documentAvailable = $documentRaw !== '';
-        $publicDetails = $this->buildPublicDetails($contract, $registration, $checkpointData, $planSnapshot, $documentMasked);
+        $publicDetails = $this->buildPublicDetails($contract, $registration, $checkpointData, $planSnapshot, $documentMasked, is_array($clientProfile) ? $clientProfile : [], $upgradeSnapshot);
         $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
         if ($signaturePath !== null) {
             $publicDetails['assinatura_path'] = $signaturePath;
@@ -477,9 +494,21 @@ final class AcceptanceController
             (string) ($contract['technician_login'] ?? ''),
         ];
 
+        $genericNames = [
+            'administrador local',
+            'admin local',
+            'administrador',
+            'local',
+            'operador',
+            'usuario',
+            'usuário',
+            'equipe técnica',
+            'equipe tecnica',
+        ];
+
         foreach ($candidates as $candidate) {
             $candidate = trim($candidate);
-            if ($candidate !== '') {
+            if ($candidate !== '' && !in_array(strtolower($candidate), $genericNames, true)) {
                 return $candidate;
             }
         }
@@ -492,7 +521,7 @@ final class AcceptanceController
 
         $userLogin = trim((string) ($user['login'] ?? ''));
 
-        return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+        return $userLogin !== '' ? $userLogin : 'Equipe iEvo Technology';
     }
 
     private function queueUpgradeOperationalTask(array $contract, array $acceptance, int $acceptanceId, Request $request): void
@@ -854,9 +883,33 @@ final class AcceptanceController
         $contractTitle = $providerName === 'nossa equipe'
             ? 'Contrato digital da nossa equipe'
             : 'Contrato digital ' . $providerName;
-        $technicianName = trim((string) ($contract['technician_name'] ?? ''));
-        $technicianLogin = trim((string) ($contract['technician_login'] ?? ''));
+        $technicianName = $this->resolveTechnicianDisplayName($contract);
         $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
+
+        if ((string) ($contract['tipo_aceite'] ?? '') === 'contrato_digital') {
+            return trim(implode("\n", [
+                'Contrato Digital de Prestação de Serviço',
+                '',
+                'Contratada: ' . $contractTitle,
+                'Contratante: ' . $nome,
+                'Login do cliente: ' . $login,
+                'Telefone: ' . $telefone,
+                'Responsável pela operação: ' . ($technicianName !== '' ? $technicianName : 'Equipe iEvo Technology'),
+                '',
+                'Resumo do contrato atual',
+                $observacao !== '' ? $observacao : 'Dados atuais consultados no cadastro do cliente.',
+                'Fidelidade: ' . $fidelidade . ' meses, quando aplicável ao plano contratado.',
+                '',
+                'Condições gerais',
+                'O cliente confirma a ciência e concordância com o contrato de prestação de serviço vigente.',
+                'O contrato digital não altera plano, valor, tecnologia, login, senha, roteador ou titularidade no MkAuth.',
+                'Boletos, faturas, notas e segunda via podem ser consultados pela Central do Assinante:',
+                $centralAssinanteUrl,
+                '',
+                'Assinatura eletrônica/remota',
+                'O aceite eletrônico deste termo é realizado por link pessoal enviado ao cliente, com registro de IP, data, hora e dispositivo.',
+            ]));
+        }
 
         if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
             $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
@@ -883,7 +936,7 @@ final class AcceptanceController
                 '',
                 'Contratada: ' . $contractTitle,
                 'Contratante: ' . $nome,
-                'Técnico responsável: ' . ($technicianName !== '' ? $technicianName : 'Equipe técnica'),
+                'Responsável pela operação: ' . ($technicianName !== '' ? $technicianName : 'Equipe iEvo Technology'),
                 'Telefone: ' . $telefone,
                 $originalContractReference !== '' ? 'Referência original: ' . $originalContractReference : null,
                 '',
@@ -915,7 +968,7 @@ final class AcceptanceController
         return trim(implode("\n", [
             $contractTitle,
             'Cliente: ' . $nome,
-            'Técnico responsável: ' . ($technicianName !== '' ? $technicianName : 'Equipe técnica'),
+            'Responsável pela operação: ' . ($technicianName !== '' ? $technicianName : 'Equipe iEvo Technology'),
             'Telefone: ' . $telefone,
             'Tipo de adesão: ' . $tipoAdesao,
             'Valor da adesão: R$ ' . $valorAdesao,
@@ -967,6 +1020,23 @@ final class AcceptanceController
 
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function normalizeUpgradeSnapshotForDisplay(array $upgradeSnapshot): array
+    {
+        return [
+            'current_plan' => (string) ($upgradeSnapshot['current_plan'] ?? ''),
+            'new_plan' => (string) ($upgradeSnapshot['new_plan'] ?? ''),
+            'current_technology' => (string) ($upgradeSnapshot['current_technology'] ?? ''),
+            'new_technology' => (string) ($upgradeSnapshot['new_technology'] ?? ''),
+            'benefit_flags' => $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null),
+            'benefit_description' => (string) ($upgradeSnapshot['benefit_description'] ?? ''),
+            'benefit_value' => isset($upgradeSnapshot['benefit_value']) ? (float) $upgradeSnapshot['benefit_value'] : null,
+            'new_monthly_value' => isset($upgradeSnapshot['new_monthly_value']) ? (float) $upgradeSnapshot['new_monthly_value'] : null,
+            'fidelity_months' => isset($upgradeSnapshot['fidelity_months']) ? (int) $upgradeSnapshot['fidelity_months'] : 12,
+            'observacao' => (string) ($upgradeSnapshot['observacao'] ?? ''),
+            'original_contract_reference' => (string) ($upgradeSnapshot['original_contract_reference'] ?? ''),
+        ];
     }
 
     private function normalizeUpgradeBenefitFlags(mixed $rawFlags): array
@@ -1083,8 +1153,25 @@ final class AcceptanceController
         ];
     }
 
-    private function buildPublicDetails(array $contract, ?array $registration, array $checkpointData, array $planSnapshot, string $maskedDocument): array
+    private function buildPublicDetails(array $contract, ?array $registration, array $checkpointData, array $planSnapshot, string $maskedDocument, array $clientProfile = [], array $upgradeSnapshot = []): array
     {
+        $isUpgrade = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
+        $clientProfile = is_array($clientProfile) ? $clientProfile : [];
+        $customerName = trim((string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? $registration['client_name'] ?? '-'));
+        $customerLogin = trim((string) ($clientProfile['login'] ?? $contract['mkauth_login'] ?? $registration['mkauth_login'] ?? '-'));
+        $customerPhone = trim((string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $contract['telefone_cliente'] ?? '-'));
+        $customerDocument = trim((string) ($clientProfile['cpf_cnpj'] ?? $registration['cpf_cnpj'] ?? ''));
+        $customerAddressParts = array_filter([
+            trim((string) ($clientProfile['endereco'] ?? '')),
+            trim((string) ($clientProfile['numero'] ?? '')),
+            trim((string) ($clientProfile['complemento'] ?? '')),
+            trim((string) ($clientProfile['bairro'] ?? '')),
+            trim((string) ($clientProfile['cidade'] ?? '')),
+            trim((string) ($clientProfile['estado'] ?? '')),
+            trim((string) ($clientProfile['cep'] ?? '')),
+        ], static fn (string $value): bool => $value !== '');
+        $customerAddress = trim(implode(', ', $customerAddressParts));
+
         $addressParts = array_filter([
             (string) ($checkpointData['endereco'] ?? ''),
             (string) ($checkpointData['numero'] ?? ''),
@@ -1099,28 +1186,35 @@ final class AcceptanceController
 
         return [
             'cliente' => [
-                'nome' => (string) ($contract['nome_cliente'] ?? $registration['client_name'] ?? '-'),
-                'login' => (string) ($contract['mkauth_login'] ?? $registration['mkauth_login'] ?? '-'),
-                'cpf_cnpj' => $maskedDocument,
-                'telefone' => (string) ($contract['telefone_cliente'] ?? '-'),
+                'nome' => $customerName,
+                'login' => $customerLogin,
+                'cpf_cnpj' => $customerDocument !== '' ? $maskedDocument : '-',
+                'telefone' => $customerPhone !== '' ? $customerPhone : '-',
+                'endereco' => $customerAddress !== '' ? $customerAddress : '-',
             ],
             'instalacao' => [
-                'cep' => (string) ($checkpointData['cep'] ?? '-'),
-                'endereco' => $installationAddress !== '' ? $installationAddress : '-',
-                'coordenadas' => (string) ($checkpointData['coordenadas'] ?? '-'),
-                'tipo_instalacao' => (string) ($checkpointData['tipo_instalacao'] ?? '-'),
-                'local_dici' => (string) ($checkpointData['local_dici'] ?? '-'),
-                'observacao' => $installationNotes !== '' ? $installationNotes : '-',
+                'cep' => (string) ($checkpointData['cep'] ?? ''),
+                'endereco' => $installationAddress,
+                'coordenadas' => (string) ($checkpointData['coordenadas'] ?? ''),
+                'tipo_instalacao' => (string) ($checkpointData['tipo_instalacao'] ?? ''),
+                'local_dici' => (string) ($checkpointData['local_dici'] ?? ''),
+                'observacao' => $installationNotes,
             ],
             'plano' => [
-                'nome' => (string) ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'),
-                'valor_mensal' => $planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null,
+                'nome' => $isUpgrade
+                    ? (string) ($upgradeSnapshot['new_plan'] ?? ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'))
+                    : (string) ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'),
+                'valor_mensal' => $isUpgrade
+                    ? (($upgradeSnapshot['new_monthly_value'] ?? null) !== null ? (float) $upgradeSnapshot['new_monthly_value'] : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null))
+                    : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null),
                 'origem' => (string) ($planSnapshot['source'] ?? 'unknown'),
             ],
             'contrato' => [
-                'vencimento' => (string) ($checkpointData['vencimento'] ?? '-'),
-                'valor_mensal' => $planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null,
-                'tipo_adesao' => (string) ($contract['tipo_adesao'] ?? '-'),
+                'vencimento' => (string) ($checkpointData['vencimento'] ?? $clientProfile['venc'] ?? ''),
+                'valor_mensal' => $isUpgrade
+                    ? (($upgradeSnapshot['new_monthly_value'] ?? null) !== null ? (float) $upgradeSnapshot['new_monthly_value'] : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null))
+                    : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null),
+                'tipo_adesao' => (string) ($contract['tipo_adesao'] ?? ''),
                 'valor_adesao' => (float) ($contract['valor_adesao'] ?? 0),
                 'parcelas_adesao' => (int) ($contract['parcelas_adesao'] ?? 1),
                 'valor_parcela_adesao' => (float) ($contract['valor_parcela_adesao'] ?? 0),
@@ -1129,11 +1223,11 @@ final class AcceptanceController
                 'fidelidade_meses' => (int) ($contract['fidelidade_meses'] ?? 12),
                 'multa_total' => (float) ($contract['multa_total'] ?? 0),
                 'beneficio_concedido_por' => (string) ($contract['beneficio_concedido_por'] ?? ''),
-                'tipo_aceite' => (string) ($contract['tipo_aceite'] ?? '-'),
-                'observacao_adesao' => (string) ($contract['observacao_adesao'] ?? '-'),
-                'equipamentos_comodato' => $equipmentNotes !== '' ? $equipmentNotes : '-',
+                'tipo_aceite' => (string) ($contract['tipo_aceite'] ?? ''),
+                'observacao_adesao' => (string) ($contract['observacao_adesao'] ?? ''),
+                'equipamentos_comodato' => $equipmentNotes,
             ],
-            'upgrade' => $this->extractUpgradeSnapshot($contract),
+            'upgrade' => $isUpgrade ? $this->normalizeUpgradeSnapshotForDisplay($upgradeSnapshot) : [],
             'termo_versao' => (string) ($contract['termo_versao'] ?? $this->config->get('contracts.term_version', '2026.1')),
         ];
     }
