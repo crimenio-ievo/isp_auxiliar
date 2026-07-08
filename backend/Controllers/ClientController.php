@@ -294,6 +294,100 @@ final class ClientController
         return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
     }
 
+    public function requestDigitalContractSignature(Request $request): Response
+    {
+        $login = $this->sanitizeLogin((string) $request->input('login', $request->query('login', '')));
+        if ($login === '') {
+            Flash::set('error', 'Informe o login do cliente para solicitar o contrato digital.');
+            return Response::redirect('/clientes');
+        }
+
+        if (!$this->canCreateClient() && !$this->canManageContracts()) {
+            Flash::set('error', 'Usuario sem permissao para solicitar contrato digital.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if ((string) $request->input('confirm_send', '') !== '1') {
+            Flash::set('error', 'Confirme o envio do contrato digital antes de continuar.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        try {
+            $clientProfile = $this->mkauthDatabase->findClientProfile($login);
+        } catch (\Throwable $exception) {
+            $clientProfile = null;
+        }
+
+        if (!is_array($clientProfile) || $clientProfile === []) {
+            Flash::set('error', 'Nao foi possivel localizar o cliente no MkAuth para gerar o contrato digital.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        try {
+            $contracts = $this->contractRepository->listByLogin($login, 20);
+        } catch (\Throwable) {
+            $contracts = [];
+        }
+
+        $pending = $this->findPendingDigitalContractAcceptance($contracts);
+        if ($pending !== null) {
+            try {
+                $pendingContractId = (int) ($pending['contract']['id'] ?? 0);
+                $pendingAcceptanceId = (int) ($pending['acceptance']['id'] ?? 0);
+                if ($this->hasRecentDigitalContractNotification($pendingContractId, $pendingAcceptanceId)) {
+                    Flash::set('success', 'Envio do contrato digital ja processado ha poucos segundos. O aceite pendente foi mantido.');
+                } else {
+                    $this->dispatchDigitalContractAcceptance($pending['contract'], $pending['acceptance'], $clientProfile, true, $request);
+                    Flash::set('success', 'Aceite do contrato digital reenviado ao cliente.');
+                }
+            } catch (\Throwable $exception) {
+                Flash::set('error', 'Contrato digital pendente localizado, mas nao foi possivel reenviar agora: ' . $exception->getMessage());
+            }
+
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        try {
+            $contractData = $this->buildDigitalContractData($login, $clientProfile);
+            $contractId = $this->contractRepository->create($contractData) ?? 0;
+            if ($contractId <= 0) {
+                throw new \RuntimeException('Contrato digital nao pôde ser gravado.');
+            }
+
+            $contractData['id'] = $contractId;
+            $contractData['contract_id'] = $contractId;
+            $termBody = $this->buildContractTermBody($contractData);
+            $acceptanceData = $this->buildDigitalContractAcceptanceData($contractId, $contractData, hash('sha256', $termBody), $request);
+            $acceptanceId = $this->contractAcceptanceRepository->create($acceptanceData) ?? 0;
+            if ($acceptanceId <= 0) {
+                throw new \RuntimeException('Aceite do contrato digital nao pôde ser gravado.');
+            }
+
+            $acceptanceRecord = $this->contractAcceptanceRepository->findById($acceptanceId) ?? array_merge($acceptanceData, ['id' => $acceptanceId]);
+            $this->recordAudit('contract.digital.created', 'client_contract', $contractId, [
+                'login' => $login,
+                'contract_id' => $contractId,
+                'acceptance_id' => $acceptanceId,
+                'status' => 'assinatura_pendente',
+                'tipo_aceite' => 'contrato_digital',
+            ], $request);
+            $this->recordAudit('contract.acceptance.created', 'contract_acceptance', $acceptanceId, [
+                'login' => $login,
+                'contract_id' => $contractId,
+                'status' => 'assinatura_pendente',
+                'tipo_aceite' => 'contrato_digital',
+            ], $request);
+            $this->dispatchDigitalContractAcceptance($contractData, is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData, $clientProfile, false, $request);
+        } catch (\Throwable $exception) {
+            Flash::set('error', 'Nao foi possivel solicitar o contrato digital agora: ' . $exception->getMessage());
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        Flash::set('success', 'Contrato digital gerado com assinatura remota pendente.');
+
+        return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+    }
+
     public function create(Request $request): Response
     {
         $cities = $this->loadCities();
@@ -1491,6 +1585,7 @@ final class ClientController
         ], static fn (string $value): bool => $value !== '')));
 
         $statusVisual = $this->resolveClientStatusVisual($clientProfile);
+        $digitalContract = $this->buildDigitalContractSummary($login, $clientProfile, $contracts);
 
         $profile = [
             'name' => trim((string) ($clientProfile['nome'] ?? $primaryContract['nome_cliente'] ?? $registration['client_name'] ?? '-')),
@@ -1512,6 +1607,7 @@ final class ClientController
             'clientProfile' => $clientProfile,
             'contract' => is_array($primaryContract) ? $primaryContract : [],
             'contracts' => array_values(array_map(fn (array $item): array => $this->normalizeContractSummary($item), $contracts)),
+            'digitalContract' => $digitalContract,
             'acceptance' => $acceptance,
             'acceptanceHistory' => is_array($acceptanceRecords) ? $acceptanceRecords : [],
             'financialTask' => $financialTask,
@@ -1616,12 +1712,93 @@ final class ClientController
             'login' => (string) ($contract['mkauth_login'] ?? ''),
             'name' => (string) ($contract['nome_cliente'] ?? '-'),
             'status_financeiro' => (string) ($contract['status_financeiro'] ?? '-'),
+            'tipo_aceite' => (string) ($contract['tipo_aceite'] ?? '-'),
             'tipo_adesao' => (string) ($contract['tipo_adesao'] ?? '-'),
             'valor_adesao' => (float) ($contract['valor_adesao'] ?? 0),
             'parcelas_adesao' => (int) ($contract['parcelas_adesao'] ?? 0),
             'valor_parcela_adesao' => (float) ($contract['valor_parcela_adesao'] ?? 0),
             'created_at' => (string) ($contract['created_at'] ?? ''),
             'updated_at' => (string) ($contract['updated_at'] ?? ''),
+        ];
+    }
+
+    private function buildDigitalContractSummary(string $login, array $clientProfile, array $contracts): array
+    {
+        $latestDigitalContract = null;
+        $latestAcceptance = null;
+
+        foreach ($contracts as $contract) {
+            if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'contrato_digital') {
+                continue;
+            }
+
+            $latestDigitalContract = $contract;
+            $contractId = (int) ($contract['id'] ?? 0);
+            if ($contractId > 0) {
+                try {
+                    $latestAcceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+                } catch (\Throwable) {
+                    $latestAcceptance = null;
+                }
+            }
+            break;
+        }
+
+        if (!is_array($latestDigitalContract)) {
+            return [
+                'status' => 'none',
+                'label' => 'Nao possui contrato digital',
+                'description' => 'Solicite a assinatura remota do contrato atual do cliente.',
+                'contract_id' => null,
+                'acceptance_id' => null,
+                'accepted_at' => '',
+                'pending' => false,
+                'signed' => false,
+                'stale' => false,
+                'request_url' => '/clientes/contrato/solicitar',
+                'detail_url' => '',
+                'login' => $login,
+            ];
+        }
+
+        $acceptanceStatus = is_array($latestAcceptance) ? (string) ($latestAcceptance['status'] ?? '') : '';
+        $acceptedAt = is_array($latestAcceptance) ? trim((string) ($latestAcceptance['accepted_at'] ?? '')) : '';
+        $currentPlan = trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? ''));
+        $storedNotes = trim((string) ($latestDigitalContract['observacao_adesao'] ?? ''));
+        $stale = $acceptanceStatus === 'aceito' && $currentPlan !== '' && $storedNotes !== '' && !str_contains($storedNotes, 'Plano atual: ' . $currentPlan);
+        $pending = in_array($acceptanceStatus, ['criado', 'enviado', 'assinatura_pendente'], true);
+
+        if ($pending) {
+            $label = 'Aceite pendente';
+            $status = 'pending';
+            $description = 'Link gerado. Use reenviar se o cliente ainda nao assinou.';
+        } elseif ($acceptanceStatus === 'aceito' && $stale) {
+            $label = 'Contrato desatualizado';
+            $status = 'stale';
+            $description = 'O plano atual do MkAuth parece diferente do contrato digital assinado.';
+        } elseif ($acceptanceStatus === 'aceito') {
+            $label = 'Contrato assinado';
+            $status = 'signed';
+            $description = $acceptedAt !== '' ? 'Ultima assinatura: ' . $acceptedAt : 'Contrato digital aceito.';
+        } else {
+            $label = 'Nao possui contrato digital vigente';
+            $status = 'none';
+            $description = 'Existe contrato local, mas sem aceite digital concluido.';
+        }
+
+        return [
+            'status' => $status,
+            'label' => $label,
+            'description' => $description,
+            'contract_id' => (int) ($latestDigitalContract['id'] ?? 0),
+            'acceptance_id' => is_array($latestAcceptance) ? (int) ($latestAcceptance['id'] ?? 0) : null,
+            'accepted_at' => $acceptedAt,
+            'pending' => $pending,
+            'signed' => $acceptanceStatus === 'aceito',
+            'stale' => $stale,
+            'request_url' => '/clientes/contrato/solicitar',
+            'detail_url' => (int) ($latestDigitalContract['id'] ?? 0) > 0 ? Url::to('/contratos/detalhe?id=' . rawurlencode((string) $latestDigitalContract['id'])) : '',
+            'login' => $login,
         ];
     }
 
@@ -3845,6 +4022,185 @@ final class ClientController
         }
     }
 
+    private function findPendingDigitalContractAcceptance(array $contracts): ?array
+    {
+        foreach ($contracts as $contract) {
+            if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'contrato_digital') {
+                continue;
+            }
+
+            $contractId = (int) ($contract['id'] ?? 0);
+            if ($contractId <= 0) {
+                continue;
+            }
+
+            try {
+                $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+            } catch (\Throwable) {
+                $acceptance = null;
+            }
+
+            if (!is_array($acceptance)) {
+                continue;
+            }
+
+            if (in_array((string) ($acceptance['status'] ?? ''), ['criado', 'enviado', 'assinatura_pendente'], true)) {
+                return [
+                    'contract' => $contract,
+                    'acceptance' => $acceptance,
+                ];
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    private function dispatchDigitalContractAcceptance(
+        array $contract,
+        array $acceptance,
+        array $clientProfile,
+        bool $forceResend,
+        Request $request
+    ): void {
+        $notificationDraft = [
+            'nome_completo' => (string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? 'Cliente'),
+            'celular' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $contract['telefone_cliente'] ?? ''),
+            'telefone_cliente' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $contract['telefone_cliente'] ?? ''),
+            'email' => (string) ($clientProfile['email'] ?? ''),
+            'email_original' => (string) ($clientProfile['email'] ?? ''),
+            'has_real_email' => trim((string) ($clientProfile['email'] ?? '')) !== '' && strtolower(trim((string) ($clientProfile['email'] ?? ''))) !== 'cliente@ievo.com.br',
+        ];
+
+        $sendWhatsapp = preg_replace('/\D+/', '', (string) ($notificationDraft['celular'] ?? '')) !== '';
+        $sendEmail = (bool) ($notificationDraft['has_real_email'] ?? false);
+
+        if (!$sendWhatsapp && !$sendEmail) {
+            return;
+        }
+
+        $this->dispatchAcceptanceChannels($contract, $acceptance, $notificationDraft, $sendWhatsapp, $sendEmail, $forceResend, $request);
+    }
+
+    private function hasRecentDigitalContractNotification(int $contractId, int $acceptanceId, int $seconds = 10): bool
+    {
+        if ($contractId <= 0 || $acceptanceId <= 0) {
+            return false;
+        }
+
+        $seconds = max(1, min(60, $seconds));
+
+        try {
+            $row = $this->database->fetchOne(
+                'SELECT id
+                 FROM notification_logs
+                 WHERE contract_id = :contract_id
+                   AND acceptance_id = :acceptance_id
+                   AND created_at >= DATE_SUB(NOW(), INTERVAL ' . (int) $seconds . ' SECOND)
+                 ORDER BY id DESC
+                 LIMIT 1',
+                [
+                    'contract_id' => $contractId,
+                    'acceptance_id' => $acceptanceId,
+                ]
+            );
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return is_array($row) && isset($row['id']);
+    }
+
+    private function buildDigitalContractData(string $login, array $clientProfile): array
+    {
+        $operator = $this->resolveUser();
+        $operatorLogin = $this->sanitizeLogin((string) ($operator['login'] ?? ''));
+        if ($operatorLogin === '') {
+            $operatorLogin = 'full_users';
+        }
+
+        try {
+            $registration = $this->localRepository->findLatestClientRegistrationByLogin($login);
+        } catch (\Throwable) {
+            $registration = null;
+        }
+
+        $planName = trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? ''));
+        $planValue = $this->normalizeMoney((string) ($clientProfile['plano_valor'] ?? '0'));
+        $technology = trim((string) ($clientProfile['plano_tecnologia'] ?? ''));
+        $dueDay = trim((string) ($clientProfile['venc'] ?? ''));
+        $address = $this->formatClientProfileAddress($clientProfile);
+
+        $observacao = trim(implode("\n", array_filter([
+            'Contrato digital independente gerado a partir do cadastro atual no MkAuth.',
+            $planName !== '' ? 'Plano atual: ' . $planName : null,
+            $planValue > 0 ? 'Valor mensal atual: R$ ' . number_format($planValue, 2, ',', '.') : null,
+            $technology !== '' ? 'Tecnologia atual: ' . $technology : null,
+            $dueDay !== '' ? 'Vencimento: dia ' . $dueDay : null,
+            $address !== '' ? 'Endereco cadastrado: ' . $address : null,
+        ], static fn (?string $value): bool => $value !== null && trim($value) !== '')));
+
+        return [
+            'client_id' => is_array($registration) && isset($registration['id']) ? (int) $registration['id'] : null,
+            'mkauth_login' => $login,
+            'technician_name' => (string) ($operator['name'] ?? $operatorLogin),
+            'technician_login' => $operatorLogin,
+            'nome_cliente' => (string) ($clientProfile['nome'] ?? 'Cliente'),
+            'telefone_cliente' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? ''),
+            'tipo_adesao' => 'isenta',
+            'valor_adesao' => '0.00',
+            'parcelas_adesao' => '1',
+            'valor_parcela_adesao' => '0.00',
+            'vencimento_primeira_parcela' => null,
+            'fidelidade_meses' => (string) max(1, (int) $this->config->get('contracts.commercial.fidelidade_meses_padrao', 12)),
+            'beneficio_valor' => '0.00',
+            'multa_total' => '0.00',
+            'tipo_aceite' => 'contrato_digital',
+            'observacao_adesao' => $observacao,
+            'upgrade_snapshot_json' => null,
+            'status_financeiro' => 'dispensado',
+        ];
+    }
+
+    private function buildDigitalContractAcceptanceData(int $contractId, array $contractData, string $termHash, Request $request): array
+    {
+        $technician = $this->resolveTechnicianIdentity();
+
+        return [
+            'contract_id' => $contractId,
+            'technician_name' => $technician['name'],
+            'technician_login' => $technician['login'],
+            'token' => bin2hex(random_bytes(16)),
+            'token_expires_at' => (new \DateTimeImmutable())->modify('+' . max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48)) . ' hours')->format('Y-m-d H:i:s'),
+            'status' => 'assinatura_pendente',
+            'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'remote_signature_reason' => 'Assinatura remota de contrato digital.',
+            'whatsapp_message_id' => null,
+            'sent_at' => null,
+            'accepted_at' => null,
+            'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
+            'user_agent' => (string) $request->header('User-Agent', ''),
+            'termo_versao' => (string) $this->config->get('contracts.term_version', '2026.1'),
+            'termo_hash' => $termHash,
+            'pdf_path' => null,
+            'evidence_json_path' => null,
+        ];
+    }
+
+    private function formatClientProfileAddress(array $clientProfile): string
+    {
+        return trim(implode(', ', array_filter([
+            trim((string) ($clientProfile['endereco'] ?? '')),
+            trim((string) ($clientProfile['numero'] ?? '')),
+            trim((string) ($clientProfile['complemento'] ?? '')),
+            trim((string) ($clientProfile['bairro'] ?? '')),
+            trim((string) ($clientProfile['cidade'] ?? '')),
+            trim((string) ($clientProfile['estado'] ?? '')),
+            trim((string) ($clientProfile['cep'] ?? '')),
+        ], static fn (string $value): bool => $value !== '')));
+    }
+
     private function buildUpgradeContractData(array $data, array $context, Request $request): array
     {
         $operator = $this->resolveUser();
@@ -4536,6 +4892,13 @@ final class ClientController
         $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
         $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
         $isUpgrade = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
+        $isDigitalContract = (string) ($contract['tipo_aceite'] ?? '') === 'contrato_digital';
+        if ($isDigitalContract) {
+            $first = "Olá, {$customer}.\n\nA equipe iEvo Technology preparou seu contrato digital para assinatura.\n\nConfira o termo e conclua a assinatura pelo link abaixo:\n\n{$link}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, fale com a equipe iEvo Technology antes de confirmar.";
+
+            return [trim($first)];
+        }
+
         if ($isUpgrade) {
             $first = "Olá, {$customer}! 👋\n\nAqui é {$companyOpening}.\nO upgrade / migração do seu contrato foi preparado pelo técnico {$technician}.\n\nConfira o novo termo e conclua a assinatura remota pelo link que enviamos a seguir.\n\nDepois da confirmação, a alteração no MkAuth será aplicada manualmente pela operação.\n\nBoletos, faturas, notas e segunda via continuam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
         } else {
@@ -4560,7 +4923,17 @@ final class ClientController
         $companyClosing = $company === 'nossa equipe' ? 'Nossa equipe' : 'Equipe ' . $company;
         $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
         $isUpgrade = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
-        if ($isUpgrade) {
+        $isDigitalContract = (string) ($contract['tipo_aceite'] ?? '') === 'contrato_digital';
+        if ($isDigitalContract) {
+            $subject = 'Contrato digital para assinatura - iEvo Technology';
+            $text = "Olá, {$customer}.\n\nA equipe iEvo Technology preparou seu contrato digital para assinatura.\n\nConfira o termo e conclua a assinatura pelo link abaixo:\n\n{$link}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, fale com a equipe iEvo Technology antes de confirmar.";
+            $html = '<p>Olá, <strong>' . htmlspecialchars($customer, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+                . '<p>A equipe iEvo Technology preparou seu contrato digital para assinatura.</p>'
+                . '<p>Confira o termo e conclua a assinatura pelo link abaixo:</p>'
+                . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>'
+                . '<p>Este link é pessoal, seguro e expira em ' . htmlspecialchars($ttl, ENT_QUOTES, 'UTF-8') . ' horas.</p>'
+                . '<p>Se tiver qualquer dúvida, fale com a equipe iEvo Technology antes de confirmar.</p>';
+        } elseif ($isUpgrade) {
             $subject = 'Upgrade / Migração - aceite digital - ' . $company;
             $text = "Olá, {$customer}!\n\nAqui é {$companyOpening}.\n\nO upgrade / migração do seu contrato foi preparado pelo técnico {$technician}.\n\nAcesse o link abaixo para conferir o termo e concluir a assinatura remota:\n\n{$link}\n\nApós a confirmação, a alteração no MkAuth será aplicada manualmente pela operação.\n\nBoletos, faturas, notas e segunda via continuam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
             $html = '<p>Olá, <strong>' . htmlspecialchars($customer, ENT_QUOTES, 'UTF-8') . '</strong>!</p>'
@@ -4690,9 +5063,21 @@ final class ClientController
             (string) ($draft['technician_login'] ?? ''),
         ];
 
+        $genericNames = [
+            'administrador local',
+            'admin local',
+            'administrador',
+            'local',
+            'operador',
+            'usuario',
+            'usuário',
+            'equipe técnica',
+            'equipe tecnica',
+        ];
+
         foreach ($candidates as $candidate) {
             $candidate = trim($candidate);
-            if ($candidate !== '') {
+            if ($candidate !== '' && !in_array(strtolower($candidate), $genericNames, true)) {
                 return $candidate;
             }
         }
@@ -4706,7 +5091,7 @@ final class ClientController
 
         $userLogin = trim((string) ($user['login'] ?? ''));
 
-        return $userLogin !== '' ? $userLogin : 'Equipe técnica';
+        return $userLogin !== '' ? $userLogin : 'Equipe iEvo Technology';
     }
 
     private function resolveTechnicianIdentity(): array
@@ -4807,6 +5192,31 @@ final class ClientController
         $contractTitle = $providerName === 'nossa equipe' ? 'Contrato digital da nossa equipe' : 'Contrato digital ' . $providerName;
         $technician = $this->resolveTechnicianIdentity();
         $centralAssinanteUrl = $this->resolveCentralAssinanteUrl();
+
+        if ((string) ($contractData['tipo_aceite'] ?? '') === 'contrato_digital') {
+            return trim(implode("\n", [
+                'Contrato Digital de Prestação de Serviço',
+                '',
+                'Contratada: ' . $contractTitle,
+                'Contratante: ' . $nome,
+                'Login do cliente: ' . $login,
+                'Telefone: ' . $telefone,
+                'Responsável pela operação: ' . $this->resolveTechnicianDisplayName($contractData),
+                '',
+                'Resumo do contrato atual',
+                $observacao !== '' ? $observacao : 'Dados atuais consultados no cadastro do cliente.',
+                'Fidelidade: ' . $fidelidade . ' meses, quando aplicável ao plano contratado.',
+                '',
+                'Condições gerais',
+                'O cliente confirma a ciência e concordância com o contrato de prestação de serviço vigente.',
+                'O contrato digital não altera plano, valor, tecnologia, login, senha, roteador ou titularidade no MkAuth.',
+                'Boletos, faturas, notas e segunda via podem ser consultados pela Central do Assinante:',
+                $centralAssinanteUrl,
+                '',
+                'Assinatura eletrônica/remota',
+                'O aceite eletrônico deste termo é realizado por link pessoal enviado ao cliente, com registro de IP, data, hora e dispositivo.',
+            ]));
+        }
 
         if ((string) ($contractData['tipo_aceite'] ?? '') === 'upgrade_migracao') {
             $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
