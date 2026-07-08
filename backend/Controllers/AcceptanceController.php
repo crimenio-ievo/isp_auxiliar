@@ -969,6 +969,36 @@ final class AcceptanceController
         return is_array($decoded) ? $decoded : [];
     }
 
+    private function normalizeUpgradeBenefitFlags(mixed $rawFlags): array
+    {
+        if (is_string($rawFlags) && trim($rawFlags) !== '') {
+            $decoded = json_decode($rawFlags, true);
+            if (is_array($decoded)) {
+                $rawFlags = $decoded;
+            }
+        }
+
+        if (!is_array($rawFlags)) {
+            return [];
+        }
+
+        $map = [
+            'radio_to_fiber' => false,
+            'adhesion_waiver' => false,
+            'plan_upgrade' => false,
+            'retention' => false,
+            'other_benefit' => false,
+        ];
+
+        foreach ($map as $key => $default) {
+            $value = $rawFlags[$key] ?? $rawFlags[str_replace('_', '-', $key)] ?? null;
+            $map[$key] = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+            $map[$key] = $map[$key] ?? in_array(strtolower((string) $value), ['1', 'true', 'yes', 'on'], true);
+        }
+
+        return $map;
+    }
+
     private function maskDocument(string $document): string
     {
         $document = preg_replace('/\D+/', '', $document) ?? '';
