@@ -130,7 +130,7 @@ ob_start();
 
             <label class="field">
                 <span>Valor do benefício</span>
-                <input type="text" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" required data-upgrade-benefit-value>
+                <input type="text" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" required data-upgrade-benefit-value <?= empty($canUpgradeCommercial) ? 'readonly' : ''; ?>>
             </label>
 
             <div class="field">
@@ -146,7 +146,7 @@ ob_start();
                 <div class="upgrade-benefit-grid" data-upgrade-benefit-group>
                     <label class="upgrade-benefit-card">
                         <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="radio_to_fiber">
+                            <input type="checkbox" data-upgrade-benefit-checkbox="radio_to_fiber" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
                         </span>
                         <span class="upgrade-benefit-card__body">
                             <strong>Migração rádio → fibra</strong>
@@ -155,7 +155,7 @@ ob_start();
                     </label>
                     <label class="upgrade-benefit-card">
                         <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="adhesion_waiver">
+                            <input type="checkbox" data-upgrade-benefit-checkbox="adhesion_waiver" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
                         </span>
                         <span class="upgrade-benefit-card__body">
                             <strong>Isenção de adesão/instalação</strong>
@@ -164,7 +164,7 @@ ob_start();
                     </label>
                     <label class="upgrade-benefit-card">
                         <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="plan_upgrade">
+                            <input type="checkbox" data-upgrade-benefit-checkbox="plan_upgrade" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
                         </span>
                         <span class="upgrade-benefit-card__body">
                             <strong>Upgrade de plano</strong>
@@ -173,7 +173,7 @@ ob_start();
                     </label>
                     <label class="upgrade-benefit-card">
                         <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="retention">
+                            <input type="checkbox" data-upgrade-benefit-checkbox="retention" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
                         </span>
                         <span class="upgrade-benefit-card__body">
                             <strong>Condição de retenção</strong>
@@ -182,7 +182,7 @@ ob_start();
                     </label>
                     <label class="upgrade-benefit-card upgrade-benefit-card--wide">
                         <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="other_benefit">
+                            <input type="checkbox" data-upgrade-benefit-checkbox="other_benefit" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
                         </span>
                         <span class="upgrade-benefit-card__body">
                             <strong>Outro benefício</strong>
@@ -200,7 +200,7 @@ ob_start();
 
             <label class="field">
                 <span>Prazo de fidelidade</span>
-                <input type="number" name="fidelidade_meses" min="1" value="<?= htmlspecialchars((string) $fidelityMonths, ENT_QUOTES, 'UTF-8'); ?>" required data-upgrade-fidelity>
+                <input type="number" name="fidelidade_meses" min="1" value="<?= htmlspecialchars((string) $fidelityMonths, ENT_QUOTES, 'UTF-8'); ?>" required data-upgrade-fidelity <?= empty($canUpgradeCommercial) ? 'readonly' : ''; ?>>
             </label>
 
             <label class="field field--span-2">
@@ -208,8 +208,23 @@ ob_start();
                 <textarea rows="4" name="observacao" placeholder="Descreva a justificativa comercial e qualquer observação operacional."><?= htmlspecialchars($observation, ENT_QUOTES, 'UTF-8'); ?></textarea>
             </label>
 
+            <label class="field">
+                <span>Forma de assinatura</span>
+                <select name="signature_mode" required>
+                    <option value="remote">Titular não está no local / assinatura remota</option>
+                    <option value="local">Assinatura colhida no local</option>
+                </select>
+                <small class="field-help">O processo continuará pendente até existir aceite digital válido.</small>
+            </label>
+
+            <label class="field">
+                <span>Motivo da assinatura remota</span>
+                <input type="text" name="remote_signature_reason" placeholder="Ex.: titular não está no local">
+                <small class="field-help">Obrigatório quando a assinatura for remota.</small>
+            </label>
+
             <div class="form-actions field--span-2">
-                <button class="button" type="submit">Gerar aceite remoto</button>
+                <button class="button" type="submit">Gerar aceite obrigatório</button>
                 <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Cancelar</a>
             </div>
         </div>

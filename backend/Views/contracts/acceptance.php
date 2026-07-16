@@ -39,8 +39,9 @@ $centralAssinanteUrl = trim((string) ($centralAssinanteUrl ?? ($context['central
 $centralAssinanteUrl = $centralAssinanteUrl !== '' ? $centralAssinanteUrl : 'https://sistema.ievo.com.br/central';
 $status = (string) ($acceptance['status'] ?? '');
 $isAccepted = $status === 'aceito';
-$remoteSignatureRequired = $status === 'assinatura_pendente';
 $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
+$signatureRequired = $status === 'assinatura_pendente';
+$remoteSignatureRequired = $signatureRequired && $remoteSignatureReason !== '';
 $isExpired = str_contains((string) ($context['error'] ?? ''), 'expirou');
 $hasError = !empty($context['error']) || !empty($errorMessage);
 $acceptedAt = trim((string) ($acceptance['accepted_at'] ?? ''));
@@ -140,10 +141,10 @@ ob_start();
                     <strong>Este link expirou e não pode ser concluído.</strong>
                     <small>Solicite um novo envio ao atendimento.</small>
                 </div>
-            <?php elseif ($remoteSignatureRequired): ?>
+            <?php elseif ($signatureRequired): ?>
                 <div class="status-card status-card--warning" style="margin-top: 16px;">
-                    <strong>Assinatura remota pendente.</strong>
-                    <small><?= $digitalContractMode ? 'Conclua agora a assinatura eletrônica do contrato digital e a validação do documento.' : 'O titular não assinou no local. Conclua agora com a assinatura eletrônica e a validação do documento.'; ?></small>
+                    <strong><?= $remoteSignatureRequired ? 'Assinatura remota pendente.' : 'Assinatura no local pendente.'; ?></strong>
+                    <small><?= $remoteSignatureRequired ? ($digitalContractMode ? 'Conclua agora a assinatura eletrônica do contrato digital e a validação do documento.' : 'O titular não assinou no local. Conclua agora com a assinatura eletrônica e a validação do documento.') : 'Colha a assinatura eletrônica do titular neste dispositivo e valide o documento.'; ?></small>
                     <?php if ($remoteSignatureReason !== ''): ?>
                         <small>Motivo informado: <?= htmlspecialchars($remoteSignatureReason, ENT_QUOTES, 'UTF-8'); ?></small>
                     <?php endif; ?>
@@ -300,7 +301,7 @@ ob_start();
                     method="post"
                     action="<?= htmlspecialchars(Url::to('/aceite/' . rawurlencode((string) $token) . '/confirmar'), ENT_QUOTES, 'UTF-8'); ?>"
                     data-acceptance-form
-                    data-signature-required="<?= $remoteSignatureRequired ? '1' : '0'; ?>"
+                    data-signature-required="<?= $signatureRequired ? '1' : '0'; ?>"
                     data-document-validation-required="<?= $documentValidationRequired ? '1' : '0'; ?>"
                     data-document-validation-digits="<?= htmlspecialchars((string) $documentValidationDigits, ENT_QUOTES, 'UTF-8'); ?>"
                 >
@@ -327,7 +328,7 @@ ob_start();
                         </label>
                     <?php endif; ?>
 
-                    <?php if ($remoteSignatureRequired): ?>
+                    <?php if ($signatureRequired): ?>
                         <div class="signature-pad" data-signature-pad style="margin-top: 12px;">
                             <p class="section-heading__eyebrow">Assinatura eletrônica</p>
                             <canvas class="signature-pad__canvas" data-signature-canvas width="960" height="300"></canvas>

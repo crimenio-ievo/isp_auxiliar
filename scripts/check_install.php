@@ -66,13 +66,15 @@ $providerKey = (string) $app->config()->get('app.provider_key', 'default');
 $dbHost = (string) $app->config()->get('database.host', '127.0.0.1');
 $dbDatabase = (string) $app->config()->get('database.database', 'isp_auxiliar');
 $storageRoot = dirname(__DIR__);
+$logsPath = (string) $app->config()->get('paths.logs', $storageRoot . '/logs');
 $writeChecks = [
-    'storage/logs' => isWritablePath($storageRoot . '/storage/logs'),
+    'logs' => isWritablePath($logsPath),
     'storage/backups' => isWritablePath($storageRoot . '/backups'),
 ];
 $email = (array) $app->config()->get('email', []);
 $evotrix = (array) $app->config()->get('evotrix', []);
 $mkauthTicket = (array) $app->config()->get('contracts.mkauth_ticket', []);
+$mkauthWriteEnabled = (bool) $app->config()->get('app.mkauth.write_enabled', false);
 $mkauthConfigured = trim((string) Env::get('MKAUTH_BASE_URL', '')) !== '';
 $mkauthDatabase = null;
 try {
@@ -111,11 +113,12 @@ echo ' - can_manage_contracts: ' . boolLabel((bool) ($access['can_manage_contrac
 echo ' - can_manage_financial: ' . boolLabel((bool) ($access['can_manage_financial'] ?? false)) . "\n";
 echo ' - can_manage_system: ' . boolLabel((bool) ($access['can_manage_system'] ?? false)) . "\n";
 echo ' - permission_origin: ' . (string) ($access['permission_origin_label'] ?? $access['permission_origin'] ?? 'Local') . "\n";
-echo 'storage/logs: ' . ($writeChecks['storage/logs'] ? 'OK' : 'FALHOU') . "\n";
+echo 'logs: ' . ($writeChecks['logs'] ? 'OK' : 'FALHOU') . "\n";
 echo 'storage/backups: ' . ($writeChecks['storage/backups'] ? 'OK' : 'FALHOU') . "\n";
 echo 'SMTP configurado: ' . smtpConfigured($email) . "\n";
 echo 'Evotrix configurado: ' . evotrixConfigured($evotrix) . "\n";
 echo 'MkAuth API configurado: ' . ($mkauthConfigured ? 'sim' : 'nao') . "\n";
+echo 'MKAUTH_WRITE_ENABLED: ' . boolLabel($mkauthWriteEnabled) . ' (' . ($mkauthWriteEnabled ? 'ESCRITA LIBERADA' : 'ESCRITA BLOQUEADA') . ")\n";
 echo 'integracao de consulta de chamado MkAuth: ' . boolLabel($mkauthDatabase instanceof MkAuthDatabase && $mkauthDatabase->isConfigured()) . "\n";
 echo 'MKAUTH_TICKET_MESSAGE_FALLBACK ativo: ' . boolLabel(!isset($mkauthTicket['message_fallback']) || !empty($mkauthTicket['message_fallback'])) . "\n";
 echo 'AUTO_CREATE_FINANCIAL_TICKET ativo: ' . boolLabel(!empty($mkauthTicket['auto_create'])) . "\n";

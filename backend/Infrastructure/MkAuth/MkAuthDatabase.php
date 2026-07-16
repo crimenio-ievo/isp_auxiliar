@@ -25,8 +25,10 @@ final class MkAuthDatabase
         private string $username,
         private string $password,
         private string $charset = 'utf8mb4',
-        private string $hashAlgos = 'sha256,sha1'
+        private string $hashAlgos = 'sha256,sha1',
+        private ?MkAuthWriteGuard $writeGuard = null
     ) {
+        $this->writeGuard ??= new MkAuthWriteGuard('unknown', false);
     }
 
     public function isConfigured(): bool
@@ -618,6 +620,8 @@ final class MkAuthDatabase
         if ($ticket === '' || $message === '') {
             return null;
         }
+
+        $this->writeGuard?->assertAllowed('database INSERT/UPDATE sis_msg');
 
         $emptyRow = $this->fetchOne(
             'SELECT id

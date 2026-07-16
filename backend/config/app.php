@@ -13,6 +13,7 @@ return [
     'timezone' => Env::get('APP_TIMEZONE', 'UTC'),
     'mkauth' => [
         'base_url' => Env::get('MKAUTH_BASE_URL', ''),
+        'write_enabled' => Env::bool('MKAUTH_WRITE_ENABLED', false),
         'api_token' => Env::get('MKAUTH_API_TOKEN', ''),
         'client_id' => Env::get('MKAUTH_CLIENT_ID', ''),
         'client_secret' => Env::get('MKAUTH_CLIENT_SECRET', ''),

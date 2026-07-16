@@ -143,6 +143,22 @@ function openDigitalContractModal(button) {
     }
 
     pendingDigitalContractForm = button.closest('form');
+    const reasonField = digitalContractModal.querySelector('[data-digital-contract-reason]');
+    const reasonError = digitalContractModal.querySelector('[data-digital-contract-reason-error]');
+    const signatureModeField = digitalContractModal.querySelector('[data-digital-contract-signature-mode]');
+    const reasonWrapper = digitalContractModal.querySelector('[data-digital-contract-reason-wrapper]');
+    if (signatureModeField instanceof HTMLSelectElement) {
+        signatureModeField.value = 'remote';
+    }
+    if (reasonWrapper instanceof HTMLElement) {
+        reasonWrapper.hidden = false;
+    }
+    if (reasonField instanceof HTMLTextAreaElement) {
+        reasonField.value = '';
+    }
+    if (reasonError instanceof HTMLElement) {
+        reasonError.hidden = true;
+    }
     digitalContractSubmitting = false;
     if (digitalContractConfirmButton instanceof HTMLButtonElement) {
         digitalContractConfirmButton.disabled = false;
@@ -207,6 +223,20 @@ if (digitalContractModal) {
     });
 }
 
+const digitalContractSignatureMode = digitalContractModal?.querySelector('[data-digital-contract-signature-mode]');
+if (digitalContractSignatureMode instanceof HTMLSelectElement) {
+    digitalContractSignatureMode.addEventListener('change', () => {
+        const reasonWrapper = digitalContractModal?.querySelector('[data-digital-contract-reason-wrapper]');
+        const reasonError = digitalContractModal?.querySelector('[data-digital-contract-reason-error]');
+        if (reasonWrapper instanceof HTMLElement) {
+            reasonWrapper.hidden = digitalContractSignatureMode.value === 'local';
+        }
+        if (reasonError instanceof HTMLElement) {
+            reasonError.hidden = true;
+        }
+    });
+}
+
 if (digitalContractConfirmButton instanceof HTMLButtonElement) {
     digitalContractConfirmButton.addEventListener('click', () => {
         if (digitalContractSubmitting) {
@@ -218,10 +248,33 @@ if (digitalContractConfirmButton instanceof HTMLButtonElement) {
             return;
         }
 
+        const reasonField = digitalContractModal?.querySelector('[data-digital-contract-reason]');
+        const reasonError = digitalContractModal?.querySelector('[data-digital-contract-reason-error]');
+        const signatureModeField = digitalContractModal?.querySelector('[data-digital-contract-signature-mode]');
+        const signatureMode = signatureModeField instanceof HTMLSelectElement && signatureModeField.value === 'local' ? 'local' : 'remote';
+        const reason = reasonField instanceof HTMLTextAreaElement ? reasonField.value.trim() : '';
+        if (signatureMode === 'remote' && reason === '') {
+            if (reasonError instanceof HTMLElement) {
+                reasonError.hidden = false;
+            }
+            if (reasonField instanceof HTMLTextAreaElement) {
+                reasonField.focus();
+            }
+            return;
+        }
+
         digitalContractSubmitting = true;
         const confirmInput = pendingDigitalContractForm.querySelector('[data-digital-contract-confirm-input]');
         if (confirmInput instanceof HTMLInputElement) {
             confirmInput.value = '1';
+        }
+        const reasonInput = pendingDigitalContractForm.querySelector('[data-digital-contract-reason-input]');
+        if (reasonInput instanceof HTMLInputElement) {
+            reasonInput.value = reason;
+        }
+        const signatureModeInput = pendingDigitalContractForm.querySelector('[data-digital-contract-signature-mode-input]');
+        if (signatureModeInput instanceof HTMLInputElement) {
+            signatureModeInput.value = signatureMode;
         }
 
         digitalContractConfirmButton.disabled = true;

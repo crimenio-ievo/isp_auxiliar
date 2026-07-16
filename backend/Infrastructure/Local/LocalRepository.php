@@ -205,6 +205,14 @@ final class LocalRepository
         $explicitFinancial = !empty($user['can_manage_financial']);
         $explicitUsers = !empty($user['can_manage_users']);
         $explicitSystem = !empty($user['can_manage_system']);
+        $explicitSearchClients = !empty($user['can_search_clients']);
+        $explicitCreateClient = !empty($user['can_create_client']);
+        $explicitUpgradeRequest = !empty($user['can_upgrade_request']);
+        $explicitContractView = !empty($user['can_view_contracts']);
+        $explicitContractSignature = !empty($user['can_request_contract_signature']);
+        $explicitAcceptanceResend = !empty($user['can_resend_contract_acceptance']);
+        $explicitUpgradeTechnical = !empty($user['can_complete_upgrade_technical']);
+        $explicitUpgradeCommercial = !empty($user['can_upgrade_commercial']);
         $explicitAdmin = !empty($user['is_admin']) || !empty($user['gestor_admin']);
         $permissionOrigin = trim((string) ($user['permission_origin'] ?? ''));
 
@@ -221,6 +229,7 @@ final class LocalRepository
 
         $isAdminRole = in_array($role, ['platform_admin', 'admin', 'administrador'], true);
         $isManagerRole = in_array($role, ['manager', 'gestor'], true) || !empty($user['can_manage']);
+        $isTechnicianRole = $role === 'technician' || !empty($permissionProfile['tecnico']);
 
         $isAdmin = $isAdminRole
             || ($login !== '' && in_array($login, $adminLogins, true))
@@ -242,6 +251,14 @@ final class LocalRepository
             'can_manage_financial' => $isManager || $explicitFinancial || !empty($permissionProfile['financeiro']) || ($login !== '' && in_array($login, $financialLogins, true)),
             'can_manage_users' => $isAdmin || $explicitUsers,
             'can_manage_system' => $isAdmin || $explicitSystem,
+            'can_search_clients' => $isManager || $isTechnicianRole || $explicitSearchClients,
+            'can_create_client' => $isManager || $isTechnicianRole || $explicitCreateClient,
+            'can_upgrade_request' => $isManager || $isTechnicianRole || $explicitUpgradeRequest,
+            'can_view_contracts' => $isManager || $isTechnicianRole || $explicitContractView,
+            'can_request_contract_signature' => $isManager || $isTechnicianRole || $explicitContractSignature,
+            'can_resend_contract_acceptance' => $isManager || $isTechnicianRole || $explicitAcceptanceResend,
+            'can_complete_upgrade_technical' => $isManager || $isTechnicianRole || $explicitUpgradeTechnical,
+            'can_upgrade_commercial' => $isManager || $explicitUpgradeCommercial,
             'permission_origin' => $permissionOrigin,
             'permission_origin_label' => $permissionOrigin,
         ];

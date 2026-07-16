@@ -19,6 +19,7 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
+use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
 
@@ -49,6 +50,11 @@ final class ClientController
 
     public function index(Request $request): Response
     {
+        if (!$this->canSearchClients()) {
+            Flash::set('error', 'Seu usuário não possui permissão para consultar clientes.');
+            return Response::redirect('/dashboard');
+        }
+
         $query = trim((string) $request->query('q', $request->input('q', '')));
         $searchMode = $this->detectClientSearchMode($query);
         $results = [];
@@ -87,6 +93,14 @@ final class ClientController
 
     public function search(Request $request): Response
     {
+        if (!$this->canSearchClients()) {
+            return Response::json([
+                'status' => 'error',
+                'message' => 'Seu usuário não possui permissão para consultar clientes.',
+                'results' => [],
+            ], 403);
+        }
+
         $query = trim((string) $request->query('q', $request->input('q', '')));
 
         if ($query === '' || mb_strlen($query) < 3) {
@@ -143,6 +157,11 @@ final class ClientController
 
     public function detail(Request $request): Response
     {
+        if (!$this->canSearchClients()) {
+            Flash::set('error', 'Seu usuário não possui permissão para abrir o detalhe de clientes.');
+            return Response::redirect('/dashboard');
+        }
+
         $login = $this->sanitizeLogin((string) $request->query('login', $request->input('login', '')));
 
         if ($login === '') {
@@ -224,6 +243,9 @@ final class ClientController
             'canManageContracts' => $this->canManageContracts(),
             'canManageFinancial' => $this->canManageFinancial(),
             'canManageSettings' => $this->canManageSettings(),
+            'canRequestUpgrade' => $this->canRequestUpgrade(),
+            'canRequestContractSignature' => $this->canRequestContractSignature(),
+            'canCompleteUpgradeTechnical' => $this->canCompleteUpgradeTechnical(),
         ]);
 
         return Response::html($html);
@@ -231,11 +253,21 @@ final class ClientController
 
     public function upgrade(Request $request): Response
     {
+        if (!$this->canRequestUpgrade()) {
+            Flash::set('error', 'Seu usuário não possui permissão para iniciar Upgrade / Migração.');
+            return Response::redirect('/clientes');
+        }
+
         $login = $this->sanitizeLogin((string) $request->query('login', $request->input('login', '')));
 
         if ($login === '') {
             Flash::set('error', 'Informe o login do cliente para iniciar o upgrade.');
             return Response::redirect('/clientes');
+        }
+
+        if ($this->hasOpenUpgradeProcess($login)) {
+            Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. Retome o processo existente.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
         }
 
         $context = $this->loadUpgradeContext($login);
@@ -254,6 +286,7 @@ final class ClientController
             'context' => $context,
             'canCreateClient' => $this->canCreateClient(),
             'canSearchClients' => $this->canSearchClients(),
+            'canUpgradeCommercial' => $this->canUpgradeCommercial(),
             'currentLogin' => $login,
         ]);
 
@@ -266,6 +299,17 @@ final class ClientController
         if ($login === '') {
             Flash::set('error', 'Informe o login do cliente para concluir o upgrade.');
             return Response::redirect('/clientes');
+        }
+
+        if (!$this->canRequestUpgrade()) {
+            Flash::set('error', 'Seu usuário não possui permissão para iniciar Upgrade / Migração.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+
+        if ($this->hasOpenUpgradeProcess($login)) {
+            Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. Retome o processo existente.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
         }
 
         $context = $this->loadUpgradeContext($login);
@@ -283,10 +327,15 @@ final class ClientController
         }
 
         try {
-            $this->syncUpgradeContractArtifacts($data, $context, $request);
+            $result = $this->syncUpgradeContractArtifacts($data, $context, $request);
         } catch (\Throwable $exception) {
             Flash::set('error', 'Nao foi possivel concluir o upgrade agora: ' . $exception->getMessage());
             return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login));
+        }
+
+        if (($result['signature_mode'] ?? 'remote') === 'local' && trim((string) ($result['token'] ?? '')) !== '') {
+            Flash::set('success', 'Upgrade / Migração criado. Colha agora o aceite digital do titular neste dispositivo.');
+            return Response::redirect('/aceite/' . rawurlencode((string) $result['token']));
         }
 
         Flash::set('success', 'Upgrade / Migração criado com aceite remoto pendente.');
@@ -302,13 +351,21 @@ final class ClientController
             return Response::redirect('/clientes');
         }
 
-        if (!$this->canCreateClient() && !$this->canManageContracts()) {
+        if (!$this->canRequestContractSignature()) {
             Flash::set('error', 'Usuario sem permissao para solicitar contrato digital.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
         if ((string) $request->input('confirm_send', '') !== '1') {
             Flash::set('error', 'Confirme o envio do contrato digital antes de continuar.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+
+        $signatureMode = (string) $request->input('signature_mode', 'remote') === 'local' ? 'local' : 'remote';
+        $remoteSignatureReason = trim((string) $request->input('remote_signature_reason', ''));
+        if ($signatureMode === 'remote' && $remoteSignatureReason === '') {
+            Flash::set('error', 'Informe o motivo da assinatura remota.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
@@ -334,6 +391,36 @@ final class ClientController
             try {
                 $pendingContractId = (int) ($pending['contract']['id'] ?? 0);
                 $pendingAcceptanceId = (int) ($pending['acceptance']['id'] ?? 0);
+                if ($signatureMode === 'local') {
+                    $termBody = $this->buildContractTermBody($pending['contract']);
+                    $localAcceptance = $this->buildDigitalContractAcceptanceData(
+                        $pendingContractId,
+                        $pending['contract'],
+                        hash('sha256', $termBody),
+                        $request,
+                        '',
+                        'local'
+                    );
+                    $localAcceptanceId = $this->contractAcceptanceRepository->create($localAcceptance) ?? 0;
+                    if ($localAcceptanceId <= 0) {
+                        throw new \RuntimeException('O aceite local não pôde ser preparado.');
+                    }
+                    if ($pendingAcceptanceId > 0) {
+                        $this->contractAcceptanceRepository->cancel($pendingAcceptanceId);
+                    }
+                    $this->recordAudit('contract.acceptance.local_prepared', 'contract_acceptance', $localAcceptanceId, [
+                        'login' => $login,
+                        'contract_id' => $pendingContractId,
+                        'replaced_acceptance_id' => $pendingAcceptanceId,
+                    ], $request);
+                    Flash::set('success', 'Aceite local preparado. Colha agora a assinatura digital do titular.');
+                    return Response::redirect('/aceite/' . rawurlencode((string) $localAcceptance['token']));
+                }
+
+                $pending['acceptance']['remote_signature_reason'] = $remoteSignatureReason;
+                if ($pendingAcceptanceId > 0) {
+                    $this->contractAcceptanceRepository->updateById($pendingAcceptanceId, $pending['acceptance']);
+                }
                 if ($this->hasRecentDigitalContractNotification($pendingContractId, $pendingAcceptanceId)) {
                     Flash::set('success', 'Envio do contrato digital ja processado ha poucos segundos. O aceite pendente foi mantido.');
                 } else {
@@ -347,6 +434,7 @@ final class ClientController
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
+        $localAcceptanceToken = '';
         try {
             $contractData = $this->buildDigitalContractData($login, $clientProfile);
             $contractId = $this->contractRepository->create($contractData) ?? 0;
@@ -357,7 +445,14 @@ final class ClientController
             $contractData['id'] = $contractId;
             $contractData['contract_id'] = $contractId;
             $termBody = $this->buildContractTermBody($contractData);
-            $acceptanceData = $this->buildDigitalContractAcceptanceData($contractId, $contractData, hash('sha256', $termBody), $request);
+            $acceptanceData = $this->buildDigitalContractAcceptanceData(
+                $contractId,
+                $contractData,
+                hash('sha256', $termBody),
+                $request,
+                $remoteSignatureReason,
+                $signatureMode
+            );
             $acceptanceId = $this->contractAcceptanceRepository->create($acceptanceData) ?? 0;
             if ($acceptanceId <= 0) {
                 throw new \RuntimeException('Aceite do contrato digital nao pôde ser gravado.');
@@ -377,10 +472,19 @@ final class ClientController
                 'status' => 'assinatura_pendente',
                 'tipo_aceite' => 'contrato_digital',
             ], $request);
-            $this->dispatchDigitalContractAcceptance($contractData, is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData, $clientProfile, false, $request);
+            if ($signatureMode === 'remote') {
+                $this->dispatchDigitalContractAcceptance($contractData, is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData, $clientProfile, false, $request);
+            } else {
+                $localAcceptanceToken = (string) ($acceptanceData['token'] ?? '');
+            }
         } catch (\Throwable $exception) {
             Flash::set('error', 'Nao foi possivel solicitar o contrato digital agora: ' . $exception->getMessage());
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if ($signatureMode === 'local' && $localAcceptanceToken !== '') {
+            Flash::set('success', 'Contrato digital gerado. Colha agora a assinatura digital do titular.');
+            return Response::redirect('/aceite/' . rawurlencode($localAcceptanceToken));
         }
 
         Flash::set('success', 'Contrato digital gerado com assinatura remota pendente.');
@@ -388,8 +492,122 @@ final class ClientController
         return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
     }
 
+    public function storeUpgradeTechnicalExecution(Request $request): Response
+    {
+        $login = $this->sanitizeLogin((string) $request->input('login', ''));
+        $contractId = (int) $request->input('contract_id', 0);
+        $returnTo = '/clientes/detalhe?login=' . rawurlencode($login);
+
+        if (!$this->canCompleteUpgradeTechnical()) {
+            Flash::set('error', 'Seu usuário não possui permissão para registrar a execução técnica do upgrade.');
+            return Response::redirect($login !== '' ? $returnTo : '/clientes');
+        }
+
+        $contract = $contractId > 0 ? $this->contractRepository->findById($contractId) : null;
+        if (!is_array($contract)
+            || (string) ($contract['tipo_aceite'] ?? '') !== 'upgrade_migracao'
+            || $this->sanitizeLogin((string) ($contract['mkauth_login'] ?? '')) !== $login
+        ) {
+            Flash::set('error', 'Não foi possível localizar o Upgrade / Migração informado.');
+            return Response::redirect($login !== '' ? $returnTo : '/clientes');
+        }
+
+        $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+        if (!is_array($acceptance) || (string) ($acceptance['status'] ?? '') !== 'aceito') {
+            Flash::set('error', 'A execução técnica só pode ser confirmada após o aceite digital válido do cliente.');
+            return Response::redirect($returnTo);
+        }
+
+        $checklistKeys = [
+            'plan_checked',
+            'technology_changed',
+            'pppoe_validated',
+            'client_connected',
+            'speed_checked',
+            'monthly_value_checked',
+        ];
+        $checklist = ['acceptance_completed' => true];
+        foreach ($checklistKeys as $key) {
+            $checklist[$key] = (string) $request->input($key, '') === '1';
+        }
+
+        $checkedCount = count(array_filter($checklistKeys, static fn (string $key): bool => !empty($checklist[$key])));
+        $allChecked = $checkedCount === count($checklistKeys);
+        $requestedCompletion = (string) $request->input('action', 'save') === 'complete';
+        if ($requestedCompletion && !$allChecked) {
+            Flash::set('error', 'Conclua todos os itens do checklist antes de confirmar a execução técnica.');
+            return Response::redirect($returnTo);
+        }
+
+        $snapshot = $this->extractUpgradeSnapshot($contract);
+        $technician = $this->resolveTechnicianIdentity();
+        $now = date('Y-m-d H:i:s');
+        $technicalStatus = $allChecked ? 'concluido' : ($checkedCount > 0 ? 'execucao_tecnica_parcial' : 'aguardando_execucao_tecnica');
+        $snapshot['technical_status'] = $technicalStatus;
+        $snapshot['technical_checklist'] = $checklist;
+        $snapshot['technical_observation'] = trim((string) $request->input('technical_observation', ''));
+        $snapshot['technical_updated_at'] = $now;
+        $snapshot['technical_updated_by'] = $technician['name'];
+        $snapshot['technical_updated_by_login'] = $technician['login'];
+        if ($allChecked) {
+            $snapshot['technical_completed_at'] = $now;
+        } else {
+            unset($snapshot['technical_completed_at']);
+        }
+
+        $this->contractRepository->updateUpgradeSnapshot($contractId, $snapshot);
+
+        try {
+            $task = $this->financialTaskRepository->findByContractId($contractId);
+            if (is_array($task) && isset($task['id'])) {
+                $taskId = (int) $task['id'];
+                $this->financialTaskRepository->updateStatus($taskId, $allChecked ? 'concluido' : 'em_andamento');
+                if ($allChecked) {
+                    $this->financialTaskRepository->updateTicketMetadata($taskId, [
+                        'completed_at' => $now,
+                        'completed_by' => $technician['login'],
+                    ]);
+                }
+            }
+        } catch (\Throwable $exception) {
+            $this->recordAudit('contract.upgrade.technical_task_sync_failed', 'client_contract', $contractId, [
+                'login' => $login,
+                'error' => $exception->getMessage(),
+            ], $request);
+        }
+
+        $this->recordAudit(
+            $allChecked ? 'contract.upgrade.technical_completed' : 'contract.upgrade.technical_partial',
+            'client_contract',
+            $contractId,
+            [
+                'login' => $login,
+                'acceptance_id' => (int) ($acceptance['id'] ?? 0),
+                'technical_status' => $technicalStatus,
+                'checklist' => $checklist,
+                'observation' => $snapshot['technical_observation'],
+                'responsible_name' => $technician['name'],
+                'responsible_login' => $technician['login'],
+            ],
+            $request
+        );
+
+        Flash::set(
+            $allChecked ? 'success' : 'warning',
+            $allChecked
+                ? 'Execução técnica concluída e registrada. Nenhuma alteração automática foi feita no MkAuth.'
+                : 'Checklist parcial salvo. O Upgrade / Migração continua pendente.'
+        );
+
+        return Response::redirect($returnTo);
+    }
+
     public function create(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $cities = $this->loadCities();
         $draftId = trim((string) $request->query('draft', ''));
         $checkpointToken = trim((string) $request->query('token', ''));
@@ -449,6 +667,10 @@ final class ClientController
 
     public function store(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $draftId = trim((string) $request->input('draft_id', ''));
         $checkpointToken = trim((string) $request->input('checkpoint_token', $request->query('token', '')));
         $editingCheckpoint = $checkpointToken !== '' && $this->isValidCheckpointToken($checkpointToken);
@@ -499,6 +721,10 @@ final class ClientController
 
     public function clearDraft(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess(true)) !== null) {
+            return $denied;
+        }
+
         $key = trim((string) $request->input('key', ''));
 
         if (str_starts_with($key, 'client-create') || str_starts_with($key, 'client-acceptance') || str_starts_with($key, 'client-edit')) {
@@ -513,6 +739,10 @@ final class ClientController
 
     public function acceptance(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $draftId = trim((string) $request->query('draft', ''));
         $draftRecord = $this->loadDraftRecord($draftId);
         $draft = $this->loadDraft($draftId);
@@ -554,6 +784,10 @@ final class ClientController
 
     public function finalize(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $draftId = trim((string) $request->input('draft_id', $request->query('draft', '')));
         $checkpointToken = trim((string) $request->input('checkpoint_token', $request->query('token', '')));
         $editingCheckpoint = $checkpointToken !== '' && $this->isValidCheckpointToken($checkpointToken);
@@ -620,6 +854,17 @@ final class ClientController
         } catch (\Throwable $exception) {
             $loginValue = (string) ($data['login'] ?? '');
             $cpfValue = (string) ($data['cpf_cnpj'] ?? '');
+
+            if ($exception->getMessage() === MkAuthWriteGuard::BLOCKED_MESSAGE) {
+                $this->recordAudit('client.provision_blocked', 'client_registration', null, [
+                    'login' => $loginValue,
+                    'error' => $exception->getMessage(),
+                ], $request);
+                Flash::set('error', MkAuthWriteGuard::BLOCKED_MESSAGE . ' Os dados locais foram mantidos para nova tentativa.');
+
+                return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+            }
+
             $clientAlreadyExists = false;
 
             try {
@@ -771,6 +1016,10 @@ final class ClientController
 
     public function connection(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $token = trim((string) $request->query('token', ''));
         $record = $this->loadInstallationCheckpoint($token);
 
@@ -811,6 +1060,10 @@ final class ClientController
 
     public function completeConnection(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $token = trim((string) $request->input('token', ''));
         $record = $this->loadInstallationCheckpoint($token);
 
@@ -856,6 +1109,10 @@ final class ClientController
 
     public function correctContactAndResend(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $token = trim((string) $request->input('token', $request->query('token', '')));
         $record = $this->loadInstallationCheckpoint($token);
 
@@ -1129,6 +1386,10 @@ final class ClientController
 
     public function resume(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess()) !== null) {
+            return $denied;
+        }
+
         $token = trim((string) $request->query('token', $request->input('token', '')));
         $login = $this->sanitizeLogin((string) $request->query('login', $request->input('login', '')));
 
@@ -1226,6 +1487,10 @@ final class ClientController
 
     public function checkConnection(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess(true)) !== null) {
+            return $denied;
+        }
+
         $token = trim((string) $request->query('token', ''));
         $login = trim((string) $request->query('login', ''));
 
@@ -1312,6 +1577,10 @@ final class ClientController
 
     public function lookupCep(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess(true)) !== null) {
+            return $denied;
+        }
+
         $cep = preg_replace('/\D+/', '', (string) $request->query('cep', '')) ?? '';
 
         if (strlen($cep) !== 8) {
@@ -1344,6 +1613,10 @@ final class ClientController
 
     public function validateClientField(Request $request): Response
     {
+        if (($denied = $this->guardClientCreationAccess(true)) !== null) {
+            return $denied;
+        }
+
         $type = strtolower(trim((string) $request->query('type', '')));
         $value = trim((string) $request->query('value', ''));
 
@@ -1444,6 +1717,25 @@ final class ClientController
         return $access['is_manager'] || $access['is_admin'] || !empty($access['can_create_client']);
     }
 
+    private function guardClientCreationAccess(bool $json = false): ?Response
+    {
+        if ($this->canCreateClient()) {
+            return null;
+        }
+
+        $message = 'Seu usuário não possui permissão para iniciar ou retomar o cadastro de clientes.';
+        if ($json) {
+            return Response::json([
+                'status' => 'error',
+                'message' => $message,
+            ], 403);
+        }
+
+        Flash::set('error', $message);
+
+        return Response::redirect('/clientes');
+    }
+
     private function canSearchClients(): bool
     {
         $access = $this->localRepository->accessProfileForUser($this->resolveUser());
@@ -1463,6 +1755,37 @@ final class ClientController
         $access = $this->localRepository->accessProfileForUser($this->resolveUser());
 
         return $access['is_manager'] || $access['is_admin'] || !empty($access['can_manage_settings']);
+    }
+
+    private function canRequestUpgrade(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_upgrade_request']);
+    }
+
+    private function canRequestContractSignature(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager']
+            || $access['is_admin']
+            || !empty($access['can_request_contract_signature'])
+            || !empty($access['can_resend_contract_acceptance']);
+    }
+
+    private function canCompleteUpgradeTechnical(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_complete_upgrade_technical']);
+    }
+
+    private function canUpgradeCommercial(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_upgrade_commercial']);
     }
 
     private function buildClientHubSearchResults(array $rows): array
@@ -1586,6 +1909,7 @@ final class ClientController
 
         $statusVisual = $this->resolveClientStatusVisual($clientProfile);
         $digitalContract = $this->buildDigitalContractSummary($login, $clientProfile, $contracts);
+        $upgradeProcess = $this->buildUpgradeProcessSummary($login, $contracts);
 
         $profile = [
             'name' => trim((string) ($clientProfile['nome'] ?? $primaryContract['nome_cliente'] ?? $registration['client_name'] ?? '-')),
@@ -1608,6 +1932,7 @@ final class ClientController
             'contract' => is_array($primaryContract) ? $primaryContract : [],
             'contracts' => array_values(array_map(fn (array $item): array => $this->normalizeContractSummary($item), $contracts)),
             'digitalContract' => $digitalContract,
+            'upgradeProcess' => $upgradeProcess,
             'acceptance' => $acceptance,
             'acceptanceHistory' => is_array($acceptanceRecords) ? $acceptanceRecords : [],
             'financialTask' => $financialTask,
@@ -1726,9 +2051,16 @@ final class ClientController
     {
         $latestDigitalContract = null;
         $latestAcceptance = null;
+        $digitalContractTypes = [
+            'contrato_digital',
+            'nova_instalacao',
+            'regularizacao_contrato',
+            'alteracao_plano',
+            'renovacao_fidelidade',
+        ];
 
         foreach ($contracts as $contract) {
-            if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'contrato_digital') {
+            if (!is_array($contract) || !in_array((string) ($contract['tipo_aceite'] ?? ''), $digitalContractTypes, true)) {
                 continue;
             }
 
@@ -1765,7 +2097,11 @@ final class ClientController
         $acceptedAt = is_array($latestAcceptance) ? trim((string) ($latestAcceptance['accepted_at'] ?? '')) : '';
         $currentPlan = trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? ''));
         $storedNotes = trim((string) ($latestDigitalContract['observacao_adesao'] ?? ''));
-        $stale = $acceptanceStatus === 'aceito' && $currentPlan !== '' && $storedNotes !== '' && !str_contains($storedNotes, 'Plano atual: ' . $currentPlan);
+        $stale = $acceptanceStatus === 'aceito'
+            && (string) ($latestDigitalContract['tipo_aceite'] ?? '') === 'contrato_digital'
+            && $currentPlan !== ''
+            && $storedNotes !== ''
+            && !str_contains($storedNotes, 'Plano atual: ' . $currentPlan);
         $pending = in_array($acceptanceStatus, ['criado', 'enviado', 'assinatura_pendente'], true);
 
         if ($pending) {
@@ -1800,6 +2136,127 @@ final class ClientController
             'detail_url' => (int) ($latestDigitalContract['id'] ?? 0) > 0 ? Url::to('/contratos/detalhe?id=' . rawurlencode((string) $latestDigitalContract['id'])) : '',
             'login' => $login,
         ];
+    }
+
+    private function buildUpgradeProcessSummary(string $login, array $contracts): array
+    {
+        $upgradeContract = null;
+        foreach ($contracts as $contract) {
+            if (is_array($contract) && (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
+                $upgradeContract = $contract;
+                break;
+            }
+        }
+
+        if (!is_array($upgradeContract)) {
+            return [
+                'exists' => false,
+                'status' => 'none',
+                'status_label' => 'Nenhum processo iniciado',
+                'contract_status_label' => 'Novo aceite obrigatório ao iniciar',
+                'technical_status_label' => 'Não iniciado',
+                'pending_label' => 'Iniciar Upgrade / Migração',
+                'priority' => 'normal',
+                'resume_url' => '/clientes/upgrade?login=' . rawurlencode($login),
+            ];
+        }
+
+        $contractId = (int) ($upgradeContract['id'] ?? 0);
+        try {
+            $acceptance = $contractId > 0 ? $this->contractAcceptanceRepository->findLatestByContractId($contractId) : null;
+        } catch (\Throwable) {
+            $acceptance = null;
+        }
+
+        $acceptanceStatus = strtolower(trim((string) ($acceptance['status'] ?? '')));
+        $snapshot = $this->extractUpgradeSnapshot($upgradeContract);
+        $checklist = is_array($snapshot['technical_checklist'] ?? null) ? $snapshot['technical_checklist'] : [];
+        $manualChecklistKeys = [
+            'plan_checked',
+            'technology_changed',
+            'pppoe_validated',
+            'client_connected',
+            'speed_checked',
+            'monthly_value_checked',
+        ];
+        $checkedCount = count(array_filter($manualChecklistKeys, static fn (string $key): bool => !empty($checklist[$key])));
+        $allChecked = $checkedCount === count($manualChecklistKeys);
+
+        $status = 'aguardando_aceite';
+        $statusLabel = 'Aguardando aceite';
+        $contractStatusLabel = 'Assinatura pendente';
+        $technicalStatusLabel = 'Bloqueado até o aceite';
+        $pendingLabel = 'Cliente precisa assinar o aditivo';
+        $priority = 'attention';
+
+        if ($acceptanceStatus === 'aceito') {
+            $contractStatusLabel = 'Aceite concluído';
+            if ($allChecked && trim((string) ($snapshot['technical_completed_at'] ?? '')) !== '') {
+                $status = 'concluido';
+                $statusLabel = 'Concluído';
+                $technicalStatusLabel = 'Checklist concluído';
+                $pendingLabel = 'Nenhuma pendência';
+                $priority = 'normal';
+            } elseif ($checkedCount > 0) {
+                $planPending = empty($checklist['plan_checked']) || empty($checklist['monthly_value_checked']);
+                $status = $planPending ? 'aguardando_confirmacao_plano' : 'execucao_tecnica_parcial';
+                $statusLabel = $planPending ? 'Aguardando confirmação de plano/valor' : 'Execução técnica parcial';
+                $technicalStatusLabel = $checkedCount . '/6 itens técnicos conferidos';
+                $pendingLabel = 'Cliente já aceitou a alteração; execução técnica pendente.';
+                $priority = 'urgent';
+            } else {
+                $status = 'aguardando_execucao_tecnica';
+                $statusLabel = 'Aguardando execução técnica';
+                $technicalStatusLabel = 'Ainda não confirmada';
+                $pendingLabel = 'Cliente já aceitou a alteração; execução técnica pendente.';
+                $priority = 'urgent';
+            }
+        } elseif (in_array($acceptanceStatus, ['cancelado', 'expirado'], true)) {
+            $status = $acceptanceStatus === 'cancelado' ? 'cancelado' : 'erro';
+            $statusLabel = $acceptanceStatus === 'cancelado' ? 'Cancelado' : 'Aceite expirado';
+            $contractStatusLabel = $statusLabel;
+            $technicalStatusLabel = 'Bloqueado';
+            $pendingLabel = 'Solicitar novo aceite';
+            $priority = $acceptanceStatus === 'expirado' ? 'urgent' : 'attention';
+        }
+
+        return [
+            'exists' => true,
+            'contract_id' => $contractId,
+            'acceptance_id' => is_array($acceptance) ? (int) ($acceptance['id'] ?? 0) : 0,
+            'acceptance_status' => $acceptanceStatus,
+            'accepted' => $acceptanceStatus === 'aceito',
+            'status' => $status,
+            'status_label' => $statusLabel,
+            'contract_status_label' => $contractStatusLabel,
+            'technical_status_label' => $technicalStatusLabel,
+            'pending_label' => $pendingLabel,
+            'priority' => $priority,
+            'checklist' => array_merge(array_fill_keys($manualChecklistKeys, false), $checklist, [
+                'acceptance_completed' => $acceptanceStatus === 'aceito',
+            ]),
+            'technical_observation' => (string) ($snapshot['technical_observation'] ?? ''),
+            'technical_updated_at' => (string) ($snapshot['technical_updated_at'] ?? ''),
+            'technical_updated_by' => (string) ($snapshot['technical_updated_by'] ?? ''),
+            'resume_url' => '/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process',
+            'detail_url' => $contractId > 0 ? Url::to('/contratos/detalhe?id=' . rawurlencode((string) $contractId)) : '',
+        ];
+    }
+
+    private function hasOpenUpgradeProcess(string $login): bool
+    {
+        try {
+            $contracts = $this->contractRepository->listByLogin($login, 20);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $summary = $this->buildUpgradeProcessSummary($login, $contracts);
+        if (empty($summary['exists'])) {
+            return false;
+        }
+
+        return !in_array((string) ($summary['status'] ?? ''), ['concluido', 'cancelado', 'erro'], true);
     }
 
     private function detectClientSearchMode(string $query): string
@@ -3901,6 +4358,13 @@ final class ClientController
         $benefitValue = $this->normalizeMoney((string) $request->input('valor_beneficio', (string) $benefitDefaults['value']));
         $benefitOtherText = trim((string) $request->input('beneficio_outro_text', ''));
 
+        if (!$this->canUpgradeCommercial()) {
+            $benefitFlags = $benefitDefaults['flags'];
+            $benefitDescription = $benefitDefaults['description'];
+            $benefitValue = (float) $benefitDefaults['value'];
+            $benefitOtherText = '';
+        }
+
         return [
             'login' => $this->sanitizeLogin((string) ($context['login'] ?? $request->input('login', ''))),
             'plano_atual' => trim((string) $request->input('plano_atual', $context['current_plan'] ?? '')),
@@ -3921,8 +4385,12 @@ final class ClientController
             'beneficio_outro_text' => $benefitOtherText,
             'valor_beneficio' => $benefitValue,
             'novo_valor_mensal' => $this->normalizeMoney((string) $request->input('novo_valor_mensal', (string) $monthlyValue)),
-            'fidelidade_meses' => max(1, (int) $request->input('fidelidade_meses', (string) ($context['fidelity_months'] ?? 12))),
+            'fidelidade_meses' => $this->canUpgradeCommercial()
+                ? max(1, (int) $request->input('fidelidade_meses', (string) ($context['fidelity_months'] ?? 12)))
+                : max(1, (int) ($context['fidelity_months'] ?? 12)),
             'observacao' => trim((string) $request->input('observacao', $context['observacao'] ?? '')),
+            'signature_mode' => (string) $request->input('signature_mode', 'remote') === 'local' ? 'local' : 'remote',
+            'remote_signature_reason' => trim((string) $request->input('remote_signature_reason', '')),
         ];
     }
 
@@ -3954,10 +4422,14 @@ final class ClientController
             $errors[] = 'Nao foi possivel identificar o plano atual do cliente.';
         }
 
+        if (($data['signature_mode'] ?? 'remote') === 'remote' && trim((string) ($data['remote_signature_reason'] ?? '')) === '') {
+            $errors[] = 'Informe o motivo da assinatura remota.';
+        }
+
         return $errors;
     }
 
-    private function syncUpgradeContractArtifacts(array $data, array $context, Request $request): void
+    private function syncUpgradeContractArtifacts(array $data, array $context, Request $request): array
     {
         try {
             $this->messageTemplateRepository->ensureDefaults($this->defaultMessageTemplates());
@@ -4010,7 +4482,7 @@ final class ClientController
         $sendWhatsapp = trim((string) ($notificationDraft['celular'] ?? '')) !== '';
         $sendEmail = (bool) ($notificationDraft['has_real_email'] ?? false);
 
-        if ($sendWhatsapp || $sendEmail) {
+        if (($data['signature_mode'] ?? 'remote') === 'remote' && ($sendWhatsapp || $sendEmail)) {
             try {
                 $this->dispatchAcceptanceChannels($contractData, is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData, $notificationDraft, $sendWhatsapp, $sendEmail, false, $request);
             } catch (\Throwable $exception) {
@@ -4020,12 +4492,27 @@ final class ClientController
                 ], $request);
             }
         }
+
+        return [
+            'contract_id' => $contractId,
+            'acceptance_id' => $acceptanceId,
+            'signature_mode' => (string) ($data['signature_mode'] ?? 'remote'),
+            'token' => (string) ($acceptanceData['token'] ?? ''),
+        ];
     }
 
     private function findPendingDigitalContractAcceptance(array $contracts): ?array
     {
+        $eligibleTypes = [
+            'contrato_digital',
+            'nova_instalacao',
+            'regularizacao_contrato',
+            'alteracao_plano',
+            'renovacao_fidelidade',
+        ];
+
         foreach ($contracts as $contract) {
-            if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'contrato_digital') {
+            if (!is_array($contract) || !in_array((string) ($contract['tipo_aceite'] ?? ''), $eligibleTypes, true)) {
                 continue;
             }
 
@@ -4163,7 +4650,14 @@ final class ClientController
         ];
     }
 
-    private function buildDigitalContractAcceptanceData(int $contractId, array $contractData, string $termHash, Request $request): array
+    private function buildDigitalContractAcceptanceData(
+        int $contractId,
+        array $contractData,
+        string $termHash,
+        Request $request,
+        string $remoteSignatureReason,
+        string $signatureMode = 'remote'
+    ): array
     {
         $technician = $this->resolveTechnicianIdentity();
 
@@ -4175,7 +4669,7 @@ final class ClientController
             'token_expires_at' => (new \DateTimeImmutable())->modify('+' . max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48)) . ' hours')->format('Y-m-d H:i:s'),
             'status' => 'assinatura_pendente',
             'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
-            'remote_signature_reason' => 'Assinatura remota de contrato digital.',
+            'remote_signature_reason' => $signatureMode === 'remote' ? trim($remoteSignatureReason) : null,
             'whatsapp_message_id' => null,
             'sent_at' => null,
             'accepted_at' => null,
@@ -4319,7 +4813,9 @@ final class ClientController
             'token_expires_at' => (new \DateTimeImmutable())->modify('+' . max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48)) . ' hours')->format('Y-m-d H:i:s'),
             'status' => 'assinatura_pendente',
             'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
-            'remote_signature_reason' => 'Upgrade / Migração: assinatura remota obrigatória para concluir a alteração contratual.',
+            'remote_signature_reason' => ($data['signature_mode'] ?? 'remote') === 'remote'
+                ? trim((string) ($data['remote_signature_reason'] ?? ''))
+                : null,
             'whatsapp_message_id' => null,
             'sent_at' => null,
             'accepted_at' => null,
@@ -5085,13 +5581,15 @@ final class ClientController
         $user = $this->resolveUser();
         $userName = trim((string) ($user['name'] ?? ''));
 
-        if ($userName !== '') {
+        if ($userName !== '' && !in_array(strtolower($userName), $genericNames, true)) {
             return $userName;
         }
 
         $userLogin = trim((string) ($user['login'] ?? ''));
 
-        return $userLogin !== '' ? $userLogin : 'Equipe iEvo Technology';
+        return $userLogin !== '' && !in_array(strtolower($userLogin), $genericNames, true)
+            ? $userLogin
+            : 'Equipe iEvo Technology';
     }
 
     private function resolveTechnicianIdentity(): array
@@ -5099,13 +5597,14 @@ final class ClientController
         $user = $this->resolveUser();
         $name = trim((string) ($user['name'] ?? ''));
         $login = trim((string) ($user['login'] ?? ''));
+        $genericNames = ['administrador local', 'admin local', 'administrador', 'local', 'operador', 'usuario', 'usuário', 'equipe técnica', 'equipe tecnica'];
 
-        if ($name === '' && $login !== '') {
+        if (($name === '' || in_array(strtolower($name), $genericNames, true)) && $login !== '' && !in_array(strtolower($login), $genericNames, true)) {
             $name = $login;
         }
 
-        if ($name === '') {
-            $name = 'Equipe técnica';
+        if ($name === '' || in_array(strtolower($name), $genericNames, true)) {
+            $name = 'Equipe iEvo Technology';
         }
 
         return [
