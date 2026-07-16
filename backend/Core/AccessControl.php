@@ -39,6 +39,14 @@ final class AccessControl
             'contratos' => !empty($access['can_access_contracts']),
             'financeiro' => !empty($access['can_manage_financial']),
             'usuarios', 'sistema' => !empty($access['can_manage_users']) || !empty($access['can_manage_system']),
+            'clients.view' => !empty($access['can_search_clients']),
+            'clients.create' => !empty($access['can_create_client']),
+            'clients.upgrade_request' => !empty($access['can_upgrade_request']),
+            'contracts.view' => !empty($access['can_view_contracts']),
+            'contracts.request_signature' => !empty($access['can_request_contract_signature']),
+            'contracts.resend_acceptance' => !empty($access['can_resend_contract_acceptance']),
+            'clients.upgrade_technical_complete' => !empty($access['can_complete_upgrade_technical']),
+            'clients.upgrade_commercial' => !empty($access['can_upgrade_commercial']),
             default => false,
         };
     }

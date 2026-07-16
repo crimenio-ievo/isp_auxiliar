@@ -20,9 +20,11 @@ final class MkAuthTicketService
         private ?MkAuthDatabase $mkauthDatabase = null,
         private ?string $apiToken = null,
         private ?string $clientId = null,
-        private ?string $clientSecret = null
+        private ?string $clientSecret = null,
+        private ?MkAuthWriteGuard $writeGuard = null
     ) {
         $this->baseUrl = rtrim(trim($baseUrl), '/');
+        $this->writeGuard ??= new MkAuthWriteGuard('unknown', false);
     }
 
     public function openFinancialTicket(array $payload): array
@@ -48,6 +50,8 @@ final class MkAuthTicketService
                 'duration_ms' => 0,
             ];
         }
+
+        $this->writeGuard?->assertAllowed('api POST ' . $endpoint);
 
         if ($this->baseUrl === '') {
             throw new RuntimeException('MkAuth nao configurado para abertura de chamados.');

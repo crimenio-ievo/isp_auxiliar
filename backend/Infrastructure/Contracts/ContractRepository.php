@@ -114,6 +114,20 @@ final class ContractRepository
         );
     }
 
+    public function updateUpgradeSnapshot(int $id, array $snapshot): int
+    {
+        return $this->database->execute(
+            'UPDATE client_contracts
+             SET upgrade_snapshot_json = :upgrade_snapshot_json,
+                 updated_at = NOW()
+             WHERE id = :id AND tipo_aceite = "upgrade_migracao"',
+            [
+                'id' => $id,
+                'upgrade_snapshot_json' => json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
+            ]
+        );
+    }
+
     private function normalizeData(array $data): array
     {
         return [

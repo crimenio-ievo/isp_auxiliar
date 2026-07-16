@@ -247,7 +247,7 @@ ob_start();
         <?php if ($canManageSettings): ?>
             <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=contratos'), ENT_QUOTES, 'UTF-8'); ?>">Abrir configurações</a>
         <?php endif; ?>
-        <?php if ($canManageContracts && $acceptance !== []): ?>
+        <?php if ((!empty($canManageContracts) || !empty($canResendAcceptance)) && $acceptance !== []): ?>
             <section class="integration-send-panel card" style="width: 100%; margin-top: 8px;">
                 <div class="section-heading">
                     <p class="section-heading__eyebrow">Envio do aceite ao cliente</p>

@@ -26,6 +26,7 @@ use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
+use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -133,11 +134,17 @@ function bootstrapApplication(): Application
         ]),
         $container->get(NotificationLogRepository::class)
     ));
+    $container->set(MkAuthWriteGuard::class, new MkAuthWriteGuard(
+        (string) $config->get('app.env', 'production'),
+        (bool) $config->get('app.mkauth.write_enabled', false),
+        (string) $config->get('paths.logs', $rootPath . '/logs') . '/mkauth-write-guard.log'
+    ));
     $container->set(MkAuthClient::class, new MkAuthClient(
         $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),
         $setting('mkauth_client_id', 'MKAUTH_CLIENT_ID'),
-        $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET')
+        $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET'),
+        $container->get(MkAuthWriteGuard::class)
     ));
     $container->set(MkAuthDatabase::class, new MkAuthDatabase(
         $setting('mkauth_db_host', 'MKAUTH_DB_HOST'),
@@ -146,7 +153,8 @@ function bootstrapApplication(): Application
         $setting('mkauth_db_user', 'MKAUTH_DB_USER'),
         $setting('mkauth_db_password', 'MKAUTH_DB_PASSWORD'),
         $setting('mkauth_db_charset', 'MKAUTH_DB_CHARSET', 'utf8mb4'),
-        $setting('mkauth_db_hash_algos', 'MKAUTH_DB_HASH_ALGOS', 'sha256,sha1')
+        $setting('mkauth_db_hash_algos', 'MKAUTH_DB_HASH_ALGOS', 'sha256,sha1'),
+        $container->get(MkAuthWriteGuard::class)
     ));
     $container->set(ClientPayloadMapper::class, new ClientPayloadMapper());
     $container->set(ClientProvisioner::class, new ClientProvisioner(
@@ -159,7 +167,8 @@ function bootstrapApplication(): Application
         $container->get(MkAuthDatabase::class),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),
         $setting('mkauth_client_id', 'MKAUTH_CLIENT_ID'),
-        $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET')
+        $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET'),
+        $container->get(MkAuthWriteGuard::class)
     ));
 
     $router = new Router();

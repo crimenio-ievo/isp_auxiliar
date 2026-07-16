@@ -159,7 +159,7 @@ final class ContractController
 
     public function detalhe(Request $request): Response
     {
-        if (!$this->canAccessContracts()) {
+        if (!$this->canViewContracts()) {
             Flash::set('error', 'Seu usuário não possui acesso ao detalhe de contratos.');
             return Response::redirect('/dashboard');
         }
@@ -184,6 +184,7 @@ final class ContractController
             'moduleMessage' => $state['moduleMessage'],
             'detail' => $detail,
             'canManageContracts' => $this->canManageContracts(),
+            'canResendAcceptance' => $this->canResendAcceptance(),
             'canManageFinancial' => $this->canManageFinancial(),
             'canManageSettings' => $this->canManageSettings(),
             'simulatedAcceptanceLink' => $this->buildSimulatedAcceptanceLink($detail),
@@ -264,7 +265,7 @@ final class ContractController
 
     public function enviarAceiteWhatsapp(Request $request): Response
     {
-        if (!$this->canManageContracts()) {
+        if (!$this->canResendAcceptance()) {
             Flash::set('error', 'Seu usuário não possui permissão para enviar o aceite manualmente.');
             return Response::redirect('/contratos');
         }
@@ -442,7 +443,7 @@ final class ContractController
 
     public function enviarAceiteEmail(Request $request): Response
     {
-        if (!$this->canManageContracts()) {
+        if (!$this->canResendAcceptance()) {
             Flash::set('error', 'Seu usuário não possui permissão para enviar o aceite manualmente por e-mail.');
             return Response::redirect('/contratos');
         }
@@ -1999,6 +2000,20 @@ final class ContractController
     {
         $access = $this->resolveAccessProfile();
         return $access['is_manager'] || $access['can_access_contracts'];
+    }
+
+    private function canViewContracts(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || $access['can_access_contracts'] || !empty($access['can_view_contracts']);
+    }
+
+    private function canResendAcceptance(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager']
+            || $access['can_access_contracts']
+            || !empty($access['can_resend_contract_acceptance']);
     }
 
     private function canManageFinancial(): bool

@@ -178,8 +178,9 @@ final class AcceptanceController
         }
 
         $acceptanceStatus = (string) ($acceptance['status'] ?? '');
-        $remoteSignatureRequired = $acceptanceStatus === 'assinatura_pendente';
         $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
+        $signatureRequired = $acceptanceStatus === 'assinatura_pendente';
+        $remoteSignatureRequired = $signatureRequired && $remoteSignatureReason !== '';
         $documentValidation = is_array($context['documentValidation'] ?? null) ? $context['documentValidation'] : [];
         $documentInput = preg_replace('/\D+/', '', (string) $request->input('document_prefix', '')) ?? '';
         $requiredDigits = max(1, (int) ($documentValidation['digits_required'] ?? $this->documentValidationDigits()));
@@ -222,7 +223,7 @@ final class AcceptanceController
         $signatureDataUrl = trim((string) $request->input('assinatura_cliente', ''));
         $acceptanceId = (int) $acceptance['id'];
         $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
-        if ($remoteSignatureRequired) {
+        if ($signatureRequired) {
             if ($signatureDataUrl === '') {
                 Flash::set('error', 'Desenhe a assinatura para concluir o aceite remoto.');
                 return Response::redirect('/aceite/' . rawurlencode($token));
@@ -515,13 +516,15 @@ final class AcceptanceController
 
         $user = $_SESSION['user'] ?? [];
         $userName = trim((string) ($user['name'] ?? ''));
-        if ($userName !== '') {
+        if ($userName !== '' && !in_array(strtolower($userName), $genericNames, true)) {
             return $userName;
         }
 
         $userLogin = trim((string) ($user['login'] ?? ''));
 
-        return $userLogin !== '' ? $userLogin : 'Equipe iEvo Technology';
+        return $userLogin !== '' && !in_array(strtolower($userLogin), $genericNames, true)
+            ? $userLogin
+            : 'Equipe iEvo Technology';
     }
 
     private function queueUpgradeOperationalTask(array $contract, array $acceptance, int $acceptanceId, Request $request): void

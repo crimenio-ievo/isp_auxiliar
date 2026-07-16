@@ -20,9 +20,11 @@ final class MkAuthClient
         private string $baseUrl,
         private ?string $apiToken = null,
         private ?string $clientId = null,
-        private ?string $clientSecret = null
+        private ?string $clientSecret = null,
+        private ?MkAuthWriteGuard $writeGuard = null
     ) {
         $this->baseUrl = $this->normalizeBaseUrl($baseUrl);
+        $this->writeGuard ??= new MkAuthWriteGuard('unknown', false);
     }
 
     public function isConfigured(): bool
@@ -105,6 +107,11 @@ final class MkAuthClient
 
     private function request(string $method, string $path, array $payload = [], bool $authRequired = false): array
     {
+        $method = strtoupper(trim($method));
+        if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
+            $this->writeGuard?->assertAllowed('api ' . $method . ' ' . $path);
+        }
+
         if (!$this->isConfigured()) {
             return [
                 'status' => 'simulado',

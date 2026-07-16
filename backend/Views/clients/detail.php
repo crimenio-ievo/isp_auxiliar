@@ -8,6 +8,7 @@ $detail = is_array($detail ?? null) ? $detail : [];
 $profile = is_array($detail['profile'] ?? null) ? $detail['profile'] : [];
 $contracts = is_array($detail['contracts'] ?? null) ? $detail['contracts'] : [];
 $digitalContract = is_array($detail['digitalContract'] ?? null) ? $detail['digitalContract'] : [];
+$upgradeProcess = is_array($detail['upgradeProcess'] ?? null) ? $detail['upgradeProcess'] : [];
 $acceptanceHistory = is_array($detail['acceptanceHistory'] ?? null) ? $detail['acceptanceHistory'] : [];
 $financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
 $registration = is_array($detail['registration'] ?? null) ? $detail['registration'] : [];
@@ -26,8 +27,8 @@ ob_start();
     </div>
     <div class="hero-actions">
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>">Voltar para clientes</a>
-        <?php if (!empty($canCreateClient)): ?>
-            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Upgrade / Migração</a>
+        <?php if (!empty($canRequestUpgrade)): ?>
+            <a class="button button--ghost" href="<?= !empty($upgradeProcess['exists']) ? '#upgrade-process' : htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>"><?= !empty($upgradeProcess['exists']) ? 'Retomar Upgrade / Migração' : 'Upgrade / Migração'; ?></a>
         <?php endif; ?>
         <?php if (!empty($canCreateClient)): ?>
             <a class="button" href="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>">Novo cliente</a>
@@ -96,6 +97,12 @@ ob_start();
             <strong><?= htmlspecialchars((string) ($profile['address'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
         </div>
     </div>
+
+    <?php if (($upgradeProcess['priority'] ?? 'normal') !== 'normal'): ?>
+        <div class="alert alert--<?= ($upgradeProcess['priority'] ?? '') === 'urgent' ? 'error' : 'warning'; ?>" style="margin-top: 14px;">
+            <?= htmlspecialchars((string) ($upgradeProcess['pending_label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
 </section>
 
 <section class="card">
@@ -118,7 +125,7 @@ ob_start();
             <strong><?= ((int) ($digitalContract['contract_id'] ?? 0) > 0) ? '#' . htmlspecialchars((string) $digitalContract['contract_id'], ENT_QUOTES, 'UTF-8') : '-'; ?></strong>
         </div>
     </div>
-    <?php if (!empty($canCreateClient) || !empty($canManageContracts)): ?>
+    <?php if (!empty($canRequestContractSignature)): ?>
         <div class="hero-actions" style="margin-top: 16px;">
             <form
                 method="post"
@@ -127,6 +134,8 @@ ob_start();
             >
                 <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="confirm_send" value="0" data-digital-contract-confirm-input>
+                <input type="hidden" name="signature_mode" value="remote" data-digital-contract-signature-mode-input>
+                <input type="hidden" name="remote_signature_reason" value="" data-digital-contract-reason-input>
                 <button
                     class="button button--small"
                     type="button"
@@ -188,6 +197,18 @@ ob_start();
                     <strong data-digital-contract-action>Será gerado ou reutilizado um link de aceite digital.</strong>
                 </div>
             </div>
+            <label class="field" style="margin-top: 16px;">
+                <span>Forma de assinatura</span>
+                <select data-digital-contract-signature-mode>
+                    <option value="remote">Titular não está no local / assinatura remota</option>
+                    <option value="local">Assinatura colhida no local</option>
+                </select>
+            </label>
+            <label class="field" style="margin-top: 16px;" data-digital-contract-reason-wrapper>
+                <span>Motivo da assinatura remota</span>
+                <textarea rows="3" required data-digital-contract-reason placeholder="Ex.: titular não está no local"></textarea>
+                <small class="field-help" data-digital-contract-reason-error hidden>Informe o motivo antes de enviar.</small>
+            </label>
         </div>
         <div class="contract-send-modal__footer">
             <button class="button button--ghost" type="button" data-digital-contract-cancel>Cancelar</button>
@@ -195,6 +216,79 @@ ob_start();
         </div>
     </div>
 </div>
+
+<section class="card" id="upgrade-process">
+    <div class="section-heading">
+        <p class="section-heading__eyebrow">Upgrade / Migração</p>
+        <h2>Aceite e execução técnica</h2>
+    </div>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <span>Status do processo</span>
+            <strong><?= htmlspecialchars((string) ($upgradeProcess['status_label'] ?? 'Não iniciado'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>Status contratual</span>
+            <strong><?= htmlspecialchars((string) ($upgradeProcess['contract_status_label'] ?? 'Novo aceite obrigatório'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>Status técnico</span>
+            <strong><?= htmlspecialchars((string) ($upgradeProcess['technical_status_label'] ?? 'Não iniciado'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        </div>
+        <div class="summary-item">
+            <span>Pendência atual</span>
+            <strong><?= htmlspecialchars((string) ($upgradeProcess['pending_label'] ?? 'Iniciar processo'), ENT_QUOTES, 'UTF-8'); ?></strong>
+        </div>
+    </div>
+
+    <div class="hero-actions" style="margin-top: 16px;">
+        <?php if (!empty($canRequestUpgrade) && empty($upgradeProcess['exists'])): ?>
+            <a class="button button--small" href="<?= htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Iniciar Upgrade / Migração</a>
+        <?php elseif (!empty($upgradeProcess['exists'])): ?>
+            <a class="button button--ghost button--small" href="#upgrade-checklist">Retomar</a>
+            <?php if (trim((string) ($upgradeProcess['detail_url'] ?? '')) !== ''): ?>
+                <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) $upgradeProcess['detail_url'], ENT_QUOTES, 'UTF-8'); ?>">Ver contrato</a>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+    <?php if (!empty($upgradeProcess['exists']) && !empty($canCompleteUpgradeTechnical)): ?>
+        <?php $technicalChecklist = is_array($upgradeProcess['checklist'] ?? null) ? $upgradeProcess['checklist'] : []; ?>
+        <form id="upgrade-checklist" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/execucao-tecnica'), ENT_QUOTES, 'UTF-8'); ?>" style="margin-top: 18px;">
+            <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+            <div class="form-grid">
+                <?php
+                $technicalItems = [
+                    'plan_checked' => 'Novo plano conferido no MkAuth',
+                    'technology_changed' => 'Tecnologia/equipamento alterado',
+                    'pppoe_validated' => 'Login PPPoE validado',
+                    'client_connected' => 'Cliente conectado',
+                    'speed_checked' => 'Velocidade/plano conferidos',
+                    'monthly_value_checked' => 'Valor mensal conferido',
+                ];
+                ?>
+                <?php foreach ($technicalItems as $key => $label): ?>
+                    <label class="field">
+                        <span><input type="checkbox" name="<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>" value="1" <?= !empty($technicalChecklist[$key]) ? 'checked' : ''; ?>> <?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></span>
+                    </label>
+                <?php endforeach; ?>
+                <label class="field">
+                    <span><input type="checkbox" checked disabled> Aceite do cliente concluído</span>
+                    <small class="field-help"><?= !empty($upgradeProcess['accepted']) ? 'Aceite válido confirmado.' : 'Bloqueado: aguarde a assinatura digital.'; ?></small>
+                </label>
+                <label class="field field--span-2">
+                    <span>Observação técnica</span>
+                    <textarea name="technical_observation" rows="3" placeholder="Registre ocorrências, equipamento e validações realizadas."><?= htmlspecialchars((string) ($upgradeProcess['technical_observation'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
+                </label>
+                <div class="form-actions field--span-2">
+                    <button class="button button--ghost" type="submit" name="action" value="save" <?= empty($upgradeProcess['accepted']) ? 'disabled' : ''; ?>>Salvar parcial</button>
+                    <button class="button" type="submit" name="action" value="complete" <?= empty($upgradeProcess['accepted']) ? 'disabled' : ''; ?>>Confirmar execução técnica</button>
+                </div>
+            </div>
+        </form>
+    <?php endif; ?>
+</section>
 
 <section class="card">
     <div class="section-heading">
