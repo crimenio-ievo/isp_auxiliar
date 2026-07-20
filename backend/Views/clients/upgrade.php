@@ -27,6 +27,22 @@ $observation = (string) ($context['observacao'] ?? '');
 $customerName = trim((string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? '-'));
 $customerPhone = trim((string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $contract['telefone_cliente'] ?? '-'));
 $customerDocument = trim((string) ($clientProfile['cpf_cnpj'] ?? '-'));
+$correctionOf = (int) ($correctionOf ?? 0);
+$correctionReason = trim((string) ($correctionReason ?? ''));
+$operationType = in_array((string) ($context['operation_type'] ?? ''), ['upgrade', 'migration'], true)
+    ? (string) ($context['operation_type'] ?? '')
+    : '';
+$currentPlanId = $currentPlan;
+foreach ($planOptions as $planOption) {
+    $optionId = trim((string) ($planOption['id'] ?? ''));
+    $optionName = trim((string) ($planOption['name'] ?? ''));
+    if (($optionId !== '' && strcasecmp($optionId, $currentPlan) === 0)
+        || ($optionName !== '' && strcasecmp($optionName, $currentPlan) === 0)
+    ) {
+        $currentPlanId = $optionId !== '' ? $optionId : $optionName;
+        break;
+    }
+}
 
 $technologyLabelForInstallType = static function (string $installType): string {
     return match (strtolower(trim($installType))) {
@@ -53,6 +69,13 @@ ob_start();
     </div>
 </section>
 
+<?php if ($correctionOf > 0): ?>
+    <section class="alert alert--warning" style="margin-bottom: 20px;">
+        <strong>Correção do contrato #<?= htmlspecialchars((string) $correctionOf, ENT_QUOTES, 'UTF-8'); ?></strong>
+        <p>O link anterior já está invalidado. Finalize esta revisão para criar uma nova versão e um novo aceite.</p>
+    </section>
+<?php endif; ?>
+
 <?php if (!empty($flash)): ?>
     <section class="alert <?= htmlspecialchars(($flash['type'] ?? 'success') === 'error' ? 'alert--error' : 'alert--success', ENT_QUOTES, 'UTF-8'); ?>" style="margin-bottom: 20px;">
         <?= htmlspecialchars((string) ($flash['message'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
@@ -76,8 +99,12 @@ ob_start();
     </div>
 </section>
 
-<form class="content-grid content-grid--form" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade'), ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-form="1">
+<form class="content-grid content-grid--form" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade'), ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-form="1" data-upgrade-current-plan-id="<?= htmlspecialchars($currentPlanId, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if ($correctionOf > 0): ?>
+        <input type="hidden" name="correction_of" value="<?= htmlspecialchars((string) $correctionOf, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="correction_reason" value="<?= htmlspecialchars($correctionReason, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endif; ?>
     <input type="hidden" name="valor_mensal_atual" value="<?= htmlspecialchars($currentMonthlyValue !== null ? number_format((float) $currentMonthlyValue, 2, '.', '') : '', ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-current-monthly-value>
     <input type="hidden" name="nova_tecnologia" value="<?= htmlspecialchars($newTechnology, ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-new-technology>
     <input type="hidden" name="novo_valor_mensal" value="<?= htmlspecialchars($newMonthlyValueRaw !== null ? number_format((float) $newMonthlyValueRaw, 2, '.', '') : '', ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-monthly-value>
@@ -92,6 +119,16 @@ ob_start();
         </div>
 
         <div class="form-grid">
+            <label class="field field--span-2">
+                <span>Tipo da operação</span>
+                <select name="operation_type" required data-upgrade-operation-type>
+                    <option value="" <?= $operationType === '' ? 'selected' : ''; ?>>Selecione a operação</option>
+                    <option value="upgrade" <?= $operationType === 'upgrade' ? 'selected' : ''; ?>>Upgrade de plano</option>
+                    <option value="migration" <?= $operationType === 'migration' ? 'selected' : ''; ?>>Migração de tecnologia</option>
+                </select>
+                <small class="field-help">Migração exige tecnologias diferentes; Upgrade exige plano diferente.</small>
+            </label>
+
             <label class="field">
                 <span>Plano atual</span>
                 <input type="text" name="plano_atual" value="<?= htmlspecialchars($currentPlan, ENT_QUOTES, 'UTF-8'); ?>" readonly>
@@ -111,6 +148,7 @@ ob_start();
                             data-upgrade-install-type="<?= htmlspecialchars($planInstallType, ENT_QUOTES, 'UTF-8'); ?>"
                             data-upgrade-technology="<?= htmlspecialchars($planTechnologyLabel, ENT_QUOTES, 'UTF-8'); ?>"
                             data-upgrade-monthly-value="<?= htmlspecialchars((string) ($plan['value'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                            data-upgrade-plan-name="<?= htmlspecialchars((string) ($plan['name'] ?? $planLabel), ENT_QUOTES, 'UTF-8'); ?>"
                             data-monthly-value="<?= htmlspecialchars((string) ($plan['value'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
                             <?= $selected((string) ($plan['id'] ?? $planLabel), $newPlan); ?>
                         ><?= htmlspecialchars($planLabel !== '' ? $planLabel : '-', ENT_QUOTES, 'UTF-8'); ?></option>
@@ -223,8 +261,34 @@ ob_start();
                 <small class="field-help">Obrigatório quando a assinatura for remota.</small>
             </label>
 
+            <label class="field field--span-2" data-upgrade-same-value-confirm hidden>
+                <span><input type="checkbox" name="confirm_same_value" value="1"> Confirmo que o novo plano possui o mesmo valor mensal e desejo continuar.</span>
+            </label>
+
+            <section class="soft-card field--span-2" aria-labelledby="upgrade-review-title">
+                <div class="section-heading">
+                    <p class="section-heading__eyebrow">Revisão obrigatória</p>
+                    <h2 id="upgrade-review-title">Confira antes de gerar o aceite</h2>
+                </div>
+                <div class="summary-grid">
+                    <div class="summary-item"><span>Operação</span><strong data-upgrade-review-operation>-</strong></div>
+                    <div class="summary-item"><span>Assinatura</span><strong data-upgrade-review-signature>-</strong></div>
+                    <div class="summary-item"><span>Antes — Tecnologia</span><strong><?= htmlspecialchars($currentTechnology !== '' ? $currentTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Antes — Plano</span><strong><?= htmlspecialchars($currentPlan !== '' ? $currentPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Antes — Valor</span><strong><?= htmlspecialchars($currentMonthlyValue !== null ? 'R$ ' . number_format((float) $currentMonthlyValue, 2, ',', '.') : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Depois — Tecnologia</span><strong data-upgrade-review-new-technology>-</strong></div>
+                    <div class="summary-item"><span>Depois — Plano</span><strong data-upgrade-review-new-plan>-</strong></div>
+                    <div class="summary-item"><span>Depois — Valor</span><strong data-upgrade-review-new-value>-</strong></div>
+                    <div class="summary-item"><span>Fidelidade</span><strong data-upgrade-review-fidelity>-</strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Benefício</span><strong data-upgrade-review-benefit>-</strong></div>
+                </div>
+                <label class="field" style="margin-top: 16px;">
+                    <span><input type="checkbox" name="review_confirmed" value="1" required> Confirmei que o plano, a tecnologia, o valor e as condições acima estão corretos.</span>
+                </label>
+            </section>
+
             <div class="form-actions field--span-2">
-                <button class="button" type="submit">Gerar aceite obrigatório</button>
+                <button class="button" type="submit"><?= $correctionOf > 0 ? 'Gerar nova versão e aceite' : 'Gerar aceite obrigatório'; ?></button>
                 <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Cancelar</a>
             </div>
         </div>

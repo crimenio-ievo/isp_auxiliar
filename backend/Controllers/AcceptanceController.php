@@ -13,6 +13,7 @@ use App\Core\View;
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
 use App\Infrastructure\Contracts\ContractRepository;
 use App\Infrastructure\Contracts\FinancialTaskRepository;
+use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
@@ -31,6 +32,7 @@ final class AcceptanceController
         private ContractAcceptanceRepository $acceptanceRepository,
         private ContractRepository $contractRepository,
         private FinancialTaskRepository $financialTaskRepository,
+        private Database $database,
         private LocalRepository $localRepository,
         private MkAuthClient $mkauthClient,
         private MkAuthDatabase $mkauthDatabase
@@ -78,6 +80,11 @@ final class AcceptanceController
         $token = trim((string) $request->route('token', ''));
         $context = $this->loadContextByToken($token);
         $acceptance = is_array($context['acceptance'] ?? null) ? $context['acceptance'] : [];
+
+        if (!empty($context['error'])) {
+            Flash::set('error', (string) $context['error']);
+            return Response::redirect('/aceite/' . rawurlencode($token));
+        }
 
         if (($acceptance['status'] ?? '') !== 'aceito') {
             Flash::set('error', 'O termo assinado fica disponível após a confirmação do aceite.');
@@ -222,19 +229,51 @@ final class AcceptanceController
 
         $signatureDataUrl = trim((string) $request->input('assinatura_cliente', ''));
         $acceptanceId = (int) $acceptance['id'];
-        $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
-        if ($signatureRequired) {
-            if ($signatureDataUrl === '') {
-                Flash::set('error', 'Desenhe a assinatura para concluir o aceite remoto.');
-                return Response::redirect('/aceite/' . rawurlencode($token));
+        if ($signatureRequired && $signatureDataUrl === '') {
+            Flash::set('error', 'Desenhe a assinatura para concluir o aceite remoto.');
+            return Response::redirect('/aceite/' . rawurlencode($token));
+        }
+
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
             }
 
-            $signaturePath = $this->saveSignatureFile($acceptanceId, $signatureDataUrl);
-            if ($signaturePath === null) {
-                Flash::set('error', 'A assinatura informada nao pôde ser salva.');
-                return Response::redirect('/aceite/' . rawurlencode($token));
+            $contract = $this->database->fetchOne(
+                'SELECT * FROM client_contracts WHERE id = :id FOR UPDATE',
+                ['id' => (int) ($contract['id'] ?? 0)]
+            );
+            $acceptance = $this->database->fetchOne(
+                'SELECT * FROM contract_acceptances WHERE id = :id AND contract_id = :contract_id FOR UPDATE',
+                ['id' => $acceptanceId, 'contract_id' => (int) ($contract['id'] ?? 0)]
+            );
+
+            if (!is_array($contract)
+                || !is_array($acceptance)
+                || (string) ($contract['lifecycle_status'] ?? 'active') !== 'active'
+                || trim((string) ($acceptance['revoked_at'] ?? '')) !== ''
+                || !in_array((string) ($acceptance['status'] ?? ''), ['criado', 'enviado', 'assinatura_pendente'], true)
+            ) {
+                throw new \RuntimeException('Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.');
             }
-        }
+
+            $acceptanceStatus = (string) ($acceptance['status'] ?? '');
+            $signatureRequired = $acceptanceStatus === 'assinatura_pendente';
+            $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
+            $remoteSignatureRequired = $signatureRequired && $remoteSignatureReason !== '';
+            if ($signatureRequired && $signatureDataUrl === '') {
+                throw new \RuntimeException('Desenhe a assinatura para concluir o aceite remoto.');
+            }
+
+            $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
+            if ($signatureRequired) {
+                $signaturePath = $this->saveSignatureFile($acceptanceId, $signatureDataUrl);
+                if ($signaturePath === null) {
+                    throw new \RuntimeException('A assinatura informada nao pôde ser salva.');
+                }
+            }
 
         $validationMatched = null;
         $validationResult = $documentAvailable ? 'not_required' : 'not_possible';
@@ -319,7 +358,9 @@ final class AcceptanceController
             'evidence_json_path' => $evidencePath,
         ]);
 
-        $this->acceptanceRepository->updateById($acceptanceId, $updateData);
+        if ($this->acceptanceRepository->updateById($acceptanceId, $updateData) !== 1) {
+            throw new \RuntimeException('O aceite foi cancelado ou alterado durante a confirmação.');
+        }
         $this->localRepository->log(
             null,
             (string) ($contract['mkauth_login'] ?? ''),
@@ -337,6 +378,18 @@ final class AcceptanceController
 
         if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
             $this->queueUpgradeOperationalTask($contract, $acceptance, $acceptanceId, $request);
+        }
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            Flash::set('error', $exception->getMessage());
+            return Response::redirect('/aceite/' . rawurlencode($token));
         }
 
         Flash::set('success', 'Termos aceitos com sucesso.');
@@ -362,6 +415,19 @@ final class AcceptanceController
 
         if (!is_array($contract)) {
             return ['error' => 'Contrato vinculado nao encontrado.'];
+        }
+
+        $lifecycleStatus = (string) ($contract['lifecycle_status'] ?? 'active');
+        if ($lifecycleStatus !== 'active'
+            || trim((string) ($acceptance['revoked_at'] ?? '')) !== ''
+            || (string) ($acceptance['status'] ?? '') === 'cancelado'
+        ) {
+            return [
+                'error' => 'Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.',
+                'unavailableReason' => 'cancelled_or_superseded',
+                'acceptance' => $acceptance,
+                'contract' => $contract,
+            ];
         }
 
         $status = (string) ($acceptance['status'] ?? '');
@@ -535,8 +601,8 @@ final class AcceptanceController
         }
 
         $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
-        $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
-        $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
+        $currentPlan = trim((string) ($upgradeSnapshot['current_plan_name'] ?? $upgradeSnapshot['current_plan'] ?? ''));
+        $newPlan = trim((string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ''));
         $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
         $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
         $originalContractReference = trim((string) ($upgradeSnapshot['original_contract_reference'] ?? ''));
@@ -915,9 +981,9 @@ final class AcceptanceController
         }
 
         if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
-            $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
+            $currentPlan = trim((string) ($upgradeSnapshot['current_plan_name'] ?? $upgradeSnapshot['current_plan'] ?? ''));
             $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
-            $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
+            $newPlan = trim((string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ''));
             $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
             $originalContractReference = trim((string) ($upgradeSnapshot['original_contract_reference'] ?? ''));
             $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);
@@ -1028,8 +1094,9 @@ final class AcceptanceController
     private function normalizeUpgradeSnapshotForDisplay(array $upgradeSnapshot): array
     {
         return [
-            'current_plan' => (string) ($upgradeSnapshot['current_plan'] ?? ''),
-            'new_plan' => (string) ($upgradeSnapshot['new_plan'] ?? ''),
+            'operation_type' => (string) ($upgradeSnapshot['operation_type'] ?? 'upgrade'),
+            'current_plan' => (string) ($upgradeSnapshot['current_plan_name'] ?? $upgradeSnapshot['current_plan'] ?? ''),
+            'new_plan' => (string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ''),
             'current_technology' => (string) ($upgradeSnapshot['current_technology'] ?? ''),
             'new_technology' => (string) ($upgradeSnapshot['new_technology'] ?? ''),
             'benefit_flags' => $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null),
@@ -1205,7 +1272,7 @@ final class AcceptanceController
             ],
             'plano' => [
                 'nome' => $isUpgrade
-                    ? (string) ($upgradeSnapshot['new_plan'] ?? ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'))
+                    ? (string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'))
                     : (string) ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'),
                 'valor_mensal' => $isUpgrade
                     ? (($upgradeSnapshot['new_monthly_value'] ?? null) !== null ? (float) $upgradeSnapshot['new_monthly_value'] : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null))

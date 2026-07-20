@@ -22,9 +22,9 @@ final class ContractAcceptanceRepository
     {
         $this->database->execute(
             'INSERT INTO contract_acceptances
-                (contract_id, technician_name, technician_login, token_hash, token_expires_at, status, telefone_enviado, remote_signature_reason, whatsapp_message_id, sent_at, accepted_at, ip_address, user_agent, termo_versao, termo_hash, pdf_path, evidence_json_path, created_at, updated_at)
+                (contract_id, technician_name, technician_login, token_hash, token_expires_at, status, telefone_enviado, remote_signature_reason, whatsapp_message_id, sent_at, accepted_at, revoked_at, revoked_by_user_id, revoked_by_login, revocation_reason, ip_address, user_agent, termo_versao, termo_hash, pdf_path, evidence_json_path, created_at, updated_at)
              VALUES
-                (:contract_id, :technician_name, :technician_login, :token_hash, :token_expires_at, :status, :telefone_enviado, :remote_signature_reason, :whatsapp_message_id, :sent_at, :accepted_at, :ip_address, :user_agent, :termo_versao, :termo_hash, :pdf_path, :evidence_json_path, NOW(), NOW())',
+                (:contract_id, :technician_name, :technician_login, :token_hash, :token_expires_at, :status, :telefone_enviado, :remote_signature_reason, :whatsapp_message_id, :sent_at, :accepted_at, :revoked_at, :revoked_by_user_id, :revoked_by_login, :revocation_reason, :ip_address, :user_agent, :termo_versao, :termo_hash, :pdf_path, :evidence_json_path, NOW(), NOW())',
             $this->normalizeData($data)
         );
 
@@ -70,6 +70,10 @@ final class ContractAcceptanceRepository
                  whatsapp_message_id = :whatsapp_message_id,
                  sent_at = :sent_at,
                  accepted_at = :accepted_at,
+                 revoked_at = :revoked_at,
+                 revoked_by_user_id = :revoked_by_user_id,
+                 revoked_by_login = :revoked_by_login,
+                 revocation_reason = :revocation_reason,
                  ip_address = :ip_address,
                  user_agent = :user_agent,
                  termo_versao = :termo_versao,
@@ -77,7 +81,8 @@ final class ContractAcceptanceRepository
                  pdf_path = :pdf_path,
                  evidence_json_path = :evidence_json_path,
                  updated_at = NOW()
-             WHERE id = :id',
+             WHERE id = :id
+               AND revoked_at IS NULL',
             array_merge(['id' => $id], $this->normalizeData($data))
         );
     }
@@ -112,7 +117,9 @@ final class ContractAcceptanceRepository
                  whatsapp_message_id = :whatsapp_message_id,
                  sent_at = :sent_at,
                  updated_at = NOW()
-             WHERE id = :id',
+             WHERE id = :id
+               AND revoked_at IS NULL
+               AND status <> "cancelado"',
             [
                 'id' => $id,
                 'whatsapp_message_id' => $whatsappMessageId !== null ? trim($whatsappMessageId) : null,
@@ -134,7 +141,9 @@ final class ContractAcceptanceRepository
                  ip_address = :ip_address,
                  user_agent = :user_agent,
                  updated_at = NOW()
-             WHERE id = :id',
+             WHERE id = :id
+               AND revoked_at IS NULL
+               AND status IN ("criado", "enviado", "assinatura_pendente")',
             [
                 'id' => $id,
                 'accepted_at' => $acceptedAt !== null && trim($acceptedAt) !== '' ? $acceptedAt : date('Y-m-d H:i:s'),
@@ -160,6 +169,27 @@ final class ContractAcceptanceRepository
         );
     }
 
+    public function revoke(int $id, string $reason, ?int $userId, string $userLogin, bool $preserveAccepted = true): int
+    {
+        return $this->database->execute(
+            'UPDATE contract_acceptances
+             SET status = CASE WHEN :preserve_accepted = 1 AND status = "aceito" THEN status ELSE "cancelado" END,
+                 revoked_at = NOW(),
+                 revoked_by_user_id = :revoked_by_user_id,
+                 revoked_by_login = :revoked_by_login,
+                 revocation_reason = :revocation_reason,
+                 updated_at = NOW()
+             WHERE id = :id',
+            [
+                'id' => $id,
+                'preserve_accepted' => $preserveAccepted ? 1 : 0,
+                'revoked_by_user_id' => $userId,
+                'revoked_by_login' => trim($userLogin) !== '' ? trim($userLogin) : null,
+                'revocation_reason' => trim($reason),
+            ]
+        );
+    }
+
     private function normalizeData(array $data): array
     {
         return [
@@ -174,6 +204,10 @@ final class ContractAcceptanceRepository
             'whatsapp_message_id' => $data['whatsapp_message_id'] ?? null,
             'sent_at' => $data['sent_at'] ?? null,
             'accepted_at' => $data['accepted_at'] ?? null,
+            'revoked_at' => $data['revoked_at'] ?? null,
+            'revoked_by_user_id' => isset($data['revoked_by_user_id']) && (int) $data['revoked_by_user_id'] > 0 ? (int) $data['revoked_by_user_id'] : null,
+            'revoked_by_login' => $this->normalizeNullableString($data['revoked_by_login'] ?? null),
+            'revocation_reason' => $this->normalizeNullableString($data['revocation_reason'] ?? null),
             'ip_address' => $data['ip_address'] ?? null,
             'user_agent' => $data['user_agent'] ?? null,
             'termo_versao' => (string) ($data['termo_versao'] ?? ''),
