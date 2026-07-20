@@ -187,6 +187,9 @@ final class ContractController
             'canResendAcceptance' => $this->canResendAcceptance(),
             'canManageFinancial' => $this->canManageFinancial(),
             'canManageSettings' => $this->canManageSettings(),
+            'canCorrectUpgrade' => $this->canCorrectUpgrade(),
+            'canCancelPendingContract' => $this->canCancelPendingContract(),
+            'canSupersedeContract' => $this->canSupersedeContract(),
             'simulatedAcceptanceLink' => $this->buildSimulatedAcceptanceLink($detail),
             'integrationStatus' => $this->buildIntegrationStatus($detail),
         ]);
@@ -290,6 +293,11 @@ final class ContractController
         $emailCandidate = $this->resolveAcceptanceEmailRecipient($contract, '', false);
         $realEmailAvailable = $emailCandidate['has_real_email'];
         $acceptanceStatus = trim((string) ($acceptance['status'] ?? 'criado'));
+
+        if (!$this->isAcceptanceVersionActive($contract, $acceptance)) {
+            Flash::set('error', 'Este aceite foi cancelado ou substituído e não pode ser reenviado.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
 
         if ($acceptanceId <= 0 || $recipientPhone === '') {
             Flash::set('error', 'O contrato ainda nao possui aceite preparado com telefone de envio.');
@@ -469,6 +477,11 @@ final class ContractController
         $testRecipient = trim((string) ($emailConfig['test_to'] ?? ''));
         $allowOnlyTest = (bool) ($emailConfig['allow_only_test_email'] ?? true);
         $acceptanceStatus = trim((string) ($acceptance['status'] ?? 'criado'));
+
+        if (!$this->isAcceptanceVersionActive($contract, $acceptance)) {
+            Flash::set('error', 'Este aceite foi cancelado ou substituído e não pode ser reenviado.');
+            return Response::redirect($returnTo !== '' ? $returnTo : '/contratos');
+        }
 
         if ($acceptanceId <= 0 || ($recipient === '' && !($allowOnlyTest && $testRecipient !== ''))) {
             Flash::set('error', 'Este contrato ainda nao possui aceite preparado com e-mail disponivel para envio.');
@@ -1028,7 +1041,11 @@ final class ContractController
 
         $limit = max(1, min(50, $limit));
         $filters = $this->normalizeListFiltersFromArray($filters);
-        $conditions = ['a.status IN ("criado", "enviado", "assinatura_pendente", "expirado")'];
+        $conditions = [
+            'a.status IN ("criado", "enviado", "assinatura_pendente", "expirado")',
+            'a.revoked_at IS NULL',
+            'c.lifecycle_status = "active"',
+        ];
         $params = [];
 
         if ($filters['financeiro'] !== '') {
@@ -2012,8 +2029,32 @@ final class ContractController
     {
         $access = $this->resolveAccessProfile();
         return $access['is_manager']
-            || $access['can_access_contracts']
             || !empty($access['can_resend_contract_acceptance']);
+    }
+
+    private function canCorrectUpgrade(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || !empty($access['can_upgrade_correct']);
+    }
+
+    private function canCancelPendingContract(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || !empty($access['can_cancel_pending_contracts']);
+    }
+
+    private function canSupersedeContract(): bool
+    {
+        $access = $this->resolveAccessProfile();
+        return $access['is_manager'] || !empty($access['can_supersede_contracts']);
+    }
+
+    private function isAcceptanceVersionActive(array $contract, array $acceptance): bool
+    {
+        return (string) ($contract['lifecycle_status'] ?? 'active') === 'active'
+            && trim((string) ($acceptance['revoked_at'] ?? '')) === ''
+            && !in_array((string) ($acceptance['status'] ?? ''), ['cancelado', 'expirado'], true);
     }
 
     private function canManageFinancial(): bool

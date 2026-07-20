@@ -75,10 +75,17 @@ $digitalSummary = $digitalPlan !== '' && $digitalPlan !== '-'
     : 'Assinatura do contrato digital vigente.';
 $hideFooter = $isAccepted;
 $alreadyAcceptedView = $isAccepted && empty($successMessage);
+$isUnavailable = (string) ($context['unavailableReason'] ?? '') === 'cancelled_or_superseded';
 
 ob_start();
 ?>
-<?php if ($isAccepted): ?>
+<?php if ($isUnavailable): ?>
+<section class="acceptance-success-screen">
+    <article class="card acceptance-success-card">
+        <p class="page-description">Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.</p>
+    </article>
+</section>
+<?php elseif ($isAccepted): ?>
 <section class="acceptance-success-screen">
     <article class="card acceptance-success-card">
         <div class="acceptance-success-card__icon" aria-hidden="true">✓</div>

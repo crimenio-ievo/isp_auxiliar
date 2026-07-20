@@ -47,6 +47,9 @@ final class AccessControl
             'contracts.resend_acceptance' => !empty($access['can_resend_contract_acceptance']),
             'clients.upgrade_technical_complete' => !empty($access['can_complete_upgrade_technical']),
             'clients.upgrade_commercial' => !empty($access['can_upgrade_commercial']),
+            'clients.upgrade_correct' => !empty($access['can_upgrade_correct']),
+            'contracts.cancel_pending' => !empty($access['can_cancel_pending_contracts']),
+            'contracts.supersede' => !empty($access['can_supersede_contracts']),
             default => false,
         };
     }

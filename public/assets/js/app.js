@@ -1860,6 +1860,23 @@ if (upgradeForm) {
     const benefitOtherTextInput = upgradeForm.querySelector('[data-upgrade-benefit-other-text]');
     const benefitOtherTextValueInput = upgradeForm.querySelector('[data-upgrade-benefit-other-text-value]');
     const benefitCheckboxes = Array.from(upgradeForm.querySelectorAll('[data-upgrade-benefit-checkbox]'));
+    const operationTypeSelect = upgradeForm.querySelector('[data-upgrade-operation-type]');
+    const signatureModeSelect = upgradeForm.querySelector('select[name="signature_mode"]');
+    const sameValueConfirm = upgradeForm.querySelector('[data-upgrade-same-value-confirm]');
+    const reviewOperation = upgradeForm.querySelector('[data-upgrade-review-operation]');
+    const reviewSignature = upgradeForm.querySelector('[data-upgrade-review-signature]');
+    const reviewNewTechnology = upgradeForm.querySelector('[data-upgrade-review-new-technology]');
+    const reviewNewPlan = upgradeForm.querySelector('[data-upgrade-review-new-plan]');
+    const reviewNewValue = upgradeForm.querySelector('[data-upgrade-review-new-value]');
+    const reviewFidelity = upgradeForm.querySelector('[data-upgrade-review-fidelity]');
+    const reviewBenefit = upgradeForm.querySelector('[data-upgrade-review-benefit]');
+    const reviewConfirmedInput = upgradeForm.querySelector('input[name="review_confirmed"]');
+
+    const markReviewDirty = () => {
+        if (reviewConfirmedInput instanceof HTMLInputElement) {
+            reviewConfirmedInput.checked = false;
+        }
+    };
 
     const normalizeTechnologyFamily = (value) => {
         const text = String(value || '').trim().toLowerCase();
@@ -1873,7 +1890,7 @@ if (upgradeForm) {
     };
 
     const currentTechnologyFamily = () => {
-        const fromField = normalizeTechnologyFamily(currentTechnologyFamilyInput?.value || '');
+        const fromField = normalizeTechnologyFamily(currentTechnologyFamilyInput?.dataset?.upgradeCurrentTechnologyFamily || '');
         if (fromField) {
             return fromField;
         }
@@ -1993,7 +2010,7 @@ if (upgradeForm) {
         const currentMonthly = readCurrentMonthlyValue();
         const newMonthly = parseMoneyFieldValue(monthlyValue);
         const selectedPlan = String(planSelect.value || '').trim();
-        const currentPlan = String(upgradeForm.querySelector('input[name="plano_atual"]')?.value || '').trim();
+        const currentPlan = String(upgradeForm.dataset.upgradeCurrentPlanId || upgradeForm.querySelector('input[name="plano_atual"]')?.value || '').trim();
         const newFamily = normalizeTechnologyFamily(selectedTechnology);
         const movingFromRadioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
         const isRetention = selectedPlan !== '' && selectedPlan !== currentPlan && newMonthly > 0 && currentMonthly > 0 && newMonthly < currentMonthly && !movingFromRadioToFiber;
@@ -2072,20 +2089,79 @@ if (upgradeForm) {
             benefitValueInput.value = formatMoneyFieldValue(1200);
         }
 
-        if (fidelityInput) {
+        if (fidelityInput && !String(fidelityInput.value || '').trim()) {
             fidelityInput.value = '12';
         }
 
         renderBenefitSummary(formattedMonthly ? `R$ ${formattedMonthly}` : '', benefitDescription);
+
+        if (sameValueConfirm) {
+            sameValueConfirm.hidden = String(operationTypeSelect?.value || '') !== 'upgrade' || Math.abs(currentMonthly - newMonthly) >= 0.005;
+            const checkbox = sameValueConfirm.querySelector('input[name="confirm_same_value"]');
+            if (checkbox && sameValueConfirm.hidden) {
+                checkbox.checked = false;
+            }
+        }
+
+        if (reviewOperation) {
+            const operationType = String(operationTypeSelect?.value || '');
+            reviewOperation.textContent = operationType === 'migration'
+                ? 'Migração de tecnologia'
+                : (operationType === 'upgrade' ? 'Upgrade de plano' : 'Selecione a operação');
+        }
+        if (reviewSignature) {
+            reviewSignature.textContent = String(signatureModeSelect?.value || '') === 'local' ? 'Local' : 'Remota';
+        }
+        if (reviewNewTechnology) {
+            reviewNewTechnology.textContent = selectedTechnology || '-';
+        }
+        if (reviewNewPlan) {
+            reviewNewPlan.textContent = String(selectedOption?.dataset.upgradePlanName || selectedOption?.textContent || '-').trim();
+        }
+        if (reviewNewValue) {
+            reviewNewValue.textContent = `R$ ${formattedMonthly}`;
+        }
+        if (reviewFidelity) {
+            reviewFidelity.textContent = `${String(fidelityInput?.value || '0')} meses`;
+        }
+        if (reviewBenefit) {
+            reviewBenefit.textContent = benefitDescription || '-';
+        }
     };
 
     if (planSelect) {
-        planSelect.addEventListener('change', applyUpgradeDefaults);
+        planSelect.addEventListener('change', () => {
+            planSelect.setCustomValidity('');
+            markReviewDirty();
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (operationTypeSelect) {
+        operationTypeSelect.addEventListener('change', () => {
+            markReviewDirty();
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (signatureModeSelect) {
+        signatureModeSelect.addEventListener('change', () => {
+            markReviewDirty();
+            applyUpgradeDefaults();
+        });
+    }
+
+    if (fidelityInput) {
+        fidelityInput.addEventListener('input', () => {
+            markReviewDirty();
+            applyUpgradeDefaults();
+        });
     }
 
     for (const checkbox of benefitCheckboxes) {
         checkbox.addEventListener('change', () => {
             checkbox.dataset.manualTouched = '1';
+            markReviewDirty();
             if (checkbox.dataset.upgradeBenefitCheckbox === 'other_benefit' && benefitOtherWrapper) {
                 benefitOtherWrapper.hidden = !checkbox.checked;
             }
@@ -2099,6 +2175,7 @@ if (upgradeForm) {
                 benefitOtherTextValueInput.value = String(benefitOtherTextInput.value || '').trim();
             }
             benefitOtherTextInput.dataset.manualTouched = '1';
+            markReviewDirty();
             applyUpgradeDefaults();
         });
     }
@@ -2106,10 +2183,84 @@ if (upgradeForm) {
     if (benefitValueInput) {
         benefitValueInput.addEventListener('input', () => {
             benefitValueInput.dataset.manualTouched = '1';
+            markReviewDirty();
         });
     }
 
+    upgradeForm.addEventListener('submit', (event) => {
+        const selectedOption = planSelect?.selectedOptions?.[0] || null;
+        const operationType = String(operationTypeSelect?.value || '');
+        const currentFamily = currentTechnologyFamily();
+        const newFamily = normalizeTechnologyFamily(String(selectedOption?.dataset.upgradeTechnology || ''))
+            || normalizeTechnologyFamily(String(selectedOption?.dataset.upgradeInstallType || ''));
+        const currentPlanId = String(upgradeForm.dataset.upgradeCurrentPlanId || '').trim().toLowerCase();
+        const newPlanId = String(planSelect?.value || '').trim().toLowerCase();
+        let message = '';
+
+        if (operationType === 'migration' && currentFamily && newFamily && currentFamily === newFamily) {
+            message = 'Migração exige tecnologias diferentes. Para manter a mesma tecnologia, use Upgrade.';
+        } else if (operationType === 'upgrade' && currentPlanId && newPlanId && currentPlanId === newPlanId) {
+            message = 'Upgrade exige um plano novo diferente do plano atual.';
+        }
+
+        if (message) {
+            event.preventDefault();
+            planSelect?.setCustomValidity(message);
+            planSelect?.reportValidity();
+            return;
+        }
+
+        planSelect?.setCustomValidity('');
+    });
+
     applyUpgradeDefaults();
+}
+
+const upgradeActionModals = Array.from(document.querySelectorAll('[data-upgrade-action-modal]'));
+
+if (upgradeActionModals.length > 0) {
+    const closeUpgradeActionModal = (modal) => {
+        if (!(modal instanceof HTMLElement)) {
+            return;
+        }
+
+        modal.hidden = true;
+    };
+
+    for (const opener of document.querySelectorAll('[data-upgrade-action-open]')) {
+        opener.addEventListener('click', () => {
+            const targetId = String(opener.getAttribute('data-upgrade-action-open') || '').trim();
+            const modal = targetId ? document.getElementById(targetId) : null;
+            if (!(modal instanceof HTMLElement)) {
+                return;
+            }
+
+            modal.hidden = false;
+            window.setTimeout(() => modal.querySelector('[data-upgrade-action-reason]')?.focus(), 0);
+        });
+    }
+
+    for (const modal of upgradeActionModals) {
+        for (const closer of modal.querySelectorAll('[data-upgrade-action-close]')) {
+            closer.addEventListener('click', () => closeUpgradeActionModal(modal));
+        }
+
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeUpgradeActionModal(modal);
+            }
+        });
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+
+        for (const modal of upgradeActionModals) {
+            closeUpgradeActionModal(modal);
+        }
+    });
 }
 
 const addressNumberInput = document.querySelector('[data-address-number-input]');

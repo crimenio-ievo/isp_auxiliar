@@ -45,6 +45,8 @@ return static function (Router $router): void {
     $router->get('/clientes/detalhe', [ClientController::class, 'detail'], 'clients.detail');
     $router->get('/clientes/upgrade', [ClientController::class, 'upgrade'], 'clients.upgrade');
     $router->post('/clientes/upgrade', [ClientController::class, 'storeUpgrade'], 'clients.upgrade.store');
+    $router->post('/clientes/upgrade/cancelar', [ClientController::class, 'cancelUpgradeRequest'], 'clients.upgrade.cancel');
+    $router->post('/clientes/upgrade/corrigir', [ClientController::class, 'startUpgradeCorrection'], 'clients.upgrade.correct');
     $router->post('/clientes/upgrade/execucao-tecnica', [ClientController::class, 'storeUpgradeTechnicalExecution'], 'clients.upgrade.technical.store');
     $router->post('/clientes/contrato/solicitar', [ClientController::class, 'requestDigitalContractSignature'], 'clients.contract.request');
     $router->get('/clientes/novo', [ClientController::class, 'create'], 'clients.create');

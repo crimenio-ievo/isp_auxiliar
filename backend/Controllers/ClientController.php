@@ -246,6 +246,9 @@ final class ClientController
             'canRequestUpgrade' => $this->canRequestUpgrade(),
             'canRequestContractSignature' => $this->canRequestContractSignature(),
             'canCompleteUpgradeTechnical' => $this->canCompleteUpgradeTechnical(),
+            'canCorrectUpgrade' => $this->canCorrectUpgrade(),
+            'canCancelPendingContract' => $this->canCancelPendingContract(),
+            'canSupersedeContract' => $this->canSupersedeContract(),
         ]);
 
         return Response::html($html);
@@ -265,7 +268,20 @@ final class ClientController
             return Response::redirect('/clientes');
         }
 
-        if ($this->hasOpenUpgradeProcess($login)) {
+        $correctionOf = (int) $request->query('correction_of', $request->input('correction_of', 0));
+        $correctionContract = $correctionOf > 0 ? $this->loadCorrectableUpgrade($correctionOf, $login) : null;
+
+        if ($correctionOf > 0 && !is_array($correctionContract)) {
+            Flash::set('error', 'A correção informada não está disponível ou não pertence a este cliente.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if ($correctionOf > 0 && !$this->canCorrectUpgradeContract($correctionContract)) {
+            Flash::set('error', 'Seu usuário não possui permissão para corrigir este Upgrade / Migração.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if ($correctionOf <= 0 && $this->hasOpenUpgradeProcess($login)) {
             Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. Retome o processo existente.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
         }
@@ -274,6 +290,10 @@ final class ClientController
         if ($context === null) {
             Flash::set('error', 'Nao foi possivel localizar o cliente para upgrade.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if (is_array($correctionContract)) {
+            $context = $this->applyCorrectionContext($context, $correctionContract);
         }
 
         $html = $this->view->render('clients/upgrade', [
@@ -288,6 +308,8 @@ final class ClientController
             'canSearchClients' => $this->canSearchClients(),
             'canUpgradeCommercial' => $this->canUpgradeCommercial(),
             'currentLogin' => $login,
+            'correctionOf' => $correctionOf,
+            'correctionReason' => is_array($correctionContract) ? (string) ($correctionContract['cancellation_reason'] ?? '') : '',
         ]);
 
         return Response::html($html);
@@ -307,7 +329,21 @@ final class ClientController
         }
 
 
-        if ($this->hasOpenUpgradeProcess($login)) {
+        $correctionOf = (int) $request->input('correction_of', 0);
+        $correctionReason = trim((string) $request->input('correction_reason', ''));
+        $correctionContract = $correctionOf > 0 ? $this->loadCorrectableUpgrade($correctionOf, $login) : null;
+
+        if ($correctionOf > 0 && (!is_array($correctionContract) || !$this->canCorrectUpgradeContract($correctionContract))) {
+            Flash::set('error', 'A correção informada não está disponível para este usuário.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if ($correctionOf > 0 && $correctionReason === '') {
+            Flash::set('error', 'Informe o motivo da correção antes de gerar a nova versão.');
+            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login) . '&correction_of=' . $correctionOf);
+        }
+
+        if ($correctionOf <= 0 && $this->hasOpenUpgradeProcess($login)) {
             Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. Retome o processo existente.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
         }
@@ -318,19 +354,106 @@ final class ClientController
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
+        if (is_array($correctionContract)) {
+            $context = $this->applyCorrectionContext($context, $correctionContract);
+        }
+
         $data = $this->collectUpgradeFormData($request, $context);
         $errors = $this->validateUpgrade($data, $context);
 
         if ($errors !== []) {
             Flash::set('error', implode(' ', $errors));
-            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login));
+            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login) . ($correctionOf > 0 ? '&correction_of=' . $correctionOf : ''));
+        }
+
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        $upgradeLockName = 'isp_aux:upgrade:' . sha1(strtolower($login));
+        $upgradeLockAcquired = false;
+        try {
+            $lockResult = $this->database->fetchOne(
+                'SELECT GET_LOCK(:lock_name, 5) AS acquired',
+                ['lock_name' => $upgradeLockName]
+            );
+            $upgradeLockAcquired = (int) ($lockResult['acquired'] ?? 0) === 1;
+            if (!$upgradeLockAcquired) {
+                throw new \RuntimeException('Outro operador está alterando este Upgrade / Migração. Tente novamente em alguns instantes.');
+            }
+
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+
+            $this->assertUpgradeCreationAllowed($login, $correctionOf);
+            $result = $this->syncUpgradeContractArtifacts($data, $context, $request, false, $correctionContract);
+            if (is_array($correctionContract)) {
+                $operator = $this->resolveUser();
+                $oldAcceptance = $this->contractAcceptanceRepository->findLatestByContractId($correctionOf);
+                if (is_array($oldAcceptance) && (int) ($oldAcceptance['id'] ?? 0) > 0
+                    && trim((string) ($oldAcceptance['revoked_at'] ?? '')) === ''
+                ) {
+                    $this->contractAcceptanceRepository->revoke(
+                        (int) $oldAcceptance['id'],
+                        $correctionReason,
+                        isset($operator['id']) ? (int) $operator['id'] : null,
+                        (string) ($operator['login'] ?? ''),
+                        true
+                    );
+                }
+                $oldTask = $this->financialTaskRepository->findByContractId($correctionOf);
+                if (is_array($oldTask) && (int) ($oldTask['id'] ?? 0) > 0
+                    && (string) ($oldTask['status'] ?? '') !== 'concluido'
+                ) {
+                    $this->financialTaskRepository->updateStatus((int) $oldTask['id'], 'cancelado');
+                }
+                $this->contractRepository->markLifecycle(
+                    $correctionOf,
+                    'superseded',
+                    $correctionReason,
+                    isset($operator['id']) ? (int) $operator['id'] : null,
+                    (string) ($operator['login'] ?? ''),
+                    (int) ($result['contract_id'] ?? 0)
+                );
+                $this->recordAudit('contract.upgrade.superseded', 'client_contract', $correctionOf, [
+                    'login' => $login,
+                    'previous_contract_id' => $correctionOf,
+                    'new_contract_id' => (int) ($result['contract_id'] ?? 0),
+                    'reason' => $correctionReason,
+                    'operator_id' => isset($operator['id']) ? (int) $operator['id'] : null,
+                    'operator_login' => (string) ($operator['login'] ?? ''),
+                    'operator_name' => (string) ($operator['name'] ?? ''),
+                    'before' => $this->extractUpgradeSnapshot($correctionContract),
+                    'after' => $this->extractUpgradeSnapshot((array) ($result['contract'] ?? [])),
+                ], $request);
+            }
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+            $this->database->fetchOne('SELECT RELEASE_LOCK(:lock_name) AS released', ['lock_name' => $upgradeLockName]);
+            $upgradeLockAcquired = false;
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($upgradeLockAcquired) {
+                try {
+                    $this->database->fetchOne('SELECT RELEASE_LOCK(:lock_name) AS released', ['lock_name' => $upgradeLockName]);
+                } catch (\Throwable) {
+                }
+            }
+            Flash::set('error', 'Nao foi possivel concluir o upgrade agora: ' . $exception->getMessage());
+            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login) . ($correctionOf > 0 ? '&correction_of=' . $correctionOf : ''));
         }
 
         try {
-            $result = $this->syncUpgradeContractArtifacts($data, $context, $request);
+            $this->dispatchUpgradeAcceptanceAfterCommit($result, $request);
         } catch (\Throwable $exception) {
-            Flash::set('error', 'Nao foi possivel concluir o upgrade agora: ' . $exception->getMessage());
-            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login));
+            $this->recordAudit('contract.upgrade.dispatch_failed', 'contract_acceptance', (int) ($result['acceptance_id'] ?? 0), [
+                'contract_id' => (int) ($result['contract_id'] ?? 0),
+                'error' => $exception->getMessage(),
+                'requeue_required' => true,
+            ], $request);
         }
 
         if (($result['signature_mode'] ?? 'remote') === 'local' && trim((string) ($result['token'] ?? '')) !== '') {
@@ -338,9 +461,86 @@ final class ClientController
             return Response::redirect('/aceite/' . rawurlencode((string) $result['token']));
         }
 
-        Flash::set('success', 'Upgrade / Migração criado com aceite remoto pendente.');
+        Flash::set('success', $correctionOf > 0
+            ? 'Correção criada. O contrato anterior foi substituído e somente o novo aceite está ativo.'
+            : 'Upgrade / Migração criado com aceite remoto pendente.');
 
         return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+    }
+
+    public function cancelUpgradeRequest(Request $request): Response
+    {
+        $contractId = (int) $request->input('contract_id', 0);
+        $reason = trim((string) $request->input('cancellation_reason', ''));
+        $contract = $contractId > 0 ? $this->contractRepository->findById($contractId) : null;
+        $login = $this->sanitizeLogin((string) ($contract['mkauth_login'] ?? $request->input('login', '')));
+        $returnTo = '/clientes/detalhe?login=' . rawurlencode($login);
+
+        if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'upgrade_migracao') {
+            Flash::set('error', 'Upgrade / Migração não localizado.');
+            return Response::redirect($login !== '' ? $returnTo : '/clientes');
+        }
+        if (!$this->canCancelPendingContract()) {
+            Flash::set('error', 'Seu usuário não possui permissão para cancelar esta solicitação.');
+            return Response::redirect($returnTo);
+        }
+        if ($reason === '') {
+            Flash::set('error', 'Informe o motivo do cancelamento.');
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
+        if ($this->upgradeTechnicalExecutionCompleted($contract)) {
+            Flash::set('error', 'Este processo já possui execução técnica concluída. É necessário abrir um processo corretivo.');
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
+
+        $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+        if ((string) ($acceptance['status'] ?? '') === 'aceito') {
+            Flash::set('error', 'Este contrato já foi aceito. Use Corrigir e reenviar com autorização administrativa ou comercial.');
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
+
+        try {
+            $this->transitionUpgradeForCorrection($contract, $acceptance, 'cancelled', $reason, $request);
+            Flash::set('success', 'Solicitação cancelada. O link antigo foi invalidado e a pendência encerrada.');
+        } catch (\Throwable $exception) {
+            Flash::set('error', 'Não foi possível cancelar a solicitação: ' . $exception->getMessage());
+        }
+
+        return Response::redirect($returnTo . '#upgrade-process');
+    }
+
+    public function startUpgradeCorrection(Request $request): Response
+    {
+        $contractId = (int) $request->input('contract_id', 0);
+        $reason = trim((string) $request->input('correction_reason', ''));
+        $contract = $contractId > 0 ? $this->contractRepository->findById($contractId) : null;
+        $login = $this->sanitizeLogin((string) ($contract['mkauth_login'] ?? $request->input('login', '')));
+        $returnTo = '/clientes/detalhe?login=' . rawurlencode($login);
+
+        if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'upgrade_migracao') {
+            Flash::set('error', 'Upgrade / Migração não localizado.');
+            return Response::redirect($login !== '' ? $returnTo : '/clientes');
+        }
+        if ($reason === '') {
+            Flash::set('error', 'Informe o motivo da correção.');
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
+
+        $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
+        if (!$this->canCorrectUpgradeContract($contract, $acceptance)) {
+            Flash::set('error', 'Seu usuário não possui permissão para corrigir este processo.');
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
+
+        try {
+            $this->transitionUpgradeForCorrection($contract, $acceptance, 'correction_pending', $reason, $request);
+            Flash::set('warning', 'Correção de Upgrade / Migração iniciada. O link antigo foi invalidado; finalize e envie a nova versão.');
+        } catch (\Throwable $exception) {
+            Flash::set('error', 'Não foi possível iniciar a correção: ' . $exception->getMessage());
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
+
+        return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login) . '&correction_of=' . $contractId);
     }
 
     public function requestDigitalContractSignature(Request $request): Response
@@ -512,8 +712,16 @@ final class ClientController
             return Response::redirect($login !== '' ? $returnTo : '/clientes');
         }
 
+        if ((string) ($contract['lifecycle_status'] ?? 'active') !== 'active') {
+            Flash::set('error', 'A execução técnica está bloqueada porque este processo foi cancelado ou substituído.');
+            return Response::redirect($returnTo);
+        }
+
         $acceptance = $this->contractAcceptanceRepository->findLatestByContractId($contractId);
-        if (!is_array($acceptance) || (string) ($acceptance['status'] ?? '') !== 'aceito') {
+        if (!is_array($acceptance)
+            || (string) ($acceptance['status'] ?? '') !== 'aceito'
+            || trim((string) ($acceptance['revoked_at'] ?? '')) !== ''
+        ) {
             Flash::set('error', 'A execução técnica só pode ser confirmada após o aceite digital válido do cliente.');
             return Response::redirect($returnTo);
         }
@@ -1788,6 +1996,27 @@ final class ClientController
         return $access['is_manager'] || $access['is_admin'] || !empty($access['can_upgrade_commercial']);
     }
 
+    private function canCorrectUpgrade(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_upgrade_correct']);
+    }
+
+    private function canCancelPendingContract(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_cancel_pending_contracts']);
+    }
+
+    private function canSupersedeContract(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin'] || !empty($access['can_supersede_contracts']);
+    }
+
     private function buildClientHubSearchResults(array $rows): array
     {
         $results = [];
@@ -2141,16 +2370,23 @@ final class ClientController
     private function buildUpgradeProcessSummary(string $login, array $contracts): array
     {
         $upgradeContract = null;
+        $latestUpgradeContract = null;
         foreach ($contracts as $contract) {
             if (is_array($contract) && (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
-                $upgradeContract = $contract;
-                break;
+                $latestUpgradeContract ??= $contract;
+                if (in_array((string) ($contract['lifecycle_status'] ?? 'active'), ['active', 'correction_pending'], true)) {
+                    $upgradeContract = $contract;
+                    break;
+                }
             }
         }
+        $upgradeContract ??= $latestUpgradeContract;
 
         if (!is_array($upgradeContract)) {
             return [
                 'exists' => false,
+                'open' => false,
+                'active' => false,
                 'status' => 'none',
                 'status_label' => 'Nenhum processo iniciado',
                 'contract_status_label' => 'Novo aceite obrigatório ao iniciar',
@@ -2169,6 +2405,9 @@ final class ClientController
         }
 
         $acceptanceStatus = strtolower(trim((string) ($acceptance['status'] ?? '')));
+        $acceptanceRevoked = trim((string) ($acceptance['revoked_at'] ?? '')) !== '';
+        $lifecycleStatus = (string) ($upgradeContract['lifecycle_status'] ?? 'active');
+        $revisionNumber = max(1, (int) ($upgradeContract['revision_number'] ?? 1));
         $snapshot = $this->extractUpgradeSnapshot($upgradeContract);
         $checklist = is_array($snapshot['technical_checklist'] ?? null) ? $snapshot['technical_checklist'] : [];
         $manualChecklistKeys = [
@@ -2189,7 +2428,21 @@ final class ClientController
         $pendingLabel = 'Cliente precisa assinar o aditivo';
         $priority = 'attention';
 
-        if ($acceptanceStatus === 'aceito') {
+        if ($lifecycleStatus === 'correction_pending') {
+            $status = 'correcao_nao_finalizada';
+            $statusLabel = 'Correção não finalizada';
+            $contractStatusLabel = 'Versão anterior invalidada';
+            $technicalStatusLabel = 'Bloqueado até a nova versão';
+            $pendingLabel = 'Correção de Upgrade / Migração não finalizada.';
+            $priority = 'attention';
+        } elseif (in_array($lifecycleStatus, ['cancelled', 'superseded'], true)) {
+            $status = $lifecycleStatus === 'cancelled' ? 'cancelado' : 'substituido';
+            $statusLabel = $lifecycleStatus === 'cancelled' ? 'Cancelado' : 'Substituído por correção';
+            $contractStatusLabel = $statusLabel;
+            $technicalStatusLabel = 'Bloqueado';
+            $pendingLabel = 'Nenhuma pendência ativa nesta versão';
+            $priority = 'normal';
+        } elseif ($acceptanceStatus === 'aceito' && !$acceptanceRevoked) {
             $contractStatusLabel = 'Aceite concluído';
             if ($allChecked && trim((string) ($snapshot['technical_completed_at'] ?? '')) !== '') {
                 $status = 'concluido';
@@ -2202,13 +2455,17 @@ final class ClientController
                 $status = $planPending ? 'aguardando_confirmacao_plano' : 'execucao_tecnica_parcial';
                 $statusLabel = $planPending ? 'Aguardando confirmação de plano/valor' : 'Execução técnica parcial';
                 $technicalStatusLabel = $checkedCount . '/6 itens técnicos conferidos';
-                $pendingLabel = 'Cliente já aceitou a alteração; execução técnica pendente.';
+                $pendingLabel = $revisionNumber > 1
+                    ? 'Cliente aceitou a correção; execução técnica pendente.'
+                    : 'Cliente já aceitou a alteração; execução técnica pendente.';
                 $priority = 'urgent';
             } else {
                 $status = 'aguardando_execucao_tecnica';
                 $statusLabel = 'Aguardando execução técnica';
                 $technicalStatusLabel = 'Ainda não confirmada';
-                $pendingLabel = 'Cliente já aceitou a alteração; execução técnica pendente.';
+                $pendingLabel = $revisionNumber > 1
+                    ? 'Cliente aceitou a correção; execução técnica pendente.'
+                    : 'Cliente já aceitou a alteração; execução técnica pendente.';
                 $priority = 'urgent';
             }
         } elseif (in_array($acceptanceStatus, ['cancelado', 'expirado'], true)) {
@@ -2220,12 +2477,23 @@ final class ClientController
             $priority = $acceptanceStatus === 'expirado' ? 'urgent' : 'attention';
         }
 
+        if ($lifecycleStatus === 'active' && $revisionNumber > 1
+            && in_array($acceptanceStatus, ['criado', 'enviado', 'assinatura_pendente'], true)
+        ) {
+            $pendingLabel = 'Aguardando aceite corrigido.';
+        }
+
         return [
             'exists' => true,
+            'open' => in_array($lifecycleStatus, ['active', 'correction_pending'], true) && $status !== 'concluido',
+            'active' => $lifecycleStatus === 'active',
             'contract_id' => $contractId,
             'acceptance_id' => is_array($acceptance) ? (int) ($acceptance['id'] ?? 0) : 0,
             'acceptance_status' => $acceptanceStatus,
-            'accepted' => $acceptanceStatus === 'aceito',
+            'accepted' => $acceptanceStatus === 'aceito' && !$acceptanceRevoked && $lifecycleStatus === 'active',
+            'acceptance_revoked' => $acceptanceRevoked,
+            'lifecycle_status' => $lifecycleStatus,
+            'completed' => $status === 'concluido',
             'status' => $status,
             'status_label' => $statusLabel,
             'contract_status_label' => $contractStatusLabel,
@@ -2233,12 +2501,24 @@ final class ClientController
             'pending_label' => $pendingLabel,
             'priority' => $priority,
             'checklist' => array_merge(array_fill_keys($manualChecklistKeys, false), $checklist, [
-                'acceptance_completed' => $acceptanceStatus === 'aceito',
+                'acceptance_completed' => $acceptanceStatus === 'aceito' && !$acceptanceRevoked && $lifecycleStatus === 'active',
             ]),
+            'snapshot' => $snapshot,
+            'operation_type' => (string) ($snapshot['operation_type'] ?? ''),
+            'current_plan' => (string) ($snapshot['current_plan_name'] ?? $snapshot['current_plan'] ?? ''),
+            'new_plan' => (string) ($snapshot['new_plan_name'] ?? $snapshot['new_plan'] ?? ''),
+            'current_technology' => (string) ($snapshot['current_technology'] ?? ''),
+            'new_technology' => (string) ($snapshot['new_technology'] ?? ''),
+            'revision_number' => $revisionNumber,
+            'supersedes_contract_id' => (int) ($upgradeContract['supersedes_contract_id'] ?? 0),
+            'superseded_by_contract_id' => (int) ($upgradeContract['superseded_by_contract_id'] ?? 0),
+            'cancellation_reason' => (string) ($upgradeContract['cancellation_reason'] ?? ''),
             'technical_observation' => (string) ($snapshot['technical_observation'] ?? ''),
             'technical_updated_at' => (string) ($snapshot['technical_updated_at'] ?? ''),
             'technical_updated_by' => (string) ($snapshot['technical_updated_by'] ?? ''),
-            'resume_url' => '/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process',
+            'resume_url' => $lifecycleStatus === 'correction_pending'
+                ? '/clientes/upgrade?login=' . rawurlencode($login) . '&correction_of=' . $contractId
+                : '/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process',
             'detail_url' => $contractId > 0 ? Url::to('/contratos/detalhe?id=' . rawurlencode((string) $contractId)) : '',
         ];
     }
@@ -2252,11 +2532,7 @@ final class ClientController
         }
 
         $summary = $this->buildUpgradeProcessSummary($login, $contracts);
-        if (empty($summary['exists'])) {
-            return false;
-        }
-
-        return !in_array((string) ($summary['status'] ?? ''), ['concluido', 'cancelado', 'erro'], true);
+        return !empty($summary['open']);
     }
 
     private function detectClientSearchMode(string $query): string
@@ -2682,17 +2958,22 @@ final class ClientController
 
         if ($plans === []) {
             return [
-                ['id' => 'FibraRural_40mbpsPromo', 'label' => 'FibraRural_40mbpsPromo', 'value' => '', 'install_type' => 'fibra', 'local_dici' => 'r'],
-                ['id' => 'FibraUrbano_100mbps', 'label' => 'FibraUrbano_100mbps', 'value' => '', 'install_type' => 'fibra', 'local_dici' => 'u'],
-                ['id' => 'RadioRural_10mbps', 'label' => 'RadioRural_10mbps', 'value' => '', 'install_type' => 'radio', 'local_dici' => 'r'],
+                ['id' => 'FibraRural_40mbpsPromo', 'name' => 'FibraRural_40mbpsPromo', 'label' => 'FibraRural_40mbpsPromo', 'value' => '', 'technology' => 'Fibra', 'install_type' => 'fibra', 'local_dici' => 'r'],
+                ['id' => 'FibraUrbano_100mbps', 'name' => 'FibraUrbano_100mbps', 'label' => 'FibraUrbano_100mbps', 'value' => '', 'technology' => 'Fibra', 'install_type' => 'fibra', 'local_dici' => 'u'],
+                ['id' => 'RadioRural_10mbps', 'name' => 'RadioRural_10mbps', 'label' => 'RadioRural_10mbps', 'value' => '', 'technology' => 'Rádio', 'install_type' => 'radio', 'local_dici' => 'r'],
             ];
         }
 
         return array_map(static function (array $plan): array {
             $name = trim((string) ($plan['nome'] ?? ''));
+            $uuid = trim((string) ($plan['uuid_plano'] ?? ''));
             $value = trim((string) ($plan['valor'] ?? ''));
+            $technology = trim((string) ($plan['tecnologia'] ?? ''));
             $normalized = self::normalizeTextForMatch($name);
-            $installType = str_contains($normalized, 'radio') ? 'radio' : (str_contains($normalized, 'fibra') ? 'fibra' : '');
+            $normalizedTechnology = self::normalizeTextForMatch($technology);
+            $installType = str_contains($normalizedTechnology, 'radio') || str_contains($normalized, 'radio')
+                ? 'radio'
+                : (str_contains($normalizedTechnology, 'fibra') || str_contains($normalized, 'fibra') ? 'fibra' : '');
             $localDici = str_contains($normalized, 'rural') ? 'r' : (str_contains($normalized, 'urbano') ? 'u' : '');
             $label = $name;
 
@@ -2701,9 +2982,11 @@ final class ClientController
             }
 
             return [
-                'id' => $name,
+                'id' => $uuid !== '' ? $uuid : $name,
+                'name' => $name,
                 'label' => $label,
                 'value' => $value,
+                'technology' => $technology,
                 'install_type' => $installType,
                 'local_dici' => $localDici,
             ];
@@ -4224,6 +4507,226 @@ final class ClientController
         ];
     }
 
+    private function loadCorrectableUpgrade(int $contractId, string $login): ?array
+    {
+        if ($contractId <= 0 || !$this->canCorrectUpgrade()) {
+            return null;
+        }
+
+        $contract = $this->contractRepository->findById($contractId);
+        if (!is_array($contract)
+            || (string) ($contract['tipo_aceite'] ?? '') !== 'upgrade_migracao'
+            || $this->sanitizeLogin((string) ($contract['mkauth_login'] ?? '')) !== $this->sanitizeLogin($login)
+            || (string) ($contract['lifecycle_status'] ?? 'active') !== 'correction_pending'
+        ) {
+            return null;
+        }
+
+        return $contract;
+    }
+
+    private function assertUpgradeCreationAllowed(string $login, int $correctionOf = 0): void
+    {
+        $rows = $this->database->fetchAll(
+            'SELECT id, lifecycle_status, upgrade_snapshot_json
+             FROM client_contracts
+             WHERE LOWER(mkauth_login) = LOWER(:login)
+               AND tipo_aceite = "upgrade_migracao"
+               AND lifecycle_status IN ("active", "correction_pending")
+             ORDER BY id DESC
+             FOR UPDATE',
+            ['login' => trim($login)]
+        );
+
+        $targetFound = $correctionOf <= 0;
+        foreach ($rows as $row) {
+            $contractId = (int) ($row['id'] ?? 0);
+            if ($correctionOf > 0 && $contractId === $correctionOf) {
+                $targetFound = true;
+                continue;
+            }
+
+            $snapshot = json_decode((string) ($row['upgrade_snapshot_json'] ?? ''), true);
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+            $completed = (string) ($snapshot['technical_status'] ?? '') === 'concluido'
+                || trim((string) ($snapshot['technical_completed_at'] ?? '')) !== '';
+
+            if (!$completed) {
+                throw new \RuntimeException('Já existe outro Upgrade / Migração ativo para este cliente.');
+            }
+        }
+
+        if (!$targetFound) {
+            throw new \RuntimeException('O processo que seria corrigido não está mais ativo.');
+        }
+    }
+
+    private function canCorrectUpgradeContract(array $contract, ?array $acceptance = null): bool
+    {
+        if (!$this->canCorrectUpgrade()
+            || (string) ($contract['tipo_aceite'] ?? '') !== 'upgrade_migracao'
+            || !in_array((string) ($contract['lifecycle_status'] ?? 'active'), ['active', 'correction_pending'], true)
+        ) {
+            return false;
+        }
+
+        if (!is_array($acceptance)) {
+            try {
+                $acceptance = $this->contractAcceptanceRepository->findLatestByContractId((int) ($contract['id'] ?? 0));
+            } catch (\Throwable) {
+                $acceptance = null;
+            }
+        }
+
+        if ($this->upgradeTechnicalExecutionCompleted($contract)
+            || (string) ($acceptance['status'] ?? '') === 'aceito'
+        ) {
+            return $this->canSupersedeContract();
+        }
+
+        return $this->canCancelPendingContract();
+    }
+
+    private function applyCorrectionContext(array $context, array $contract): array
+    {
+        $snapshot = $this->extractUpgradeSnapshot($contract);
+        $context['contract'] = $contract;
+        $context['new_plan'] = (string) ($snapshot['new_plan_id'] ?? $snapshot['new_plan'] ?? $context['new_plan'] ?? '');
+        $context['new_technology'] = (string) ($snapshot['new_technology'] ?? $context['new_technology'] ?? '');
+        $context['new_technology_family'] = (string) ($snapshot['new_technology_family'] ?? $context['new_technology_family'] ?? '');
+        $context['new_monthly_value'] = (float) ($snapshot['new_monthly_value'] ?? $context['new_monthly_value'] ?? 0);
+        $context['benefit_flags'] = $this->normalizeUpgradeBenefitFlags($snapshot['benefit_flags'] ?? null);
+        $context['benefit_description'] = (string) ($snapshot['benefit_description'] ?? $context['benefit_description'] ?? '');
+        $context['benefit_value'] = (float) ($snapshot['benefit_value'] ?? $context['benefit_value'] ?? 0);
+        $context['fidelity_months'] = max(1, (int) ($snapshot['fidelity_months'] ?? $context['fidelity_months'] ?? 12));
+        $context['observacao'] = (string) ($snapshot['observacao'] ?? $snapshot['observation'] ?? $context['observacao'] ?? '');
+        $context['operation_type'] = (string) ($snapshot['operation_type'] ?? 'upgrade');
+        $context['supersedes_contract_id'] = (int) ($contract['id'] ?? 0);
+        $context['revision_number'] = max(2, (int) ($contract['revision_number'] ?? 1) + 1);
+
+        return $context;
+    }
+
+    private function upgradeTechnicalExecutionCompleted(array $contract): bool
+    {
+        $snapshot = $this->extractUpgradeSnapshot($contract);
+
+        return (string) ($snapshot['technical_status'] ?? '') === 'concluido'
+            || trim((string) ($snapshot['technical_completed_at'] ?? '')) !== '';
+    }
+
+    private function transitionUpgradeForCorrection(
+        array $contract,
+        ?array $acceptance,
+        string $lifecycleStatus,
+        string $reason,
+        Request $request
+    ): void {
+        if (!in_array($lifecycleStatus, ['cancelled', 'correction_pending'], true)) {
+            throw new \InvalidArgumentException('Estado de correção inválido.');
+        }
+
+        $contractId = (int) ($contract['id'] ?? 0);
+        if ($contractId <= 0 || (string) ($contract['lifecycle_status'] ?? 'active') !== 'active') {
+            throw new \RuntimeException('Este processo não está mais ativo para cancelamento ou correção.');
+        }
+
+        $operator = $this->resolveUser();
+        $operatorId = isset($operator['id']) && (int) $operator['id'] > 0 ? (int) $operator['id'] : null;
+        $operatorLogin = (string) ($operator['login'] ?? '');
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+
+        try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+
+            $currentContract = $this->database->fetchOne(
+                'SELECT * FROM client_contracts WHERE id = :id FOR UPDATE',
+                ['id' => $contractId]
+            );
+            if (!is_array($currentContract) || (string) ($currentContract['lifecycle_status'] ?? 'active') !== 'active') {
+                throw new \RuntimeException('Este processo não está mais ativo para cancelamento ou correção.');
+            }
+
+            if (is_array($acceptance) && (int) ($acceptance['id'] ?? 0) > 0) {
+                $acceptance = $this->database->fetchOne(
+                    'SELECT * FROM contract_acceptances WHERE id = :id AND contract_id = :contract_id FOR UPDATE',
+                    ['id' => (int) $acceptance['id'], 'contract_id' => $contractId]
+                );
+            }
+
+            if ($lifecycleStatus === 'cancelled' && (string) ($acceptance['status'] ?? '') === 'aceito') {
+                throw new \RuntimeException('Este contrato já foi aceito. Use Corrigir e reenviar com autorização administrativa ou comercial.');
+            }
+            if ($lifecycleStatus === 'cancelled' && $this->upgradeTechnicalExecutionCompleted($currentContract)) {
+                throw new \RuntimeException('Este processo já possui execução técnica concluída. É necessário abrir um processo corretivo.');
+            }
+            if ($lifecycleStatus === 'correction_pending'
+                && ((string) ($acceptance['status'] ?? '') === 'aceito' || $this->upgradeTechnicalExecutionCompleted($currentContract))
+                && !$this->canSupersedeContract()
+            ) {
+                throw new \RuntimeException('A substituição deste contrato exige permissão administrativa ou comercial.');
+            }
+
+            $contract = $currentContract;
+
+            $this->contractRepository->markLifecycle(
+                $contractId,
+                $lifecycleStatus,
+                $reason,
+                $operatorId,
+                $operatorLogin
+            );
+
+            if (is_array($acceptance) && (int) ($acceptance['id'] ?? 0) > 0) {
+                $this->contractAcceptanceRepository->revoke(
+                    (int) $acceptance['id'],
+                    $reason,
+                    $operatorId,
+                    $operatorLogin,
+                    true
+                );
+            }
+
+            $financialTask = $this->financialTaskRepository->findByContractId($contractId);
+            if (is_array($financialTask) && (int) ($financialTask['id'] ?? 0) > 0
+                && (string) ($financialTask['status'] ?? '') !== 'concluido'
+            ) {
+                $this->financialTaskRepository->updateStatus((int) $financialTask['id'], 'cancelado');
+            }
+
+            $this->recordAudit(
+                $lifecycleStatus === 'cancelled' ? 'contract.upgrade.cancelled' : 'contract.upgrade.correction_started',
+                'client_contract',
+                $contractId,
+                [
+                    'login' => (string) ($contract['mkauth_login'] ?? ''),
+                    'contract_id' => $contractId,
+                    'acceptance_id' => is_array($acceptance) ? (int) ($acceptance['id'] ?? 0) : null,
+                    'previous_lifecycle_status' => (string) ($contract['lifecycle_status'] ?? 'active'),
+                    'new_lifecycle_status' => $lifecycleStatus,
+                    'reason' => $reason,
+                    'operator_id' => $operatorId,
+                    'operator_login' => $operatorLogin,
+                    'operator_name' => (string) ($operator['name'] ?? ''),
+                    'before' => $this->extractUpgradeSnapshot($contract),
+                ],
+                $request
+            );
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
     private function loadUpgradeContext(string $login): ?array
     {
         $login = $this->sanitizeLogin($login);
@@ -4262,7 +4765,7 @@ final class ClientController
             $currentPlan
         );
         $upgradeSnapshot = $this->extractUpgradeSnapshot(is_array($contract) ? $contract : []);
-        $defaultNewPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? $currentPlan));
+        $defaultNewPlan = trim((string) ($upgradeSnapshot['new_plan_id'] ?? $upgradeSnapshot['new_plan'] ?? $currentPlan));
         if ($defaultNewPlan === '' && isset($planOptions[0]['id'])) {
             $defaultNewPlan = (string) $planOptions[0]['id'];
         }
@@ -4307,6 +4810,9 @@ final class ClientController
             'current_technology_family' => $currentTechnologyFamily,
             'current_monthly_value' => $currentMonthlyValue,
             'new_plan' => $defaultNewPlan,
+            'operation_type' => in_array((string) ($upgradeSnapshot['operation_type'] ?? 'upgrade'), ['upgrade', 'migration'], true)
+                ? (string) ($upgradeSnapshot['operation_type'] ?? 'upgrade')
+                : 'upgrade',
             'new_technology' => trim((string) ($upgradeSnapshot['new_technology'] ?? $defaultNewTechnology)),
             'new_technology_family' => $defaultNewTechnologyFamily,
             'benefit_flags' => $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null) ?: $defaultBenefitDefaults['flags'],
@@ -4367,13 +4873,20 @@ final class ClientController
 
         return [
             'login' => $this->sanitizeLogin((string) ($context['login'] ?? $request->input('login', ''))),
+            'operation_type' => in_array((string) $request->input('operation_type', $context['operation_type'] ?? ''), ['upgrade', 'migration'], true)
+                ? (string) $request->input('operation_type', $context['operation_type'] ?? '')
+                : '',
             'plano_atual' => trim((string) $request->input('plano_atual', $context['current_plan'] ?? '')),
+            'current_plan_id' => trim((string) ($currentPlanOption['id'] ?? $currentPlan)),
+            'current_plan_name' => trim((string) ($currentPlanOption['name'] ?? $currentPlan)),
             'tecnologia_atual' => $this->resolveTechnologyLabel(
                 (string) $request->input('tecnologia_atual', $currentTechnology),
                 is_array($currentPlanOption) ? $currentPlanOption : [],
                 $currentPlan
             ),
             'novo_plano' => $selectedPlan,
+            'new_plan_id' => trim((string) ($selectedPlanOption['id'] ?? $selectedPlan)),
+            'new_plan_name' => trim((string) ($selectedPlanOption['name'] ?? $selectedPlan)),
             'nova_tecnologia' => $this->resolveTechnologyLabel(
                 (string) $request->input('nova_tecnologia', $selectedTechnology),
                 is_array($selectedPlanOption) ? $selectedPlanOption : [],
@@ -4391,12 +4904,23 @@ final class ClientController
             'observacao' => trim((string) $request->input('observacao', $context['observacao'] ?? '')),
             'signature_mode' => (string) $request->input('signature_mode', 'remote') === 'local' ? 'local' : 'remote',
             'remote_signature_reason' => trim((string) $request->input('remote_signature_reason', '')),
+            'review_confirmed' => (string) $request->input('review_confirmed', '') === '1',
+            'confirm_same_value' => (string) $request->input('confirm_same_value', '') === '1',
         ];
     }
 
     private function validateUpgrade(array $data, array $context): array
     {
         $errors = [];
+
+        $operationType = (string) ($data['operation_type'] ?? '');
+        if (!in_array($operationType, ['upgrade', 'migration'], true)) {
+            $errors[] = 'Selecione se a operação é Upgrade ou Migração.';
+        }
+
+        if (empty($data['review_confirmed'])) {
+            $errors[] = 'Confirme a revisão final do plano, tecnologia, valor e condições.';
+        }
 
         if (trim((string) ($data['plano_atual'] ?? '')) === '') {
             $errors[] = 'Informe o plano atual.';
@@ -4426,10 +4950,47 @@ final class ClientController
             $errors[] = 'Informe o motivo da assinatura remota.';
         }
 
+        $currentPlanId = trim((string) ($data['current_plan_id'] ?? $data['plano_atual'] ?? ''));
+        $newPlanId = trim((string) ($data['new_plan_id'] ?? $data['novo_plano'] ?? ''));
+        $currentFamily = $this->resolveTechnologyFamily(
+            $this->findPlanOptionByName($currentPlanId, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []) ?? [],
+            (string) ($data['tecnologia_atual'] ?? ''),
+            (string) ($data['current_plan_name'] ?? $data['plano_atual'] ?? '')
+        );
+        $newFamily = $this->resolveTechnologyFamily(
+            $this->findPlanOptionByName($newPlanId, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []) ?? [],
+            (string) ($data['nova_tecnologia'] ?? ''),
+            (string) ($data['new_plan_name'] ?? $data['novo_plano'] ?? '')
+        );
+
+        if ($operationType === 'migration') {
+            if ($currentFamily === '' || $newFamily === '') {
+                $errors[] = 'Não foi possível confirmar as tecnologias da Migração. Revise os planos selecionados.';
+            } elseif ($currentFamily === $newFamily) {
+                $errors[] = 'Migração exige tecnologias diferentes. Para manter a mesma tecnologia, use Upgrade.';
+            }
+        }
+
+        if ($operationType === 'upgrade' && $currentPlanId !== '' && $newPlanId !== '' && strcasecmp($currentPlanId, $newPlanId) === 0) {
+            $errors[] = 'Upgrade exige um plano novo diferente do plano atual.';
+        }
+
+        $currentValue = (float) ($context['current_monthly_value'] ?? 0);
+        $newValue = (float) ($data['novo_valor_mensal'] ?? 0);
+        if ($operationType === 'upgrade' && abs($currentValue - $newValue) < 0.005 && empty($data['confirm_same_value'])) {
+            $errors[] = 'O novo plano possui o mesmo valor mensal. Confirme explicitamente que deseja continuar.';
+        }
+
         return $errors;
     }
 
-    private function syncUpgradeContractArtifacts(array $data, array $context, Request $request): array
+    private function syncUpgradeContractArtifacts(
+        array $data,
+        array $context,
+        Request $request,
+        bool $dispatchNotifications = true,
+        ?array $supersededContract = null
+    ): array
     {
         try {
             $this->messageTemplateRepository->ensureDefaults($this->defaultMessageTemplates());
@@ -4438,6 +4999,11 @@ final class ClientController
                 'login' => (string) ($context['login'] ?? ''),
                 'error' => $exception->getMessage(),
             ], $request);
+        }
+
+        if (is_array($supersededContract)) {
+            $context['supersedes_contract_id'] = (int) ($supersededContract['id'] ?? 0);
+            $context['revision_number'] = max(2, (int) ($supersededContract['revision_number'] ?? 1) + 1);
         }
 
         $contractData = $this->buildUpgradeContractData($data, $context, $request);
@@ -4482,7 +5048,7 @@ final class ClientController
         $sendWhatsapp = trim((string) ($notificationDraft['celular'] ?? '')) !== '';
         $sendEmail = (bool) ($notificationDraft['has_real_email'] ?? false);
 
-        if (($data['signature_mode'] ?? 'remote') === 'remote' && ($sendWhatsapp || $sendEmail)) {
+        if ($dispatchNotifications && ($data['signature_mode'] ?? 'remote') === 'remote' && ($sendWhatsapp || $sendEmail)) {
             try {
                 $this->dispatchAcceptanceChannels($contractData, is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData, $notificationDraft, $sendWhatsapp, $sendEmail, false, $request);
             } catch (\Throwable $exception) {
@@ -4498,7 +5064,35 @@ final class ClientController
             'acceptance_id' => $acceptanceId,
             'signature_mode' => (string) ($data['signature_mode'] ?? 'remote'),
             'token' => (string) ($acceptanceData['token'] ?? ''),
+            'contract' => $contractData,
+            'acceptance' => is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData,
+            'notification_draft' => $notificationDraft,
+            'send_whatsapp' => $sendWhatsapp,
+            'send_email' => $sendEmail,
         ];
+    }
+
+    private function dispatchUpgradeAcceptanceAfterCommit(array $result, Request $request): void
+    {
+        if (($result['signature_mode'] ?? 'remote') !== 'remote') {
+            return;
+        }
+
+        $sendWhatsapp = !empty($result['send_whatsapp']);
+        $sendEmail = !empty($result['send_email']);
+        if (!$sendWhatsapp && !$sendEmail) {
+            return;
+        }
+
+        $this->dispatchAcceptanceChannels(
+            is_array($result['contract'] ?? null) ? $result['contract'] : [],
+            is_array($result['acceptance'] ?? null) ? $result['acceptance'] : [],
+            is_array($result['notification_draft'] ?? null) ? $result['notification_draft'] : [],
+            $sendWhatsapp,
+            $sendEmail,
+            false,
+            $request
+        );
     }
 
     private function findPendingDigitalContractAcceptance(array $contracts): ?array
@@ -4713,6 +5307,8 @@ final class ClientController
         $newPlan = (string) ($data['novo_plano'] ?? $context['new_plan'] ?? '');
         $currentPlanOption = $this->findPlanOptionByName($currentPlan, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []);
         $newPlanOption = $this->findPlanOptionByName($newPlan, is_array($context['planOptions'] ?? null) ? $context['planOptions'] : []);
+        $currentPlanName = trim((string) ($currentPlanOption['name'] ?? $data['current_plan_name'] ?? $currentPlan));
+        $newPlanName = trim((string) ($newPlanOption['name'] ?? $data['new_plan_name'] ?? $newPlan));
         $currentTechnology = $this->resolveTechnologyLabel(
             (string) ($data['tecnologia_atual'] ?? $context['current_technology'] ?? ''),
             is_array($currentPlanOption) ? $currentPlanOption : [],
@@ -4728,8 +5324,8 @@ final class ClientController
         $benefitDefaults = $this->resolveUpgradeBenefitDefaults(
             $currentTechnology,
             $newTechnology,
-            $currentPlan,
-            $newPlan,
+            $currentPlanName,
+            $newPlanName,
             (float) ($data['valor_mensal_atual'] ?? ($context['current_monthly_value'] ?? 0)),
             (float) ($data['novo_valor_mensal'] ?? ($context['new_monthly_value'] ?? 0))
         );
@@ -4748,11 +5344,16 @@ final class ClientController
             $benefitDescription = $benefitDefaults['description'];
         }
         $snapshot = [
-            'current_plan' => $currentPlan,
+            'operation_type' => (string) ($data['operation_type'] ?? 'upgrade'),
+            'current_plan_id' => (string) ($currentPlanOption['id'] ?? $data['current_plan_id'] ?? $currentPlan),
+            'current_plan_name' => $currentPlanName,
+            'current_plan' => $currentPlanName,
             'current_technology' => $currentTechnology,
             'current_technology_family' => $this->resolveTechnologyFamily(is_array($currentPlanOption) ? $currentPlanOption : [], $currentTechnology, $currentPlan),
             'current_monthly_value' => $currentMonthlyValue,
-            'new_plan' => $newPlan,
+            'new_plan_id' => (string) ($newPlanOption['id'] ?? $data['new_plan_id'] ?? $newPlan),
+            'new_plan_name' => $newPlanName,
+            'new_plan' => $newPlanName,
             'new_technology' => $newTechnology,
             'new_technology_family' => $newTechnologyFamily,
             'benefit_flags' => $benefitFlags,
@@ -4768,6 +5369,10 @@ final class ClientController
             'created_at' => date('Y-m-d H:i:s'),
             'created_by' => (string) ($operator['name'] ?? $operatorLogin),
             'created_by_login' => $operatorLogin,
+            'captured_at' => date('Y-m-d H:i:s'),
+            'captured_by' => (string) ($operator['name'] ?? $operatorLogin),
+            'captured_by_login' => $operatorLogin,
+            'review_confirmed' => true,
         ];
 
         $observacaoLines = [];
@@ -4798,6 +5403,16 @@ final class ClientController
             'observacao_adesao' => trim(implode("\n", $observacaoLines)),
             'upgrade_snapshot_json' => json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
             'status_financeiro' => 'dispensado',
+            'lifecycle_status' => 'active',
+            'supersedes_contract_id' => isset($context['supersedes_contract_id']) && (int) $context['supersedes_contract_id'] > 0
+                ? (int) $context['supersedes_contract_id']
+                : null,
+            'superseded_by_contract_id' => null,
+            'revision_number' => max(1, (int) ($context['revision_number'] ?? 1)),
+            'cancellation_reason' => null,
+            'cancelled_at' => null,
+            'cancelled_by_user_id' => null,
+            'cancelled_by_login' => null,
         ];
     }
 
@@ -4852,10 +5467,11 @@ final class ClientController
 
         foreach ($plans as $plan) {
             $id = trim((string) ($plan['id'] ?? ''));
+            $name = trim((string) ($plan['name'] ?? ''));
             $label = trim((string) ($plan['label'] ?? ''));
             $value = trim((string) ($plan['value'] ?? ''));
 
-            if ($id !== '' && strcasecmp($id, $planName) === 0) {
+            if (($id !== '' && strcasecmp($id, $planName) === 0) || ($name !== '' && strcasecmp($name, $planName) === 0)) {
                 return $value !== '' ? (float) str_replace(',', '.', $value) : null;
             }
 
@@ -4880,9 +5496,14 @@ final class ClientController
             }
 
             $id = trim((string) ($plan['id'] ?? ''));
+            $name = trim((string) ($plan['name'] ?? ''));
             $label = trim((string) ($plan['label'] ?? ''));
 
-            if (($id !== '' && strcasecmp($id, $planName) === 0) || ($label !== '' && strcasecmp($label, $planName) === 0)) {
+            if (($id !== '' && strcasecmp($id, $planName) === 0)
+                || ($name !== '' && strcasecmp($name, $planName) === 0)
+                || ($label !== '' && strcasecmp($label, $planName) === 0)
+                || ($label !== '' && strcasecmp(trim((string) strtok($label, ' -')), $planName) === 0)
+            ) {
                 return $plan;
             }
         }
@@ -5718,9 +6339,9 @@ final class ClientController
         }
 
         if ((string) ($contractData['tipo_aceite'] ?? '') === 'upgrade_migracao') {
-            $currentPlan = trim((string) ($upgradeSnapshot['current_plan'] ?? ''));
+            $currentPlan = trim((string) ($upgradeSnapshot['current_plan_name'] ?? $upgradeSnapshot['current_plan'] ?? ''));
             $currentTechnology = trim((string) ($upgradeSnapshot['current_technology'] ?? ''));
-            $newPlan = trim((string) ($upgradeSnapshot['new_plan'] ?? ''));
+            $newPlan = trim((string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ''));
             $newTechnology = trim((string) ($upgradeSnapshot['new_technology'] ?? ''));
             $originalContractReference = trim((string) ($upgradeSnapshot['original_contract_reference'] ?? ''));
             $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);

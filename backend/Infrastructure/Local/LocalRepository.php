@@ -213,6 +213,9 @@ final class LocalRepository
         $explicitAcceptanceResend = !empty($user['can_resend_contract_acceptance']);
         $explicitUpgradeTechnical = !empty($user['can_complete_upgrade_technical']);
         $explicitUpgradeCommercial = !empty($user['can_upgrade_commercial']);
+        $explicitUpgradeCorrect = !empty($user['can_upgrade_correct']);
+        $explicitCancelPendingContracts = !empty($user['can_cancel_pending_contracts']);
+        $explicitSupersedeContracts = !empty($user['can_supersede_contracts']);
         $explicitAdmin = !empty($user['is_admin']) || !empty($user['gestor_admin']);
         $permissionOrigin = trim((string) ($user['permission_origin'] ?? ''));
 
@@ -259,6 +262,9 @@ final class LocalRepository
             'can_resend_contract_acceptance' => $isManager || $isTechnicianRole || $explicitAcceptanceResend,
             'can_complete_upgrade_technical' => $isManager || $isTechnicianRole || $explicitUpgradeTechnical,
             'can_upgrade_commercial' => $isManager || $explicitUpgradeCommercial,
+            'can_upgrade_correct' => $isManager || $isTechnicianRole || $explicitUpgradeCorrect,
+            'can_cancel_pending_contracts' => $isManager || $isTechnicianRole || $explicitCancelPendingContracts,
+            'can_supersede_contracts' => $isManager || $explicitSupersedeContracts,
             'permission_origin' => $permissionOrigin,
             'permission_origin_label' => $permissionOrigin,
         ];

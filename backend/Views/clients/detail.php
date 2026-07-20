@@ -17,6 +17,14 @@ $timeline = is_array($detail['timeline'] ?? null) ? $detail['timeline'] : [];
 $auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
 $source = is_array($detail['source'] ?? null) ? $detail['source'] : [];
 $login = (string) ($detail['login'] ?? $profile['login'] ?? '');
+$canCorrectCurrent = !empty($canCorrectUpgrade)
+    && !empty($upgradeProcess['active'])
+    && (empty($upgradeProcess['accepted']) || !empty($canSupersedeContract));
+$canCorrectCompleted = !empty($canSupersedeContract) && !empty($upgradeProcess['completed']);
+$canCancelCurrent = !empty($canCancelPendingContract)
+    && !empty($upgradeProcess['active'])
+    && empty($upgradeProcess['accepted'])
+    && empty($upgradeProcess['completed']);
 ob_start();
 ?>
 <section class="page-header">
@@ -28,7 +36,8 @@ ob_start();
     <div class="hero-actions">
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>">Voltar para clientes</a>
         <?php if (!empty($canRequestUpgrade)): ?>
-            <a class="button button--ghost" href="<?= !empty($upgradeProcess['exists']) ? '#upgrade-process' : htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>"><?= !empty($upgradeProcess['exists']) ? 'Retomar Upgrade / Migração' : 'Upgrade / Migração'; ?></a>
+            <?php $hasRecordedUpgrade = !empty($upgradeProcess['open']) || !empty($upgradeProcess['completed']); ?>
+            <a class="button button--ghost" href="<?= $hasRecordedUpgrade ? '#upgrade-process' : htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>"><?= !empty($upgradeProcess['open']) ? 'Retomar Upgrade / Migração' : (!empty($upgradeProcess['completed']) ? 'Ver Upgrade / Migração' : 'Upgrade / Migração'); ?></a>
         <?php endif; ?>
         <?php if (!empty($canCreateClient)): ?>
             <a class="button" href="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>">Novo cliente</a>
@@ -104,6 +113,56 @@ ob_start();
         </div>
     <?php endif; ?>
 </section>
+
+<?php if ($canCorrectCurrent || $canCorrectCompleted): ?>
+    <div class="contract-send-modal" id="client-upgrade-correct-modal" data-upgrade-action-modal hidden>
+        <div class="contract-send-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="client-upgrade-correct-title">
+            <div class="contract-send-modal__header"><div><p class="section-heading__eyebrow">Correção controlada</p><h2 id="client-upgrade-correct-title"><?= $canCorrectCompleted ? 'Abrir processo corretivo' : 'Corrigir e reenviar'; ?></h2></div><button class="button button--ghost button--small" type="button" data-upgrade-action-close>Cancelar</button></div>
+            <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/corrigir'), ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="contract-send-modal__body">
+                    <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="summary-grid">
+                        <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($profile['name'] ?? $login), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Contrato</span><strong>#<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Plano informado</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Tecnologia informada</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    </div>
+                    <label class="field" style="margin-top: 16px;"><span>Motivo da correção</span><textarea name="correction_reason" rows="3" required data-upgrade-action-reason></textarea></label>
+                    <p class="field-help">O link anterior será invalidado imediatamente. A correção ficará pendente até a nova versão ser confirmada e gerada.</p>
+                </div>
+                <div class="contract-send-modal__footer"><button class="button button--ghost" type="button" data-upgrade-action-close>Cancelar</button><button class="button" type="submit">Continuar para correção</button></div>
+            </form>
+        </div>
+    </div>
+<?php endif; ?>
+
+<?php if ($canCancelCurrent): ?>
+    <div class="contract-send-modal" id="client-upgrade-cancel-modal" data-upgrade-action-modal hidden>
+        <div class="contract-send-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="client-upgrade-cancel-title">
+            <div class="contract-send-modal__header"><div><p class="section-heading__eyebrow">Confirmação obrigatória</p><h2 id="client-upgrade-cancel-title">Cancelar solicitação</h2></div><button class="button button--ghost button--small" type="button" data-upgrade-action-close>Cancelar</button></div>
+            <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/cancelar'), ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="contract-send-modal__body">
+                    <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="summary-grid">
+                        <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($profile['name'] ?? $login), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Contrato</span><strong>#<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Plano informado</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="summary-item"><span>Tecnologia informada</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    </div>
+                    <label class="field" style="margin-top: 16px;"><span>Motivo do cancelamento</span><textarea name="cancellation_reason" rows="3" required data-upgrade-action-reason></textarea></label>
+                    <div class="alert alert--warning" style="margin-top: 16px;">O link antigo será invalidado imediatamente. Contrato, aceite, assinatura e evidências não serão apagados.</div>
+                </div>
+                <div class="contract-send-modal__footer"><button class="button button--ghost" type="button" data-upgrade-action-close>Voltar</button><button class="button" type="submit">Confirmar cancelamento</button></div>
+            </form>
+        </div>
+    </div>
+<?php endif; ?>
 
 <section class="card">
     <div class="section-heading">
@@ -242,17 +301,35 @@ ob_start();
     </div>
 
     <div class="hero-actions" style="margin-top: 16px;">
-        <?php if (!empty($canRequestUpgrade) && empty($upgradeProcess['exists'])): ?>
+        <?php if (!empty($canRequestUpgrade) && empty($upgradeProcess['open']) && empty($upgradeProcess['completed'])): ?>
             <a class="button button--small" href="<?= htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Iniciar Upgrade / Migração</a>
-        <?php elseif (!empty($upgradeProcess['exists'])): ?>
-            <a class="button button--ghost button--small" href="#upgrade-checklist">Retomar</a>
+        <?php elseif (!empty($upgradeProcess['open'])): ?>
+            <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) ($upgradeProcess['resume_url'] ?? '#upgrade-checklist'), ENT_QUOTES, 'UTF-8'); ?>">Retomar upgrade</a>
             <?php if (trim((string) ($upgradeProcess['detail_url'] ?? '')) !== ''): ?>
                 <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) $upgradeProcess['detail_url'], ENT_QUOTES, 'UTF-8'); ?>">Ver contrato</a>
             <?php endif; ?>
         <?php endif; ?>
+
+        <?php if (!empty($upgradeProcess['active']) && empty($upgradeProcess['acceptance_revoked']) && empty($upgradeProcess['completed']) && !empty($canRequestContractSignature)): ?>
+            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja reenviar o aceite ativo ao cliente?');">
+                <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="return_to" value="<?= htmlspecialchars('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process', ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="send_request_id" value="<?= htmlspecialchars(bin2hex(random_bytes(16)), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="force_resend" value="1">
+                <input type="hidden" name="send_whatsapp" value="1">
+                <input type="hidden" name="send_email" value="0">
+                <button class="button button--ghost button--small" type="submit">Reenviar aceite</button>
+            </form>
+        <?php endif; ?>
+        <?php if ($canCorrectCurrent || $canCorrectCompleted): ?>
+            <button class="button button--ghost button--small" type="button" data-upgrade-action-open="client-upgrade-correct-modal"><?= $canCorrectCompleted ? 'Abrir processo corretivo' : 'Corrigir e reenviar'; ?></button>
+        <?php endif; ?>
+        <?php if ($canCancelCurrent): ?>
+            <button class="button button--ghost button--small" type="button" data-upgrade-action-open="client-upgrade-cancel-modal">Cancelar solicitação</button>
+        <?php endif; ?>
     </div>
 
-    <?php if (!empty($upgradeProcess['exists']) && !empty($canCompleteUpgradeTechnical)): ?>
+    <?php if (!empty($upgradeProcess['active']) && !empty($canCompleteUpgradeTechnical)): ?>
         <?php $technicalChecklist = is_array($upgradeProcess['checklist'] ?? null) ? $upgradeProcess['checklist'] : []; ?>
         <form id="upgrade-checklist" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/execucao-tecnica'), ENT_QUOTES, 'UTF-8'); ?>" style="margin-top: 18px;">
             <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">

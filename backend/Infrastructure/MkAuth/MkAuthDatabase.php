@@ -462,7 +462,7 @@ final class MkAuthDatabase
         $limit = max(1, min(500, $limit));
 
         return $this->fetchAll(
-            "SELECT nome, valor, oculto FROM sis_plano WHERE nome <> \"\" AND oculto = 'nao' ORDER BY nome ASC LIMIT " . (int) $limit
+            "SELECT uuid_plano, nome, valor, tecnologia, oculto FROM sis_plano WHERE nome <> \"\" AND oculto = 'nao' ORDER BY nome ASC LIMIT " . (int) $limit
         );
     }
 
