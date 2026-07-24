@@ -476,6 +476,25 @@ textarea {
     color: var(--text);
 }
 
+.acceptance-term-details {
+    display: grid;
+    gap: 12px;
+}
+
+.acceptance-term-details summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: #ffffff;
+    color: var(--primary);
+    font-weight: 700;
+    cursor: pointer;
+}
+
 .button--full-mobile {
     display: inline-flex;
 }

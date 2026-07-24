@@ -57,10 +57,14 @@ $upgradeNewPlan = trim((string) ($upgradeDetails['new_plan'] ?? ''));
 $upgradeNewTechnology = trim((string) ($upgradeDetails['new_technology'] ?? ''));
 $upgradeBenefitFlags = is_array($upgradeDetails['benefit_flags'] ?? null) ? $upgradeDetails['benefit_flags'] : [];
 $upgradeHasWaiver = !empty($upgradeBenefitFlags['radio_to_fiber']) || !empty($upgradeBenefitFlags['adhesion_waiver']);
+$upgradeSummaryTitle = $upgradeHasWaiver || strcasecmp($upgradeNewTechnology, 'Fibra') === 0
+    ? 'Confirmar migração para iEvo Fibra'
+    : 'Confirmar upgrade / migração';
 $upgradeBenefit = trim((string) ($upgradeDetails['benefit_description'] ?? ''));
 $upgradeBenefitValue = $upgradeHasWaiver
     ? (isset($upgradeDetails['benefit_value']) ? 'R$ ' . number_format((float) $upgradeDetails['benefit_value'], 2, ',', '.') : '-')
     : 'Não se aplica';
+$upgradeAdhesion = $upgradeHasWaiver ? 'Isenta' : 'Conforme condição comercial';
 $upgradeMonthlyValue = isset($upgradeDetails['new_monthly_value']) ? 'R$ ' . number_format((float) $upgradeDetails['new_monthly_value'], 2, ',', '.') : '-';
 $upgradeFidelity = max(1, (int) ($upgradeDetails['fidelity_months'] ?? 12));
 $upgradePenalty = $upgradeHasWaiver
@@ -90,11 +94,11 @@ ob_start();
     <article class="card acceptance-success-card">
         <div class="acceptance-success-card__icon" aria-hidden="true">✓</div>
         <p class="section-heading__eyebrow">Aceite concluído</p>
-        <h1><?= $alreadyAcceptedView ? 'Aceite concluído' : 'Seu aceite foi confirmado com sucesso.'; ?></h1>
+        <h1><?= $upgradeMode ? 'Migração confirmada com sucesso.' : ($alreadyAcceptedView ? 'Aceite concluído' : 'Seu aceite foi confirmado com sucesso.'); ?></h1>
         <p class="page-description">
-            Seu aceite foi registrado com segurança.<br>
-            Você pode acessar uma cópia do termo assinado por este link.<br>
-            Para boletos, faturas, notas e segunda via, acesse a Central do Assinante.
+            <?= $upgradeMode
+                ? 'Seu aceite foi registrado com segurança. A equipe continuará o processo de migração.'
+                : 'Seu aceite foi registrado com segurança. Você pode acessar uma cópia do termo assinado por este link.'; ?>
         </p>
 
         <div class="summary-grid acceptance-success-card__meta">
@@ -102,14 +106,16 @@ ob_start();
                 <span>Cliente</span>
                 <strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
             </div>
-            <div class="summary-item">
-                <span>Provedor</span>
-                <strong><?= htmlspecialchars($providerName, ENT_QUOTES, 'UTF-8'); ?></strong>
-            </div>
-            <div class="summary-item">
-                <span>Protocolo</span>
-                <strong><?= htmlspecialchars($protocol, ENT_QUOTES, 'UTF-8'); ?></strong>
-            </div>
+            <?php if (!$upgradeMode): ?>
+                <div class="summary-item">
+                    <span>Provedor</span>
+                    <strong><?= htmlspecialchars($providerName, ENT_QUOTES, 'UTF-8'); ?></strong>
+                </div>
+                <div class="summary-item">
+                    <span>Protocolo</span>
+                    <strong><?= htmlspecialchars($protocol, ENT_QUOTES, 'UTF-8'); ?></strong>
+                </div>
+            <?php endif; ?>
             <div class="summary-item">
                 <span>Data / hora</span>
                 <strong><?= htmlspecialchars($acceptedAt !== '' ? $acceptedAt : date('Y-m-d H:i:s'), ENT_QUOTES, 'UTF-8'); ?></strong>
@@ -130,8 +136,8 @@ ob_start();
     <article class="acceptance-summary">
         <div class="card acceptance-header">
             <p class="section-heading__eyebrow">Aceite digital</p>
-            <h1><?= htmlspecialchars($contractTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
-            <p class="page-description">Revise os dados abaixo e confirme o aceite eletrônico do contrato.</p>
+            <h1><?= htmlspecialchars($upgradeMode ? $upgradeSummaryTitle : $contractTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
+            <p class="page-description"><?= $upgradeMode ? 'Confira o resumo e confirme a migração pelo celular.' : 'Revise os dados abaixo e confirme o aceite eletrônico do contrato.'; ?></p>
 
             <?php if (!empty($successMessage)): ?>
                 <div class="status-card status-card--success" style="margin-top: 16px;">
@@ -195,13 +201,13 @@ ob_start();
                 </div>
 
                 <div class="summary-grid acceptance-upgrade-summary" style="margin-top: 16px;">
-                    <div class="summary-item summary-item--span-2"><span>Cliente</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item summary-item--span-2"><span>Resumo da alteração</span><strong><?= htmlspecialchars(trim(($upgradeCurrentPlan !== '' ? $upgradeCurrentPlan : 'Plano atual') . ' → ' . ($upgradeNewPlan !== '' ? $upgradeNewPlan : 'novo plano')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Titular</span><strong><?= htmlspecialchars((string) ($customerDetails['nome'] ?? $contract['nome_cliente'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Alteração</span><strong><?= htmlspecialchars(trim(($upgradeCurrentTechnology !== '' ? $upgradeCurrentTechnology : 'Tecnologia atual') . ' para ' . ($upgradeNewTechnology !== '' ? $upgradeNewTechnology : 'nova tecnologia')), ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars($upgradeNewPlan !== '' ? $upgradeNewPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars($upgradeMonthlyValue !== '-' ? $upgradeMonthlyValue : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item summary-item--span-2"><span>Benefício / isenção</span><strong><?= htmlspecialchars($upgradeBenefit !== '' ? $upgradeBenefit : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="summary-item"><span>Adesão</span><strong><?= htmlspecialchars($upgradeAdhesion, ENT_QUOTES, 'UTF-8'); ?></strong></div>
                     <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) $upgradeFidelity, ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
-                    <div class="summary-item summary-item--span-2"><span>Termo</span><strong>Leia o termo completo ao lado.</strong></div>
+                    <div class="summary-item summary-item--span-2"><span>Condição essencial</span><strong><?= htmlspecialchars($upgradeBenefit !== '' ? $upgradeBenefit : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                 </div>
             <?php elseif ($digitalContractMode): ?>
                 <div class="status-card status-card--warning" style="margin-top: 18px;">
@@ -257,8 +263,8 @@ ob_start();
             </div>
 
             <?php if ($upgradeMode || $digitalContractMode): ?>
-                <details class="acceptance-term-details" open>
-                    <summary>Leia o termo completo</summary>
+                <details class="acceptance-term-details">
+                    <summary><?= $upgradeMode ? 'Ler contrato e condições completas' : 'Leia o termo completo'; ?></summary>
                     <div class="acceptance-term" style="margin-top: 12px;">
                         <p><strong>Versão do termo:</strong> <?= htmlspecialchars((string) ($acceptance['termo_versao'] ?? '2026.1'), ENT_QUOTES, 'UTF-8'); ?></p>
                         <p><strong>Validade:</strong> link de uso único com expiração controlada.</p>
@@ -315,16 +321,16 @@ ob_start();
                     <p class="page-description">Ao confirmar, você concorda com os dados e condições exibidos acima.</p>
 
                     <div class="field">
-                        <span>Cliente confirma o aceite?</span>
+                        <span><?= $upgradeMode ? 'Confirmação' : 'Cliente confirma o aceite?'; ?></span>
                         <label class="acceptance-check" data-acceptance-choice>
                             <input type="checkbox" name="aceite_cliente" value="sim" data-acceptance-select required>
                             <span class="acceptance-check__box" aria-hidden="true"></span>
                             <span class="acceptance-check__content">
-                                <strong>Cliente confirma o aceite do contrato</strong>
-                                <small>Marque para confirmar a concordância com o termo exibido acima.</small>
+                                <strong><?= $upgradeMode ? 'Li e aceito o termo de migração.' : 'Cliente confirma o aceite do contrato'; ?></strong>
+                                <small><?= $upgradeMode ? 'Marque para confirmar a migração e as condições apresentadas.' : 'Marque para confirmar a concordância com o termo exibido acima.'; ?></small>
                             </span>
                         </label>
-                        <small class="field-help">Esse registro confirma a concordância com os dados, instalação e evidências anexadas.</small>
+                        <small class="field-help"><?= $upgradeMode ? 'Esse registro confirma a concordância com a alteração para o novo plano/tecnologia.' : 'Esse registro confirma a concordância com os dados, instalação e evidências anexadas.'; ?></small>
                     </div>
 
                     <?php if ($documentValidationRequired && $documentValidationPossible): ?>
@@ -352,7 +358,7 @@ ob_start();
                         </div>
                     <?php endif; ?>
 
-                    <button type="submit" class="button button--full">ACEITO OS TERMOS</button>
+                    <button type="submit" class="button button--full"><?= $upgradeMode ? 'Confirmar migração' : 'ACEITO OS TERMOS'; ?></button>
                 </form>
             <?php endif; ?>
         </div>
