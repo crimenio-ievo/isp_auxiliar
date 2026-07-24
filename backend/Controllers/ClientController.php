@@ -673,7 +673,14 @@ final class ClientController
         }
 
         $localAcceptanceToken = '';
+        $contractData = [];
+        $acceptanceRecord = [];
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
         try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
             $contractData = $this->buildDigitalContractData($login, $clientProfile);
             $contractId = $this->contractRepository->create($contractData) ?? 0;
             if ($contractId <= 0) {
@@ -723,14 +730,33 @@ final class ClientController
                 'status' => 'assinatura_pendente',
                 'tipo_aceite' => 'contrato_digital',
             ], $request);
-            if ($signatureMode === 'remote') {
-                $this->dispatchDigitalContractAcceptance($contractData, is_array($acceptanceRecord) ? $acceptanceRecord : $acceptanceData, $clientProfile, false, $request);
-            } else {
+            if ($signatureMode !== 'remote') {
                 $localAcceptanceToken = (string) ($acceptanceData['token'] ?? '');
             }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
         } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             Flash::set('error', 'Nao foi possivel solicitar o contrato digital agora: ' . $exception->getMessage());
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if ($signatureMode === 'remote') {
+            try {
+                $this->dispatchDigitalContractAcceptance($contractData, $acceptanceRecord, $clientProfile, false, $request);
+            } catch (\Throwable $exception) {
+                $this->recordAudit('contract.digital.dispatch_failed', 'contract_acceptance', (int) ($acceptanceRecord['id'] ?? 0), [
+                    'contract_id' => (int) ($contractData['id'] ?? 0),
+                    'login' => $login,
+                    'error' => $exception->getMessage(),
+                    'requeue_required' => true,
+                ], $request);
+                Flash::set('warning', 'Contrato e aceite foram preparados, mas um canal de envio falhou. Retome o processo para tentar novamente.');
+                return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+            }
         }
 
         if ($signatureMode === 'local' && $localAcceptanceToken !== '') {
