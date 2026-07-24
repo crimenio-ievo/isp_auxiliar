@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Config;
+use App\Core\Csrf;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
@@ -17,6 +18,7 @@ use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
+use App\Services\Processes\OperationalProcessService;
 
 /**
  * Controla a rota publica de aceite digital.
@@ -35,7 +37,8 @@ final class AcceptanceController
         private Database $database,
         private LocalRepository $localRepository,
         private MkAuthClient $mkauthClient,
-        private MkAuthDatabase $mkauthDatabase
+        private MkAuthDatabase $mkauthDatabase,
+        private OperationalProcessService $operationalProcessService
     ) {
     }
 
@@ -68,6 +71,7 @@ final class AcceptanceController
             'documentValidationRequired' => (bool) ($context['documentValidationRequired'] ?? false),
             'documentValidationDigits' => (int) ($context['documentValidationDigits'] ?? 3),
             'documentValidationPossible' => (bool) ($context['documentValidationPossible'] ?? false),
+            'csrfToken' => Csrf::token($this->csrfScope($token)),
             'errorMessage' => $flash['error'] ?? null,
             'successMessage' => $flash['success'] ?? null,
         ]);
@@ -78,6 +82,10 @@ final class AcceptanceController
     public function term(Request $request): Response
     {
         $token = trim((string) $request->route('token', ''));
+        if ($request->method() === 'POST' && !Csrf::verify($request, $this->csrfScope($token))) {
+            Flash::set('error', 'A sessão de segurança expirou. Reabra o termo e tente novamente.');
+            return Response::redirect('/aceite/' . rawurlencode($token) . '/termo');
+        }
         $context = $this->loadContextByToken($token);
         $acceptance = is_array($context['acceptance'] ?? null) ? $context['acceptance'] : [];
 
@@ -154,6 +162,7 @@ final class AcceptanceController
             'termAttemptsRemaining' => $termAttemptsRemaining,
             'termValidationError' => $termValidationError,
             'termValidationDigits' => $documentDigits,
+            'csrfToken' => Csrf::token($this->csrfScope($token)),
         ]);
 
         return Response::html($html);
@@ -162,6 +171,10 @@ final class AcceptanceController
     public function confirm(Request $request): Response
     {
         $token = trim((string) $request->route('token', ''));
+        if (!Csrf::verify($request, $this->csrfScope($token))) {
+            Flash::set('error', 'A sessão de segurança expirou. Reabra o aceite e tente novamente.');
+            return Response::redirect('/aceite/' . rawurlencode($token));
+        }
         $context = $this->loadContextByToken($token);
 
         if (!empty($context['error'])) {
@@ -379,6 +392,7 @@ final class AcceptanceController
         if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
             $this->queueUpgradeOperationalTask($contract, $acceptance, $acceptanceId, $request);
         }
+        $this->operationalProcessService->synchronizeAcceptance($acceptanceId);
 
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -1355,6 +1369,19 @@ final class AcceptanceController
         if ($binary === null) {
             throw new \RuntimeException('A assinatura informada não pôde ser processada.');
         }
+        if (strlen($binary) > 5 * 1024 * 1024) {
+            throw new \RuntimeException('A assinatura excede o limite de 5 MB.');
+        }
+        $imageInfo = @getimagesizefromstring($binary);
+        if (!is_array($imageInfo)
+            || !in_array((int) ($imageInfo[2] ?? 0), [IMAGETYPE_PNG, IMAGETYPE_JPEG], true)
+            || (int) ($imageInfo[0] ?? 0) <= 0
+            || (int) ($imageInfo[1] ?? 0) <= 0
+            || (int) ($imageInfo[0] ?? 0) > 8000
+            || (int) ($imageInfo[1] ?? 0) > 8000
+        ) {
+            throw new \RuntimeException('O arquivo da assinatura não é uma imagem PNG/JPEG válida.');
+        }
 
         $rootPath = dirname(__DIR__, 2);
         $directory = $rootPath . '/storage/contracts/acceptances';
@@ -1433,5 +1460,10 @@ final class AcceptanceController
         }
 
         return 'storage/contracts/acceptances/' . $fileName;
+    }
+
+    private function csrfScope(string $token): string
+    {
+        return 'public_acceptance:' . hash('sha256', $token);
     }
 }

@@ -318,6 +318,7 @@ ob_start();
                     data-document-validation-required="<?= $documentValidationRequired ? '1' : '0'; ?>"
                     data-document-validation-digits="<?= htmlspecialchars((string) $documentValidationDigits, ENT_QUOTES, 'UTF-8'); ?>"
                 >
+                    <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                     <p class="page-description">Ao confirmar, você concorda com os dados e condições exibidos acima.</p>
 
                     <div class="field">
