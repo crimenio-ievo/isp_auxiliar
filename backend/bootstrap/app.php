@@ -27,6 +27,10 @@ use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
+use App\Infrastructure\Processes\OperationalProcessRepository;
+use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\MkAuth\MkAuthPlanChangeService;
+use App\Services\Processes\OperationalProcessService;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -124,6 +128,11 @@ function bootstrapApplication(): Application
     $container->set(FinancialTaskRepository::class, new FinancialTaskRepository($localDatabase));
     $container->set(MessageTemplateRepository::class, new MessageTemplateRepository($localDatabase));
     $container->set(NotificationLogRepository::class, new NotificationLogRepository($localDatabase));
+    $container->set(OperationalProcessRepository::class, new OperationalProcessRepository(
+        $localDatabase,
+        $localRepository
+    ));
+    $container->set(AcceptanceWorkflowService::class, new AcceptanceWorkflowService($config));
     $container->set(EvotrixService::class, new EvotrixService(
         (array) $config->get('evotrix', []),
         $container->get(NotificationLogRepository::class)
@@ -169,6 +178,18 @@ function bootstrapApplication(): Application
         $setting('mkauth_client_id', 'MKAUTH_CLIENT_ID'),
         $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET'),
         $container->get(MkAuthWriteGuard::class)
+    ));
+    $container->set(MkAuthPlanChangeService::class, new MkAuthPlanChangeService(
+        $container->get(MkAuthDatabase::class),
+        $container->get(MkAuthClient::class),
+        $container->get(MkAuthWriteGuard::class)
+    ));
+    $container->set(OperationalProcessService::class, new OperationalProcessService(
+        $localDatabase,
+        $container->get(OperationalProcessRepository::class),
+        $container->get(ContractAcceptanceRepository::class),
+        $container->get(FinancialTaskRepository::class),
+        $localRepository
     ));
 
     $router = new Router();

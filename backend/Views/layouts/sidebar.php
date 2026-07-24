@@ -16,6 +16,7 @@ $navigationItems = [
 
 if ($canAccessContracts) {
     $navigationItems[] = ['/contratos', 'Contratos', 'CT'];
+    $navigationItems[] = ['/processos', 'Processos', 'PR'];
 }
 
 $navigationItems[] = ['/logs', 'Logs', 'LG'];
@@ -40,6 +41,7 @@ if ($canManageSettings) {
             $isActive = $currentPath === $href
                 || ($href === '/clientes' && str_starts_with($currentPath, '/clientes'))
                 || ($href === '/contratos' && str_starts_with($currentPath, '/contratos'))
+                || ($href === '/processos' && str_starts_with($currentPath, '/processos'))
                 || ($href === '/logs' && str_starts_with($currentPath, '/logs'))
                 || ($href === '/configuracoes' && str_starts_with($currentPath, '/configuracoes'));
             ?>

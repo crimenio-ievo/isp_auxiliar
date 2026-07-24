@@ -22,6 +22,8 @@ use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
+use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\Processes\OperationalProcessService;
 
 /**
  * Fluxo de cadastro de novo cliente.
@@ -44,7 +46,9 @@ final class ClientController
         private MessageTemplateRepository $messageTemplateRepository,
         private EmailService $emailService,
         private EvotrixService $evotrixService,
-        private MkAuthTicketService $mkAuthTicketService
+        private MkAuthTicketService $mkAuthTicketService,
+        private AcceptanceWorkflowService $acceptanceWorkflowService,
+        private OperationalProcessService $operationalProcessService
     ) {
     }
 
@@ -501,6 +505,12 @@ final class ClientController
 
         try {
             $this->transitionUpgradeForCorrection($contract, $acceptance, 'cancelled', $reason, $request);
+            $this->operationalProcessService->cancelForContract(
+                OperationalProcessService::TYPE_MIGRATION,
+                $contractId,
+                $this->resolveUser(),
+                $reason
+            );
             Flash::set('success', 'Solicitação cancelada. O link antigo foi invalidado e a pendência encerrada.');
         } catch (\Throwable $exception) {
             Flash::set('error', 'Não foi possível cancelar a solicitação: ' . $exception->getMessage());
@@ -591,6 +601,19 @@ final class ClientController
             try {
                 $pendingContractId = (int) ($pending['contract']['id'] ?? 0);
                 $pendingAcceptanceId = (int) ($pending['acceptance']['id'] ?? 0);
+                $this->operationalProcessService->ensureForContract(
+                    OperationalProcessService::TYPE_STANDALONE_SIGNATURE,
+                    $pending['contract'],
+                    $pending['acceptance'],
+                    [
+                        'login' => $login,
+                        'client_name' => (string) ($clientProfile['nome'] ?? ''),
+                        'phone' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? ''),
+                        'email' => (string) ($clientProfile['email'] ?? ''),
+                        'signature_mode' => $signatureMode,
+                    ],
+                    $this->resolveUser()
+                );
                 if ($signatureMode === 'local') {
                     $termBody = $this->buildContractTermBody($pending['contract']);
                     $localAcceptance = $this->buildDigitalContractAcceptanceData(
@@ -608,6 +631,21 @@ final class ClientController
                     if ($pendingAcceptanceId > 0) {
                         $this->contractAcceptanceRepository->cancel($pendingAcceptanceId);
                     }
+                    $localAcceptanceRecord = $this->contractAcceptanceRepository->findById($localAcceptanceId)
+                        ?? array_merge($localAcceptance, ['id' => $localAcceptanceId]);
+                    $this->operationalProcessService->ensureForContract(
+                        OperationalProcessService::TYPE_STANDALONE_SIGNATURE,
+                        $pending['contract'],
+                        $localAcceptanceRecord,
+                        [
+                            'login' => $login,
+                            'client_name' => (string) ($clientProfile['nome'] ?? ''),
+                            'phone' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? ''),
+                            'email' => (string) ($clientProfile['email'] ?? ''),
+                            'signature_mode' => 'local',
+                        ],
+                        $this->resolveUser()
+                    );
                     $this->recordAudit('contract.acceptance.local_prepared', 'contract_acceptance', $localAcceptanceId, [
                         'login' => $login,
                         'contract_id' => $pendingContractId,
@@ -659,6 +697,19 @@ final class ClientController
             }
 
             $acceptanceRecord = $this->contractAcceptanceRepository->findById($acceptanceId) ?? array_merge($acceptanceData, ['id' => $acceptanceId]);
+            $this->operationalProcessService->ensureForContract(
+                OperationalProcessService::TYPE_STANDALONE_SIGNATURE,
+                $contractData,
+                is_array($acceptanceRecord) ? $acceptanceRecord : array_merge($acceptanceData, ['id' => $acceptanceId]),
+                [
+                    'login' => $login,
+                    'client_name' => (string) ($clientProfile['nome'] ?? ''),
+                    'phone' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? ''),
+                    'email' => (string) ($clientProfile['email'] ?? ''),
+                    'signature_mode' => $signatureMode,
+                ],
+                $this->resolveUser()
+            );
             $this->recordAudit('contract.digital.created', 'client_contract', $contractId, [
                 'login' => $login,
                 'contract_id' => $contractId,
@@ -2139,6 +2190,11 @@ final class ClientController
         $statusVisual = $this->resolveClientStatusVisual($clientProfile);
         $digitalContract = $this->buildDigitalContractSummary($login, $clientProfile, $contracts);
         $upgradeProcess = $this->buildUpgradeProcessSummary($login, $contracts);
+        try {
+            $operationalProcesses = $this->operationalProcessService->listByLogin($login);
+        } catch (\Throwable) {
+            $operationalProcesses = [];
+        }
 
         $profile = [
             'name' => trim((string) ($clientProfile['nome'] ?? $primaryContract['nome_cliente'] ?? $registration['client_name'] ?? '-')),
@@ -2162,6 +2218,7 @@ final class ClientController
             'contracts' => array_values(array_map(fn (array $item): array => $this->normalizeContractSummary($item), $contracts)),
             'digitalContract' => $digitalContract,
             'upgradeProcess' => $upgradeProcess,
+            'operationalProcesses' => $operationalProcesses,
             'acceptance' => $acceptance,
             'acceptanceHistory' => is_array($acceptanceRecords) ? $acceptanceRecords : [],
             'financialTask' => $financialTask,
@@ -4389,6 +4446,26 @@ final class ClientController
                     $this->dispatchAutomaticFinancialTicket($contractId, $contractData, (int) $financialTask['id'], $request);
                 }
             }
+
+            if ($acceptanceId > 0) {
+                $contractData['id'] = $contractId;
+                $acceptanceRecord = $this->contractAcceptanceRepository->findById($acceptanceId)
+                    ?? array_merge($acceptanceData, ['id' => $acceptanceId]);
+                $this->operationalProcessService->ensureForContract(
+                    OperationalProcessService::TYPE_INSTALLATION,
+                    $contractData,
+                    $acceptanceRecord,
+                    [
+                        'login' => (string) $contractData['mkauth_login'],
+                        'client_name' => (string) ($contractData['nome_cliente'] ?? ''),
+                        'phone' => (string) ($contractData['telefone_cliente'] ?? ''),
+                        'email' => (string) ($data['email_original'] ?? $data['email'] ?? ''),
+                        'registration_id' => $registrationId,
+                        'signature_mode' => $this->normalizeBoolean((string) ($data['assinatura_remota'] ?? '0')) ? 'remote' : 'local',
+                    ],
+                    $this->resolveUser()
+                );
+            }
         } catch (\Throwable $exception) {
             $this->recordAudit('contract.flow_failed', 'client_contract', $registrationId, [
                 'login' => (string) ($payload['login'] ?? $data['login'] ?? ''),
@@ -5024,6 +5101,19 @@ final class ClientController
 
         $acceptanceRecord = $this->contractAcceptanceRepository->findById($acceptanceId) ?? array_merge($acceptanceData, ['id' => $acceptanceId]);
         $contractData['acceptance_id'] = $acceptanceId;
+        $this->operationalProcessService->ensureForContract(
+            OperationalProcessService::TYPE_MIGRATION,
+            $contractData,
+            is_array($acceptanceRecord) ? $acceptanceRecord : array_merge($acceptanceData, ['id' => $acceptanceId]),
+            [
+                'login' => (string) $contractData['mkauth_login'],
+                'client_name' => (string) ($contractData['nome_cliente'] ?? ''),
+                'email' => (string) ($context['clientProfile']['email'] ?? ''),
+                'upgrade_snapshot' => $this->extractUpgradeSnapshot($contractData),
+                'signature_mode' => (string) ($data['signature_mode'] ?? 'remote'),
+            ],
+            $this->resolveUser()
+        );
         $this->recordAudit('contract.upgrade.created', 'client_contract', $contractId, [
             'login' => (string) $contractData['mkauth_login'],
             'contract_id' => $contractId,
@@ -5255,25 +5345,19 @@ final class ClientController
     {
         $technician = $this->resolveTechnicianIdentity();
 
-        return [
+        return $this->acceptanceWorkflowService->prepare([
             'contract_id' => $contractId,
             'technician_name' => $technician['name'],
             'technician_login' => $technician['login'],
-            'token' => bin2hex(random_bytes(16)),
-            'token_expires_at' => (new \DateTimeImmutable())->modify('+' . max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48)) . ' hours')->format('Y-m-d H:i:s'),
             'status' => 'assinatura_pendente',
-            'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'phone' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'signature_mode' => $signatureMode,
             'remote_signature_reason' => $signatureMode === 'remote' ? trim($remoteSignatureReason) : null,
-            'whatsapp_message_id' => null,
-            'sent_at' => null,
-            'accepted_at' => null,
             'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
             'user_agent' => (string) $request->header('User-Agent', ''),
-            'termo_versao' => (string) $this->config->get('contracts.term_version', '2026.1'),
-            'termo_hash' => $termHash,
-            'pdf_path' => null,
-            'evidence_json_path' => null,
-        ];
+            'document_version' => (string) $this->config->get('contracts.term_version', '2026.1'),
+            'term_hash' => $termHash,
+        ]);
     }
 
     private function formatClientProfileAddress(array $clientProfile): string
@@ -5420,27 +5504,21 @@ final class ClientController
     {
         $technician = $this->resolveTechnicianIdentity();
 
-        return [
+        return $this->acceptanceWorkflowService->prepare([
             'contract_id' => $contractId,
             'technician_name' => $technician['name'],
             'technician_login' => $technician['login'],
-            'token' => bin2hex(random_bytes(16)),
-            'token_expires_at' => (new \DateTimeImmutable())->modify('+' . max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48)) . ' hours')->format('Y-m-d H:i:s'),
             'status' => 'assinatura_pendente',
-            'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'phone' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'signature_mode' => (string) ($data['signature_mode'] ?? 'remote'),
             'remote_signature_reason' => ($data['signature_mode'] ?? 'remote') === 'remote'
                 ? trim((string) ($data['remote_signature_reason'] ?? ''))
                 : null,
-            'whatsapp_message_id' => null,
-            'sent_at' => null,
-            'accepted_at' => null,
             'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
             'user_agent' => (string) $request->header('User-Agent', ''),
-            'termo_versao' => (string) $this->config->get('contracts.term_version', '2026.1'),
-            'termo_hash' => $termHash,
-            'pdf_path' => null,
-            'evidence_json_path' => null,
-        ];
+            'document_version' => (string) $this->config->get('contracts.term_version', '2026.1'),
+            'term_hash' => $termHash,
+        ]);
     }
 
     private function extractUpgradeSnapshot(array $contract): array
@@ -5736,33 +5814,23 @@ final class ClientController
 
     private function buildAcceptanceData(int $contractId, array $data, array $contractData, string $termHash, Request $request): array
     {
-        $ttlHours = max(1, (int) $this->config->get('contracts.commercial.validade_link_aceite_horas', 48));
-        $expiresAt = (new \DateTimeImmutable())->modify('+' . $ttlHours . ' hours')->format('Y-m-d H:i:s');
-        $plainToken = bin2hex(random_bytes(16));
         $technician = $this->resolveTechnicianIdentity();
         $remoteSignature = $this->normalizeBoolean((string) ($data['assinatura_remota'] ?? '0'));
         $remoteReason = trim((string) ($data['assinatura_remota_motivo'] ?? ''));
-        $acceptanceData = [
+
+        return $this->acceptanceWorkflowService->prepare([
             'contract_id' => $contractId,
             'technician_name' => $technician['name'],
             'technician_login' => $technician['login'],
-            'token' => $plainToken,
-            'token_expires_at' => $expiresAt,
             'status' => $remoteSignature ? 'assinatura_pendente' : 'criado',
-            'telefone_enviado' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'phone' => (string) ($contractData['telefone_cliente'] ?? ''),
+            'signature_mode' => $remoteSignature ? 'remote' : 'local',
             'remote_signature_reason' => $remoteSignature ? $remoteReason : null,
-            'whatsapp_message_id' => null,
-            'sent_at' => null,
-            'accepted_at' => null,
             'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
             'user_agent' => (string) $request->header('User-Agent', ''),
-            'termo_versao' => (string) $this->config->get('contracts.term_version', '2026.1'),
-            'termo_hash' => $termHash,
-            'pdf_path' => null,
-            'evidence_json_path' => null,
-        ];
-
-        return $acceptanceData;
+            'document_version' => (string) $this->config->get('contracts.term_version', '2026.1'),
+            'term_hash' => $termHash,
+        ]);
     }
 
     private function buildFinancialTaskData(int $contractId, array $contractData): array

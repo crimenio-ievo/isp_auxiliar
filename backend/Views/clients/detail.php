@@ -9,6 +9,7 @@ $profile = is_array($detail['profile'] ?? null) ? $detail['profile'] : [];
 $contracts = is_array($detail['contracts'] ?? null) ? $detail['contracts'] : [];
 $digitalContract = is_array($detail['digitalContract'] ?? null) ? $detail['digitalContract'] : [];
 $upgradeProcess = is_array($detail['upgradeProcess'] ?? null) ? $detail['upgradeProcess'] : [];
+$operationalProcesses = is_array($detail['operationalProcesses'] ?? null) ? $detail['operationalProcesses'] : [];
 $acceptanceHistory = is_array($detail['acceptanceHistory'] ?? null) ? $detail['acceptanceHistory'] : [];
 $financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
 $registration = is_array($detail['registration'] ?? null) ? $detail['registration'] : [];
@@ -113,6 +114,42 @@ ob_start();
         </div>
     <?php endif; ?>
 </section>
+
+<?php if ($operationalProcesses !== []): ?>
+    <section class="card" id="operational-processes">
+        <div class="section-heading">
+            <p class="section-heading__eyebrow">Pendências visíveis</p>
+            <h2>Processos operacionais do cliente</h2>
+        </div>
+        <div class="process-card-grid">
+            <?php foreach ($operationalProcesses as $process): ?>
+                <?php
+                $processStatus = (string) ($process['status'] ?? 'in_progress');
+                $tone = $processStatus === 'attention'
+                    ? 'danger'
+                    : (str_starts_with($processStatus, 'waiting_') ? 'warning' : ($processStatus === 'completed' ? 'success' : 'info'));
+                ?>
+                <article class="process-summary-card process-summary-card--<?= htmlspecialchars($tone, ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="process-summary-card__header">
+                        <div>
+                            <strong><?= htmlspecialchars((string) ($process['type_label'] ?? 'Processo'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <small><?= (int) ($process['progress_completed'] ?? 0); ?> de <?= (int) ($process['progress_total'] ?? 0); ?> etapas concluídas</small>
+                        </div>
+                        <span class="process-status process-status--<?= htmlspecialchars($tone, ENT_QUOTES, 'UTF-8'); ?>"><?= htmlspecialchars((string) ($process['status_label'] ?? 'Em andamento'), ENT_QUOTES, 'UTF-8'); ?></span>
+                    </div>
+                    <div class="process-progress"><span style="width: <?= max(0, min(100, (int) ($process['progress_percent'] ?? 0))); ?>%"></span></div>
+                    <p class="page-description"><strong>Próxima pendência:</strong> <?= htmlspecialchars((string) ($process['next_pending_label'] ?? 'Nenhuma'), ENT_QUOTES, 'UTF-8'); ?></p>
+                    <div class="hero-actions">
+                        <?php if (!in_array($processStatus, ['completed', 'cancelled'], true)): ?>
+                            <a class="button button--small" href="<?= htmlspecialchars(Url::to((string) ($process['resume_url'] ?? '#')), ENT_QUOTES, 'UTF-8'); ?>">Continuar próxima pendência</a>
+                        <?php endif; ?>
+                        <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to((string) ($process['detail_url'] ?? '#')), ENT_QUOTES, 'UTF-8'); ?>">Ver todas as etapas</a>
+                    </div>
+                </article>
+            <?php endforeach; ?>
+        </div>
+    </section>
+<?php endif; ?>
 
 <?php if ($canCorrectCurrent || $canCorrectCompleted): ?>
     <div class="contract-send-modal" id="client-upgrade-correct-modal" data-upgrade-action-modal hidden>

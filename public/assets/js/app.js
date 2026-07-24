@@ -3443,3 +3443,39 @@ document.querySelectorAll('[data-channel-choice]').forEach((choiceBlock) => {
         }, true);
     }
 });
+
+document.querySelectorAll('form[data-single-submit-form]').forEach((form) => {
+    if (!(form instanceof HTMLFormElement)) {
+        return;
+    }
+
+    const actionInput = form.querySelector('[data-process-action-input]');
+    const submitButtons = Array.from(form.querySelectorAll('button[type="submit"]'));
+    let submitted = false;
+
+    submitButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            if (actionInput instanceof HTMLInputElement) {
+                actionInput.value = button.getAttribute('data-process-action') || 'save';
+            }
+        });
+    });
+
+    form.addEventListener('submit', (event) => {
+        if (submitted) {
+            event.preventDefault();
+            return;
+        }
+
+        submitted = true;
+        form.setAttribute('aria-busy', 'true');
+        submitButtons.forEach((button) => {
+            if (!(button instanceof HTMLButtonElement)) {
+                return;
+            }
+            button.disabled = true;
+            button.dataset.originalLabel = button.textContent || 'Salvar';
+            button.textContent = 'Salvando...';
+        });
+    });
+});
