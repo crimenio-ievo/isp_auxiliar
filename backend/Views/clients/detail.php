@@ -26,6 +26,17 @@ $canCancelCurrent = !empty($canCancelPendingContract)
     && !empty($upgradeProcess['active'])
     && empty($upgradeProcess['accepted'])
     && empty($upgradeProcess['completed']);
+$activeOperationalMigration = null;
+foreach ($operationalProcesses as $candidateProcess) {
+    if (!is_array($candidateProcess)
+        || (string) ($candidateProcess['process_type'] ?? '') !== 'migration'
+        || in_array((string) ($candidateProcess['status'] ?? ''), ['completed', 'cancelled'], true)
+    ) {
+        continue;
+    }
+    $activeOperationalMigration = $candidateProcess;
+    break;
+}
 ob_start();
 ?>
 <section class="page-header">
@@ -341,7 +352,11 @@ ob_start();
         <?php if (!empty($canRequestUpgrade) && empty($upgradeProcess['open']) && empty($upgradeProcess['completed'])): ?>
             <a class="button button--small" href="<?= htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Iniciar Upgrade / Migração</a>
         <?php elseif (!empty($upgradeProcess['open'])): ?>
-            <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) ($upgradeProcess['resume_url'] ?? '#upgrade-checklist'), ENT_QUOTES, 'UTF-8'); ?>">Retomar upgrade</a>
+            <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to((string) (
+                is_array($activeOperationalMigration)
+                    ? ($activeOperationalMigration['resume_url'] ?? '/processos/detalhe?id=' . (int) ($activeOperationalMigration['id'] ?? 0))
+                    : ($upgradeProcess['resume_url'] ?? '#upgrade-checklist')
+            )), ENT_QUOTES, 'UTF-8'); ?>">Retomar upgrade</a>
             <?php if (trim((string) ($upgradeProcess['detail_url'] ?? '')) !== ''): ?>
                 <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) $upgradeProcess['detail_url'], ENT_QUOTES, 'UTF-8'); ?>">Ver contrato</a>
             <?php endif; ?>
@@ -366,7 +381,11 @@ ob_start();
         <?php endif; ?>
     </div>
 
-    <?php if (!empty($upgradeProcess['active']) && !empty($canCompleteUpgradeTechnical)): ?>
+    <?php if (is_array($activeOperationalMigration)): ?>
+        <div class="alert alert--info" style="margin-top: 18px;">
+            A execução agora utiliza o checklist operacional compartilhado. As pendências podem ser salvas e retomadas sem marcar a migração como concluída.
+        </div>
+    <?php elseif (!empty($upgradeProcess['active']) && !empty($canCompleteUpgradeTechnical)): ?>
         <?php $technicalChecklist = is_array($upgradeProcess['checklist'] ?? null) ? $upgradeProcess['checklist'] : []; ?>
         <form id="upgrade-checklist" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/execucao-tecnica'), ENT_QUOTES, 'UTF-8'); ?>" style="margin-top: 18px;">
             <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
