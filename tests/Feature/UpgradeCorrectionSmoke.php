@@ -10,6 +10,7 @@ use App\Infrastructure\Contracts\ContractRepository;
 use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\MkAuth\TechnologyMapper;
 
 require dirname(__DIR__, 2) . '/backend/bootstrap/app.php';
 
@@ -159,11 +160,12 @@ try {
     $assert(!(bool) $app->config()->get('app.mkauth.write_enabled', false), 'O teste exige MKAUTH_WRITE_ENABLED bloqueado.');
 
     $controller = (new ReflectionClass(ClientController::class))->newInstanceWithoutConstructor();
+    (new ReflectionClass(ClientController::class))->getProperty('technologyMapper')->setValue($controller, new TechnologyMapper());
     $validate = new ReflectionMethod(ClientController::class, 'validateUpgrade');
     $plans = [
-        ['id' => 'radio-10', 'name' => 'Rádio 10 Mega', 'label' => 'Rádio 10 Mega', 'install_type' => 'radio', 'value' => '100.00'],
-        ['id' => 'radio-20', 'name' => 'Rádio 20 Mega', 'label' => 'Rádio 20 Mega', 'install_type' => 'radio', 'value' => '100.00'],
-        ['id' => 'fibra-100', 'name' => 'Fibra 100 Mega', 'label' => 'Fibra 100 Mega', 'install_type' => 'fibra', 'value' => '120.00'],
+        ['id' => 'radio-10', 'name' => 'Rádio 10 Mega', 'label' => 'Rádio 10 Mega', 'install_type' => 'radio', 'technology' => 'D', 'value' => '100.00'],
+        ['id' => 'radio-20', 'name' => 'Rádio 20 Mega', 'label' => 'Rádio 20 Mega', 'install_type' => 'radio', 'technology' => 'D', 'value' => '100.00'],
+        ['id' => 'fibra-100', 'name' => 'Fibra 100 Mega', 'label' => 'Fibra 100 Mega', 'install_type' => 'fibra', 'technology' => 'H', 'value' => '120.00'],
     ];
     $validationContext = ['current_plan' => 'radio-10', 'current_monthly_value' => 100.0, 'planOptions' => $plans];
     $validBase = [
@@ -184,13 +186,13 @@ try {
     ];
 
     $errors = $validate->invoke($controller, array_replace($validBase, ['operation_type' => 'migration']), $validationContext);
-    $assert($hasError($errors, 'Migração exige tecnologias diferentes'), 'Migração na mesma tecnologia não foi bloqueada.');
+    $assert($hasError($errors, 'tecnologias iguais não são migração'), 'Migração na mesma tecnologia não foi bloqueada.');
     $errors = $validate->invoke($controller, array_replace($validBase, ['new_plan_id' => 'radio-10', 'novo_plano' => 'radio-10']), $validationContext);
-    $assert($hasError($errors, 'Upgrade exige um plano novo diferente'), 'Upgrade para o mesmo plano não foi bloqueado.');
+    $assert($hasError($errors, 'Selecione um plano diferente'), 'Upgrade para o mesmo plano não foi bloqueado.');
     $errors = $validate->invoke($controller, array_replace($validBase, ['confirm_same_value' => false]), $validationContext);
-    $assert($hasError($errors, 'mesmo valor mensal'), 'Upgrade com valor igual não exigiu confirmação explícita.');
+    $assert($errors === [], 'Upgrade válido com valor igual foi bloqueado indevidamente.');
     $errors = $validate->invoke($controller, array_replace($validBase, ['review_confirmed' => false]), $validationContext);
-    $assert($hasError($errors, 'Confirme a revisão final'), 'Revisão final obrigatória não foi validada.');
+    $assert($errors === [], 'Campo de revisão removido continuou bloqueando o fluxo.');
     $errors = $validate->invoke($controller, array_replace($validBase, [
         'operation_type' => 'migration',
         'novo_plano' => 'fibra-100',

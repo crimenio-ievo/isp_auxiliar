@@ -376,7 +376,11 @@ try {
         $app->config(),
         $local,
         $service,
-        $planService
+        $planService,
+        $contracts,
+        $acceptances,
+        $financialTasks,
+        new MkAuthDatabase('', '3306', '', '', '', 'utf8mb4', 'sha256', $guard)
     );
     $detailResponse = $processController->detail(new Request(
         'GET',
