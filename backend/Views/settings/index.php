@@ -11,6 +11,12 @@ $storedConfig = is_array($storedConfig ?? null) ? $storedConfig : [];
 $permissionsConfig = is_array($permissionsConfig ?? null) ? $permissionsConfig : [];
 $configSource = is_array($configSource ?? null) ? $configSource : [];
 $currentTab = (string) ($currentTab ?? 'geral');
+$messageTemplates = is_array($messageTemplates ?? null) ? $messageTemplates : [];
+$selectedMessageTemplate = is_array($selectedMessageTemplate ?? null) ? $selectedMessageTemplate : [];
+$messageTemplateHistory = is_array($messageTemplateHistory ?? null) ? $messageTemplateHistory : [];
+$notificationChannels = is_array($notificationChannels ?? null) ? $notificationChannels : [];
+$messageVariables = is_array($messageVariables ?? null) ? $messageVariables : [];
+$messageCsrfToken = (string) ($messageCsrfToken ?? '');
 
 $commercial = is_array($moduleConfig['commercial'] ?? null) ? $moduleConfig['commercial'] : [];
 $email = is_array($moduleConfig['email'] ?? null) ? $moduleConfig['email'] : [];
@@ -54,6 +60,7 @@ $tabs = [
     'contratos' => 'Contratos e Aceites',
     'email' => 'E-mail / SMTP',
     'evotrix' => 'Evotrix / WhatsApp',
+    'mensagens' => 'Mensagens e notificações',
     'sistema' => 'Sistema',
 ];
 
@@ -377,6 +384,13 @@ ob_start();
                         <span>Multa padrão</span>
                         <input type="text" name="multa_padrao" inputmode="decimal" value="<?= htmlspecialchars($moneyValue($commercial['multa_padrao'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
                     </label>
+                    <label class="field">
+                        <span>Isenção em migração rádio → fibra</span>
+                        <select name="isentar_adesao_migracao_radio_fibra">
+                            <option value="0" <?= $selected(empty($commercial['isentar_adesao_migracao_radio_fibra'])); ?>>Não aplicar automaticamente</option>
+                            <option value="1" <?= $selected(!empty($commercial['isentar_adesao_migracao_radio_fibra'])); ?>>Aplicar pela regra configurada</option>
+                        </select>
+                    </label>
                 </div>
             </section>
             <section class="card field--span-2">
@@ -557,6 +571,58 @@ ob_start();
                 </div>
             </section>
         </form>
+    <?php elseif ($currentTab === 'mensagens'): ?>
+        <?php
+        $enabledChannels = json_decode((string) ($selectedMessageTemplate['enabled_channels_json'] ?? '[]'), true);
+        $enabledChannels = is_array($enabledChannels) ? $enabledChannels : [];
+        $selectedChannel = (string) ($selectedMessageTemplate['channel'] ?? '');
+        $previewValues = [
+            '%nomecliente%' => 'Maria da Silva', '%nomeresumido%' => 'Maria', '%documentocliente%' => '123.***.***-00',
+            '%logincliente%' => 'maria.exemplo', '%telefonecliente%' => '5531999999999', '%emailcliente%' => 'maria@example.test',
+            '%planoatual%' => 'Plano atual', '%novoplano%' => 'Plano novo', '%valoratual%' => 'R$ 79,90', '%novovalor%' => 'R$ 99,90',
+            '%tecnologiaatual%' => 'Rádio fixo (FWA)', '%novatecnologia%' => 'Fibra até o imóvel (FTTH)',
+            '%beneficio%' => 'Isenção de instalação', '%fidelidade%' => '12 meses', '%linkaceite%' => 'https://example.test/aceite/exemplo',
+            '%data%' => date('d/m/Y'), '%nomeprovedor%' => (string) ($provider['name'] ?? 'Provedor Exemplo'), '%protocoloprocesso%' => 'MIG-000123',
+        ];
+        $previewSubject = strtr((string) ($selectedMessageTemplate['subject'] ?? ''), $previewValues);
+        $previewBody = strtr((string) ($selectedMessageTemplate['body'] ?? ''), $previewValues);
+        ?>
+        <section class="content-grid">
+            <aside class="card">
+                <div class="section-heading"><p class="section-heading__eyebrow">Eventos</p><h2>Templates</h2></div>
+                <div class="document-list">
+                    <?php foreach ($messageTemplates as $template): ?>
+                        <a href="<?= htmlspecialchars(Url::to('/configuracoes?tab=mensagens&template_id=' . (int) ($template['id'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?>">
+                            <span><?= (int) ($template['id'] ?? 0); ?></span>
+                            <strong><?= htmlspecialchars((string) ($template['description'] ?? $template['purpose'] ?? 'Template'), ENT_QUOTES, 'UTF-8'); ?><small><?= htmlspecialchars((string) ($template['channel'] ?? ''), ENT_QUOTES, 'UTF-8'); ?> · v<?= (int) ($template['version'] ?? 1); ?></small></strong>
+                            <span aria-hidden="true">›</span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            </aside>
+            <div class="content-grid">
+                <?php if ($selectedMessageTemplate !== []): ?>
+                    <form class="card" method="post" action="<?= htmlspecialchars(Url::to('/configuracoes?tab=mensagens&template_id=' . (int) $selectedMessageTemplate['id']), ENT_QUOTES, 'UTF-8'); ?>" data-prevent-double-submit>
+                        <input type="hidden" name="_csrf" value="<?= htmlspecialchars($messageCsrfToken, ENT_QUOTES, 'UTF-8'); ?>"><input type="hidden" name="settings_section" value="mensagens"><input type="hidden" name="template_id" value="<?= (int) $selectedMessageTemplate['id']; ?>">
+                        <div class="section-heading"><p class="section-heading__eyebrow">Conteúdo por canal</p><h2><?= htmlspecialchars((string) ($selectedMessageTemplate['description'] ?? $selectedMessageTemplate['purpose']), ENT_QUOTES, 'UTF-8'); ?></h2></div>
+                        <div class="summary-grid">
+                            <div class="summary-item"><span>Canal</span><strong><?= htmlspecialchars((string) ($notificationChannels[$selectedChannel]['label'] ?? $selectedChannel), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                            <div class="summary-item"><span>Adapter</span><strong><?= !empty($notificationChannels[$selectedChannel]['available']) ? htmlspecialchars((string) $notificationChannels[$selectedChannel]['adapter'], ENT_QUOTES, 'UTF-8') : 'Indisponível'; ?></strong></div>
+                            <div class="summary-item"><span>Versão</span><strong><?= (int) ($selectedMessageTemplate['version'] ?? 1); ?></strong></div>
+                            <div class="summary-item"><span>Última alteração</span><strong><?= htmlspecialchars((string) ($selectedMessageTemplate['updated_by_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        </div>
+                        <label class="checkbox-field"><input type="checkbox" name="channel_enabled" value="1" <?= in_array($selectedChannel, $enabledChannels, true) ? 'checked' : ''; ?>><span><strong>Canal habilitado</strong><small>Somente canais com adapter podem ser ativados.</small></span></label>
+                        <label class="checkbox-field"><input type="checkbox" name="active" value="1" <?= !empty($selectedMessageTemplate['active']) ? 'checked' : ''; ?>><span>Template ativo</span></label>
+                        <?php if ($selectedChannel === 'email'): ?><label class="field"><span>Assunto do e-mail</span><input name="subject" value="<?= htmlspecialchars((string) ($selectedMessageTemplate['subject'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></label><?php else: ?><input type="hidden" name="subject" value=""><?php endif; ?>
+                        <label class="field"><span>Texto ativo</span><textarea name="body" rows="12" required><?= htmlspecialchars((string) ($selectedMessageTemplate['body'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></label>
+                        <details><summary>Variáveis permitidas</summary><p class="field-help"><?php foreach ($messageVariables as $variable): ?><code>%<?= htmlspecialchars((string) $variable, ENT_QUOTES, 'UTF-8'); ?>%</code> <?php endforeach; ?></p></details>
+                        <div class="form-actions"><button class="button" type="submit" name="template_action" value="save" data-submit-label="Salvando...">Validar e salvar</button><button class="button button--ghost" type="submit" name="template_action" value="restore" data-submit-label="Restaurando...">Restaurar padrão</button></div>
+                    </form>
+                    <section class="card"><div class="section-heading"><p class="section-heading__eyebrow">Dados fictícios</p><h2>Pré-visualização segura</h2></div><?php if ($previewSubject !== ''): ?><h3><?= htmlspecialchars($previewSubject, ENT_QUOTES, 'UTF-8'); ?></h3><?php endif; ?><p><?= nl2br(htmlspecialchars($previewBody, ENT_QUOTES, 'UTF-8')); ?></p></section>
+                    <details class="card"><summary>Histórico e comparação</summary><div class="document-list"><?php foreach ($messageTemplateHistory as $version): ?><article><strong>Versão <?= (int) ($version['version'] ?? 0); ?></strong><small><?= htmlspecialchars((string) ($version['created_by_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($version['created_at'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></small><?php if (trim((string) ($version['subject'] ?? '')) !== ''): ?><pre><?= htmlspecialchars((string) $version['subject'], ENT_QUOTES, 'UTF-8'); ?></pre><?php endif; ?><pre><?= htmlspecialchars((string) ($version['body'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></pre><form method="post" action="<?= htmlspecialchars(Url::to('/configuracoes?tab=mensagens&template_id=' . (int) $selectedMessageTemplate['id']), ENT_QUOTES, 'UTF-8'); ?>" data-prevent-double-submit><input type="hidden" name="_csrf" value="<?= htmlspecialchars($messageCsrfToken, ENT_QUOTES, 'UTF-8'); ?>"><input type="hidden" name="settings_section" value="mensagens"><input type="hidden" name="template_id" value="<?= (int) $selectedMessageTemplate['id']; ?>"><input type="hidden" name="history_version" value="<?= (int) ($version['version'] ?? 0); ?>"><button class="button button--ghost button--small" type="submit" name="template_action" value="restore_version">Ativar como nova versão</button></form></article><?php endforeach; ?></div></details>
+                <?php endif; ?>
+            </div>
+        </section>
     <?php else: ?>
         <form method="post" action="<?= htmlspecialchars(Url::to('/configuracoes?tab=sistema'), ENT_QUOTES, 'UTF-8'); ?>" class="content-grid content-grid--form">
             <input type="hidden" name="settings_section" value="sistema">

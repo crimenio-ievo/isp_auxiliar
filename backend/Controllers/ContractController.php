@@ -743,17 +743,21 @@ final class ContractController
         }
 
         if (!empty($status['closed'])) {
+            $closedAt = trim((string) ($status['closed_at'] ?? '')) ?: $now;
+            $closedBy = trim((string) ($status['closed_by'] ?? ''));
             $this->syncFinancialTaskTicketMetadata(
                 $taskId,
                 $ticketId,
                 (string) ($status['raw_status'] ?? 'fechado'),
-                $now,
-                (string) $this->resolveUser()['login']
+                $closedAt,
+                $closedBy !== '' ? $closedBy : null
             );
             $this->financialTaskRepository->updateStatus($taskId, 'concluido');
             $this->financialTaskRepository->appendSystemNote(
                 $taskId,
-                '[' . $now . '] Chamado financeiro fechado no MkAuth em ' . $now . '. Pendencia marcada como concluida.',
+                '[' . $now . '] Chamado financeiro fechado no MkAuth em ' . $closedAt
+                . ($closedBy !== '' ? ' por ' . $closedBy : '')
+                . '. Pendencia marcada como concluida.',
                 'concluido'
             );
             $this->recordAudit('financial_task.mkauth_ticket.closed', 'financial_task', $taskId, [
@@ -866,13 +870,14 @@ final class ContractController
             if (!is_array($task)) {
                 return;
             }
+            $isClosed = in_array(strtolower(trim($ticketStatus)), ['fechado', 'encerrado', 'finalizado', 'concluido', 'concluído', 'resolvido'], true);
 
             $this->financialTaskRepository->updateTicketMetadata($taskId, [
                 'mkauth_ticket_id' => $ticketId !== '' ? $ticketId : ($task['mkauth_ticket_id'] ?? null),
                 'mkauth_ticket_status' => $ticketStatus !== '' ? $ticketStatus : ($task['mkauth_ticket_status'] ?? null),
                 'mkauth_ticket_checked_at' => $checkedAt ?? ($task['mkauth_ticket_checked_at'] ?? null),
-                'completed_at' => $completedBy !== null ? ($checkedAt ?? date('Y-m-d H:i:s')) : ($task['completed_at'] ?? null),
-                'completed_by' => $completedBy !== null ? $completedBy : ($task['completed_by'] ?? null),
+                'completed_at' => $isClosed ? ($checkedAt ?? date('Y-m-d H:i:s')) : ($task['completed_at'] ?? null),
+                'completed_by' => $isClosed && $completedBy !== null ? $completedBy : ($task['completed_by'] ?? null),
             ]);
         } catch (\Throwable) {
         }

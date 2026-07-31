@@ -502,13 +502,22 @@ final class OperationalProcessService
 
         $steps = $this->processRepository->steps($processId);
         $process['steps'] = array_map(fn (array $step): array => $this->decorateStep($step), $steps);
+        if ((string) ($process['process_type'] ?? '') === self::TYPE_MIGRATION) {
+            foreach ($process['steps'] as &$step) {
+                $step['url'] = '/processos/migracao?id=' . $processId
+                    . '&screen=' . $this->migrationScreenForStep((string) ($step['step_key'] ?? ''));
+            }
+            unset($step);
+        }
         $process['type_label'] = $this->typeLabel((string) ($process['process_type'] ?? ''));
         $process['status_label'] = $this->statusLabel((string) ($process['status'] ?? ''));
         $process['progress_percent'] = (int) ($process['progress_total'] ?? 0) > 0
             ? (int) floor(((int) ($process['progress_completed'] ?? 0) * 100) / (int) $process['progress_total'])
             : 0;
-        $process['resume_url'] = '/processos/etapa?id=' . $processId
-            . '&step=' . rawurlencode((string) ($process['next_pending_key'] ?? $process['current_step_key'] ?? ''));
+        $nextKey = (string) ($process['next_pending_key'] ?? $process['current_step_key'] ?? '');
+        $process['resume_url'] = (string) ($process['process_type'] ?? '') === self::TYPE_MIGRATION
+            ? '/processos/migracao?id=' . $processId . '&screen=' . $this->migrationScreenForStep($nextKey)
+            : '/processos/etapa?id=' . $processId . '&step=' . rawurlencode($nextKey);
         $process['detail_url'] = '/processos/detalhe?id=' . $processId;
 
         return $process;
@@ -732,6 +741,16 @@ final class OperationalProcessService
             . '&step=' . rawurlencode((string) ($step['step_key'] ?? ''));
 
         return $step;
+    }
+
+    private function migrationScreenForStep(string $stepKey): int
+    {
+        return match ($stepKey) {
+            'migration_data' => 1,
+            'prepare_document', 'send_acceptance', 'confirm_acceptance' => 2,
+            'technical_execution', 'confirm_equipment', 'validate_connection' => 3,
+            default => 4,
+        };
     }
 
     private function buildMetadata(string $processType, array $contract, array $context): array

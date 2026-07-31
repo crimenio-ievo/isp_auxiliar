@@ -625,13 +625,14 @@ final class AcceptanceController
         $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);
         $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
         $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
-        $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+        $waiverApplied = !empty($benefitFlags['adhesion_waiver']);
+        $fidelityMonths = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
         $benefitSentence = $waiverApplied
             ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
             : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
-        $penaltySentence = $waiverApplied
-            ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
-            : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
+        $penaltySentence = $fidelityMonths > 0
+            ? 'A eventual multa observará o benefício registrado e o período restante, conforme as condições documentadas.'
+            : 'Nenhuma nova fidelidade ou multa vinculada a esta alteração foi aplicada.';
 
         $description = implode("\n", array_filter([
             'Upgrade / Migração aceito em aceite remoto.',
@@ -644,7 +645,8 @@ final class AcceptanceController
             'Tecnologia antiga: ' . ($currentTechnology !== '' ? $currentTechnology : '-'),
             'Tecnologia nova: ' . ($newTechnology !== '' ? $newTechnology : '-'),
             'Benefício: ' . ($benefitDescription !== '' ? $benefitDescription : '-'),
-            'Valor da taxa de adesão/instalação isentada: R$ ' . $benefitValue,
+            $waiverApplied ? 'Valor da taxa de adesão/instalação isentada: R$ ' . $benefitValue : null,
+            'Nova fidelidade: ' . ($fidelityMonths > 0 ? $fidelityMonths . ' meses' : 'não aplicada'),
             $originalContractReference !== '' ? 'Referência original: ' . $originalContractReference : null,
             $penaltySentence,
             'Necessário verificar financeiro/proporcionalidade.',
@@ -1004,15 +1006,28 @@ final class AcceptanceController
             $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
             $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
             $monthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
-            $fidelityMonths = max(1, (int) ($upgradeSnapshot['fidelity_months'] ?? $fidelidade));
+            $fidelityMonths = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
             $observation = trim((string) ($upgradeSnapshot['observacao'] ?? $observacao));
-            $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+            $waiverApplied = !empty($benefitFlags['adhesion_waiver']);
             $benefitSentence = $waiverApplied
                 ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
                 : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
-            $penaltySentence = $waiverApplied
-                ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
-                : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
+            $fidelityBenefit = trim((string) ($upgradeSnapshot['fidelity_benefit_description'] ?? ''));
+            if ($fidelityBenefit === '') {
+                $fidelityBenefit = $benefitDescription;
+            }
+            $fidelityLines = $fidelityMonths > 0
+                ? [
+                    'Cláusula Segunda: nova fidelidade expressamente aceita',
+                    'Fidelidade: ' . $fidelityMonths . ' meses',
+                    'Benefício vinculado à fidelidade: ' . ($fidelityBenefit !== '' ? $fidelityBenefit : '-'),
+                    'A eventual multa observará o benefício registrado e o período restante, conforme as condições documentadas.',
+                ]
+                : [
+                    'Cláusula Segunda: fidelidade',
+                    'Nova fidelidade: não aplicada.',
+                    'Esta alteração não renova automaticamente prazo de permanência.',
+                ];
 
             return trim(implode("\n", [
                 'Termo Aditivo ao Contrato de Prestação de Serviço',
@@ -1030,10 +1045,8 @@ final class AcceptanceController
                 'Nova tecnologia: ' . ($newTechnology !== '' ? $newTechnology : '-'),
                 $benefitSentence,
                 'Novo valor mensal: R$ ' . $monthlyValue,
-                $penaltySentence,
                 '',
-                'Cláusula Segunda: renovação da fidelidade por 12 meses',
-                'Fidelidade: ' . $fidelityMonths . ' meses',
+                ...$fidelityLines,
                 'As demais condições comerciais permanecem válidas, exceto o que este aditivo alterar expressamente.',
                 '',
                 'Cláusula Terceira: disposições gerais',

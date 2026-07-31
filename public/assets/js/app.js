@@ -3479,3 +3479,290 @@ document.querySelectorAll('form[data-single-submit-form]').forEach((form) => {
         });
     });
 });
+
+document.querySelectorAll('[data-copy-value]').forEach((button) => {
+    button.addEventListener('click', async () => {
+        const value = button.getAttribute('data-copy-value') || '';
+        const original = button.textContent || 'Copiar';
+        try {
+            await copyTextToClipboard(value);
+            button.textContent = 'Copiado';
+            window.setTimeout(() => { button.textContent = original; }, 1400);
+        } catch (error) {
+            window.prompt('Copie o valor:', value);
+        }
+    });
+});
+
+const clientHub = document.querySelector('[data-client-hub]');
+if (clientHub instanceof HTMLElement) {
+    let activePanel = null;
+
+    const closeClientPanel = () => {
+        if (!(activePanel instanceof HTMLElement)) {
+            return;
+        }
+        activePanel.hidden = true;
+        activePanel = null;
+        document.body.classList.remove('client-panel-open');
+    };
+
+    const addDetail = (list, label, value) => {
+        const normalized = value === null || value === undefined ? '' : String(value).trim();
+        if (!normalized) {
+            return;
+        }
+        const row = document.createElement('div');
+        const term = document.createElement('dt');
+        const description = document.createElement('dd');
+        term.textContent = label;
+        description.textContent = normalized;
+        row.append(term, description);
+        list.appendChild(row);
+    };
+
+    const renderConnection = (target, data) => {
+        const list = document.createElement('dl');
+        list.className = 'detail-list';
+        addDetail(list, 'Sessão', data.online ? 'Online' : 'Offline');
+        addDetail(list, 'Login', data.login);
+        addDetail(list, 'Plano', data.plan);
+        addDetail(list, 'Tecnologia', data.technology?.label);
+        addDetail(list, 'IP atual', data.ip);
+        addDetail(list, 'MAC / Caller-ID', data.mac);
+        addDetail(list, 'NAS', data.nas);
+        addDetail(list, 'Início da sessão', data.started_at);
+        addDetail(list, 'Tempo conectado', Number.isFinite(Number(data.connected_seconds)) ? formatDuration(Number(data.connected_seconds)) : '');
+        addDetail(list, 'Equipamento', data.equipment);
+        addDetail(list, 'ONU/ONT', data.onu_ont);
+        addDetail(list, 'Interface', data.interface);
+        addDetail(list, 'Fonte', data.source);
+        target.replaceChildren(list);
+    };
+
+    const renderFinancial = (target, data) => {
+        const list = document.createElement('dl');
+        list.className = 'detail-list';
+        addDetail(list, 'Próximo vencimento', data.next_due?.datavenc);
+        addDetail(list, 'Títulos em aberto', data.open_count);
+        addDetail(list, 'Títulos vencidos', data.overdue_count);
+        addDetail(list, 'Modalidade de cobrança', data.billing_type);
+        addDetail(list, 'Conta de cobrança', data.billing_account);
+        addDetail(list, 'Última atualização', data.last_update);
+        addDetail(list, 'Fonte', data.source);
+        target.replaceChildren(list);
+    };
+
+    const loadLazyDetail = async (panel) => {
+        const target = panel.querySelector('[data-lazy-client-detail]');
+        if (!(target instanceof HTMLElement) || target.dataset.loaded === '1') {
+            return;
+        }
+        target.dataset.loaded = '1';
+        try {
+            const response = await fetch(target.dataset.url || '', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+            const payload = await response.json();
+            if (!response.ok || payload.status !== 'success') {
+                throw new Error(payload.message || 'Não foi possível carregar os detalhes.');
+            }
+            if (target.dataset.lazyClientDetail === 'connection') {
+                renderConnection(target, payload.data || {});
+            } else {
+                renderFinancial(target, payload.data || {});
+            }
+        } catch (error) {
+            target.dataset.loaded = '0';
+            const alert = document.createElement('div');
+            alert.className = 'alert alert--warning';
+            alert.textContent = error instanceof Error ? error.message : 'Consulta indisponível.';
+            target.replaceChildren(alert);
+        }
+    };
+
+    clientHub.querySelectorAll('[data-open-client-panel]').forEach((trigger) => {
+        trigger.addEventListener('click', () => {
+            const key = trigger.getAttribute('data-open-client-panel') || '';
+            if (key === 'documents') {
+                document.querySelector('#documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+            const panel = clientHub.querySelector(`[data-client-panel="${CSS.escape(key)}"]`);
+            if (!(panel instanceof HTMLElement)) {
+                return;
+            }
+            closeClientPanel();
+            activePanel = panel;
+            panel.hidden = false;
+            document.body.classList.add('client-panel-open');
+            panel.querySelector('.client-detail-panel__dialog')?.focus();
+            loadLazyDetail(panel);
+        });
+    });
+
+    clientHub.querySelectorAll('[data-close-client-panel]').forEach((button) => button.addEventListener('click', closeClientPanel));
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeClientPanel();
+        }
+    });
+}
+
+function formatDuration(seconds) {
+    const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const days = Math.floor(safeSeconds / 86400);
+    const hours = Math.floor((safeSeconds % 86400) / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    return [days ? `${days}d` : '', hours ? `${hours}h` : '', `${minutes}min`].filter(Boolean).join(' ');
+}
+
+const simpleUpgradeForm = document.querySelector('[data-upgrade-simple-form]');
+if (simpleUpgradeForm instanceof HTMLFormElement) {
+    const planSelect = simpleUpgradeForm.querySelector('[data-simple-plan-select]');
+    const operationOutput = simpleUpgradeForm.querySelector('[data-simple-operation]');
+    const fidelityToggle = simpleUpgradeForm.querySelector('[data-fidelity-toggle]');
+    const fidelityFields = simpleUpgradeForm.querySelector('[data-fidelity-fields]');
+
+    const parseSpeed = (raw) => {
+        const match = String(raw || '').toLowerCase().match(/([0-9]+(?:[.,][0-9]+)?)\s*([kmg])?/);
+        if (!match) return null;
+        const value = Number(match[1].replace(',', '.'));
+        if (!Number.isFinite(value)) return null;
+        if (match[2] === 'g') return value * 1000;
+        if (match[2] === 'k') return value / 1000;
+        return value;
+    };
+
+    const updateOperation = () => {
+        if (!(planSelect instanceof HTMLSelectElement) || !(operationOutput instanceof HTMLElement)) return;
+        const option = planSelect.selectedOptions[0];
+        if (!(option instanceof HTMLOptionElement) || !option.value) {
+            operationOutput.textContent = 'Selecione um plano';
+            return;
+        }
+        const currentPlan = simpleUpgradeForm.dataset.currentPlan || '';
+        const currentFamily = simpleUpgradeForm.dataset.currentFamily || '';
+        const newFamily = option.dataset.planFamily || '';
+        let operation = '';
+        if (option.value.toLowerCase() !== currentPlan.toLowerCase()) {
+            if (currentFamily && newFamily && currentFamily !== newFamily) {
+                operation = 'Migração';
+            } else if (currentFamily && newFamily) {
+                const currentSpeed = parseSpeed(simpleUpgradeForm.dataset.currentSpeed);
+                const newSpeed = parseSpeed(option.dataset.planSpeed);
+                const currentValue = Number(simpleUpgradeForm.dataset.currentValue || 0);
+                const newValue = Number(option.dataset.planValue || 0);
+                if (currentSpeed !== null && newSpeed !== null && currentSpeed !== newSpeed) {
+                    operation = newSpeed > currentSpeed ? 'Upgrade' : 'Downgrade';
+                } else if (currentValue !== newValue) {
+                    operation = newValue > currentValue ? 'Upgrade' : 'Downgrade';
+                }
+            }
+        }
+        operationOutput.textContent = operation || 'Sem mudança efetiva — escolha outro plano';
+    };
+
+    const updateFidelity = () => {
+        if (!(fidelityToggle instanceof HTMLInputElement) || !(fidelityFields instanceof HTMLElement)) return;
+        fidelityFields.hidden = !fidelityToggle.checked;
+    };
+
+    planSelect?.addEventListener('change', updateOperation);
+    fidelityToggle?.addEventListener('change', updateFidelity);
+    updateOperation();
+    updateFidelity();
+}
+
+document.querySelectorAll('form[data-prevent-double-submit]').forEach((form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    let submitted = false;
+    form.addEventListener('submit', (event) => {
+        if (submitted) {
+            event.preventDefault();
+            return;
+        }
+        submitted = true;
+        form.setAttribute('aria-busy', 'true');
+        form.querySelectorAll('button[type="submit"]').forEach((button) => {
+            if (!(button instanceof HTMLButtonElement)) return;
+            const isSubmitter = event.submitter === button;
+            button.disabled = true;
+            if (isSubmitter) button.textContent = button.dataset.submitLabel || 'Enviando...';
+        });
+    });
+});
+
+const migrationAcceptanceForm = document.querySelector('[data-migration-acceptance-form]');
+if (migrationAcceptanceForm instanceof HTMLFormElement) {
+    const absentToggle = migrationAcceptanceForm.querySelector('[data-client-absent]');
+    const remoteReason = migrationAcceptanceForm.querySelector('[data-remote-reason]');
+    const localSignature = migrationAcceptanceForm.querySelector('[data-local-signature]');
+    const updateAcceptanceMode = () => {
+        const remote = absentToggle instanceof HTMLInputElement && absentToggle.checked;
+        if (remoteReason instanceof HTMLElement) remoteReason.hidden = !remote;
+        if (localSignature instanceof HTMLElement) localSignature.hidden = remote;
+        const reasonInput = remoteReason?.querySelector('input');
+        if (reasonInput instanceof HTMLInputElement) reasonInput.required = remote;
+    };
+    absentToggle?.addEventListener('change', updateAcceptanceMode);
+    updateAcceptanceMode();
+}
+
+const contractScanner = document.querySelector('[data-contract-scanner]');
+if (contractScanner instanceof HTMLFormElement) {
+    const input = contractScanner.querySelector('[data-scanner-input]');
+    const preview = contractScanner.querySelector('[data-scanner-preview]');
+    const orderInput = contractScanner.querySelector('[data-scanner-order]');
+    const rotationsInput = contractScanner.querySelector('[data-scanner-rotations]');
+    let pages = [];
+    const syncScannerState = () => {
+        if (orderInput instanceof HTMLInputElement) orderInput.value = JSON.stringify(pages.length ? pages.map((page) => page.index) : [-1]);
+        if (rotationsInput instanceof HTMLInputElement) rotationsInput.value = JSON.stringify(Object.fromEntries(pages.map((page) => [page.index, page.rotation])));
+    };
+    const renderScanner = () => {
+        if (!(preview instanceof HTMLElement)) return;
+        preview.replaceChildren();
+        pages.forEach((page, position) => {
+            const card = document.createElement('article');
+            card.className = 'scanner-page';
+            const visual = page.file.type === 'application/pdf' ? document.createElement('div') : document.createElement('img');
+            if (visual instanceof HTMLImageElement) {
+                visual.src = page.url;
+                visual.alt = `Prévia da página ${position + 1}`;
+                visual.style.transform = `rotate(${page.rotation}deg)`;
+            } else {
+                visual.className = 'scanner-page__pdf';
+                visual.textContent = 'PDF';
+            }
+            const name = document.createElement('strong');
+            name.textContent = `${position + 1}. ${page.file.name}`;
+            const actions = document.createElement('div');
+            [['↑', -1], ['↓', 1]].forEach(([label, delta]) => {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'button button--ghost button--small'; button.textContent = String(label);
+                button.setAttribute('aria-label', delta < 0 ? 'Mover página para cima' : 'Mover página para baixo');
+                button.addEventListener('click', () => { const target = position + Number(delta); if (target < 0 || target >= pages.length) return; [pages[position], pages[target]] = [pages[target], pages[position]]; renderScanner(); });
+                actions.appendChild(button);
+            });
+            const rotate = document.createElement('button');
+            rotate.type = 'button'; rotate.className = 'button button--ghost button--small'; rotate.textContent = 'Girar';
+            rotate.addEventListener('click', () => { page.rotation = (page.rotation + 90) % 360; renderScanner(); });
+            const remove = document.createElement('button');
+            remove.type = 'button'; remove.className = 'button button--ghost button--small'; remove.textContent = 'Remover';
+            remove.addEventListener('click', () => { URL.revokeObjectURL(page.url); pages.splice(position, 1); renderScanner(); });
+            actions.append(rotate, remove);
+            card.append(visual, name, actions);
+            preview.appendChild(card);
+        });
+        syncScannerState();
+    };
+    input?.addEventListener('change', () => {
+        pages.forEach((page) => URL.revokeObjectURL(page.url));
+        pages = Array.from(input.files || []).map((file, index) => ({ file, index, rotation: 0, url: URL.createObjectURL(file) }));
+        renderScanner();
+    });
+}
+
+const focusOnLoad = document.querySelector('[data-focus-field]') || document.querySelector('[data-focus-on-load]');
+if (focusOnLoad instanceof HTMLElement) {
+    focusOnLoad.focus({ preventScroll: false });
+}

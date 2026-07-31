@@ -193,6 +193,9 @@ final class MkAuthTicketService
             'ticket' => $ticket,
             'raw_status' => (string) ($statusInfo['status'] ?? ''),
             'closed_at' => (string) ($statusInfo['fechamento'] ?? ''),
+            'closed_by' => $state === 'closed' && trim((string) ($ticket['login_atend'] ?? '')) !== ''
+                ? trim((string) $ticket['login_atend'])
+                : null,
             'message' => $summary !== '' ? $message . ' ' . $summary : $message,
             'http_status' => 200,
             'duration_ms' => 0,

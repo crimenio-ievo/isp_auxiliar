@@ -5,24 +5,29 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Config;
+use App\Core\Csrf;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Url;
 use App\Core\View;
 use App\Infrastructure\Contracts\NotificationLogRepository;
+use App\Infrastructure\Contracts\MessageTemplateRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
+use App\Services\Notifications\NotificationTemplateService;
 
 final class SettingsController
 {
     public function __construct(
         private View $view,
         private Config $config,
-        private LocalRepository $localRepository
+        private LocalRepository $localRepository,
+        private MessageTemplateRepository $messageTemplateRepository,
+        private NotificationTemplateService $notificationTemplateService
     ) {
     }
 
@@ -65,6 +70,16 @@ final class SettingsController
         }
 
         $storedConfig = $this->readLocalPanelConfig();
+        $messageTemplates = [];
+        $selectedMessageTemplate = null;
+        $messageTemplateHistory = [];
+        if ($currentTab === 'mensagens') {
+            $this->notificationTemplateService->seedDefaults();
+            $messageTemplates = $this->messageTemplateRepository->listAll();
+            $selectedId = (int) $request->query('template_id', (string) ($messageTemplates[0]['id'] ?? 0));
+            $selectedMessageTemplate = $selectedId > 0 ? $this->messageTemplateRepository->findById($selectedId) : null;
+            $messageTemplateHistory = $selectedId > 0 ? $this->messageTemplateRepository->history($selectedId) : [];
+        }
         $moduleConfig = [
             'commercial' => (array) $this->config->get('contracts.commercial', []),
             'email' => (array) $this->config->get('email', []),
@@ -87,6 +102,12 @@ final class SettingsController
             'currentTab' => $currentTab,
             'moduleConfig' => $moduleConfig,
             'storedConfig' => $storedConfig,
+            'messageTemplates' => $messageTemplates,
+            'selectedMessageTemplate' => $selectedMessageTemplate,
+            'messageTemplateHistory' => $messageTemplateHistory,
+            'notificationChannels' => $this->notificationTemplateService->channels(),
+            'messageVariables' => NotificationTemplateService::VARIABLES,
+            'messageCsrfToken' => Csrf::token('settings:messages'),
             'permissionsConfig' => [
                 'manager_logins' => $this->stringifySettingList($providerSettings, 'mkauth_manager_logins', (string) ($providerSettings['mkauth_manager_login'] ?? '')),
                 'contract_access_logins' => $this->stringifySettingList($providerSettings, 'contract_access_logins'),
@@ -123,9 +144,51 @@ final class SettingsController
             'evotrix' => $this->saveLocalPanelConfig([
                 'evotrix' => $this->normalizeEvotrixSettingsFromRequest($request),
             ]),
+            'mensagens' => $this->saveMessageTemplate($request),
             'sistema' => $this->saveSystemSettings($request),
             default => null,
         };
+    }
+
+    private function saveMessageTemplate(Request $request): void
+    {
+        if (!Csrf::verify($request, 'settings:messages')) {
+            throw new \RuntimeException('A sessão do editor expirou. Reabra a tela e tente novamente.');
+        }
+        $templateId = (int) $request->input('template_id', 0);
+        $template = $this->messageTemplateRepository->findById($templateId);
+        if (!is_array($template)) {
+            throw new \RuntimeException('Template não localizado.');
+        }
+        $action = (string) $request->input('template_action', 'save');
+        $restore = $action === 'restore';
+        $historical = $action === 'restore_version'
+            ? $this->messageTemplateRepository->findVersion($templateId, (int) $request->input('history_version', 0))
+            : null;
+        if ($action === 'restore_version' && !is_array($historical)) {
+            throw new \RuntimeException('A versão histórica selecionada não foi localizada.');
+        }
+        $subject = $restore
+            ? (string) ($template['default_subject'] ?? '')
+            : (is_array($historical) ? (string) ($historical['subject'] ?? '') : (string) $request->input('subject', ''));
+        $body = $restore
+            ? (string) ($template['default_body'] ?? '')
+            : (is_array($historical) ? (string) ($historical['body'] ?? '') : (string) $request->input('body', ''));
+        $channel = (string) ($template['channel'] ?? '');
+        $historicalEnabled = is_array($historical) ? json_decode((string) ($historical['enabled_channels_json'] ?? '[]'), true) : null;
+        $enabledChannels = is_array($historicalEnabled)
+            ? $historicalEnabled
+            : ((string) $request->input('channel_enabled', '0') === '1' ? [$channel] : []);
+        $errors = $this->notificationTemplateService->validate($subject, $body, $enabledChannels);
+        if ($errors !== []) {
+            throw new \RuntimeException(implode(' ', $errors));
+        }
+        $this->messageTemplateRepository->saveManaged($templateId, [
+            'subject' => $subject,
+            'body' => $body,
+            'enabled_channels_json' => $enabledChannels,
+            'active' => is_array($historical) ? !empty($historical['active']) : (string) $request->input('active', '0') === '1',
+        ], $this->resolveUser());
     }
 
     private function saveGeneralSettings(Request $request): void
@@ -244,6 +307,7 @@ final class SettingsController
             'exigir_validacao_cpf_aceite' => $this->normalizeBoolean((string) $request->input('exigir_validacao_cpf_aceite', '1')),
             'quantidade_digitos_validacao_cpf' => max(1, (int) $request->input('quantidade_digitos_validacao_cpf', (string) ($commercial['quantidade_digitos_validacao_cpf'] ?? 3))),
             'multa_padrao' => $this->normalizeMoney((string) $request->input('multa_padrao', (string) ($commercial['multa_padrao'] ?? 0))),
+            'isentar_adesao_migracao_radio_fibra' => $this->normalizeBoolean((string) $request->input('isentar_adesao_migracao_radio_fibra', '0')),
         ];
     }
 
@@ -376,7 +440,7 @@ final class SettingsController
     private function normalizeTab(string $tab): string
     {
         $tab = strtolower(trim($tab));
-        return in_array($tab, ['geral', 'mkauth', 'contratos', 'email', 'evotrix', 'sistema'], true)
+        return in_array($tab, ['geral', 'mkauth', 'contratos', 'email', 'evotrix', 'mensagens', 'sistema'], true)
             ? $tab
             : 'geral';
     }

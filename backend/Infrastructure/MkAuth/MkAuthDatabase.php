@@ -225,6 +225,67 @@ final class MkAuthDatabase
             'online' => $session !== null,
             'session' => $session,
             'last_auth' => $lastAuth,
+            'connected_seconds' => is_array($session) && !empty($session['acctstarttime'])
+                ? max(0, time() - (int) strtotime((string) $session['acctstarttime']))
+                : null,
+        ];
+    }
+
+    public function clientFinancialSummary(string $login): array
+    {
+        $login = trim($login);
+        if ($login === '') {
+            return [];
+        }
+
+        $client = $this->fetchOne(
+            'SELECT login, plano, venc, tipo_cob, conta, tit_abertos, tit_vencidos, parc_abertas, desconto, acrescimo, last_update
+             FROM sis_cliente WHERE LOWER(login) = LOWER(:login) LIMIT 1',
+            ['login' => $login]
+        );
+        if (!is_array($client)) {
+            return [];
+        }
+
+        $titles = $this->fetchAll(
+            'SELECT id, datavenc, datapag, status, tipo, tipocob, formapag, valor, valorpag, referencia
+             FROM sis_lanc
+             WHERE LOWER(login) = LOWER(:login)
+               AND COALESCE(deltitulo, 0) = 0
+             ORDER BY datavenc DESC, id DESC
+             LIMIT 50',
+            ['login' => $login]
+        );
+
+        $open = [];
+        $overdue = [];
+        $now = date('Y-m-d');
+        foreach ($titles as $title) {
+            $status = strtolower(trim((string) ($title['status'] ?? '')));
+            $paid = trim((string) ($title['datapag'] ?? '')) !== '' || in_array($status, ['pago', 'quitado', 'baixado'], true);
+            if ($paid) {
+                continue;
+            }
+            $open[] = $title;
+            $due = substr((string) ($title['datavenc'] ?? ''), 0, 10);
+            if ($due !== '' && $due < $now) {
+                $overdue[] = $title;
+            }
+        }
+
+        usort($open, static fn (array $a, array $b): int => strcmp((string) ($a['datavenc'] ?? ''), (string) ($b['datavenc'] ?? '')));
+
+        return [
+            'due_day' => trim((string) ($client['venc'] ?? '')),
+            'billing_type' => trim((string) ($client['tipo_cob'] ?? '')),
+            'billing_account' => trim((string) ($client['conta'] ?? '')),
+            'open_count' => count($open),
+            'overdue_count' => count($overdue),
+            'next_due' => $open[0] ?? null,
+            'open_titles' => array_slice($open, 0, 20),
+            'overdue_titles' => array_slice($overdue, 0, 20),
+            'last_update' => trim((string) ($client['last_update'] ?? '')),
+            'source' => 'MkAuth (somente leitura)',
         ];
     }
 
@@ -462,7 +523,7 @@ final class MkAuthDatabase
         $limit = max(1, min(500, $limit));
 
         return $this->fetchAll(
-            "SELECT uuid_plano, nome, valor, tecnologia, oculto FROM sis_plano WHERE nome <> \"\" AND oculto = 'nao' ORDER BY nome ASC LIMIT " . (int) $limit
+            "SELECT uuid_plano, nome, valor, tecnologia, veldown, velup, descricao, oculto FROM sis_plano WHERE nome <> \"\" AND oculto = 'nao' ORDER BY nome ASC LIMIT " . (int) $limit
         );
     }
 
@@ -553,7 +614,7 @@ final class MkAuthDatabase
         }
 
         return $this->fetchOne(
-            'SELECT id, uuid_suporte, assunto, abertura, fechamento, email, status, chamado, nome, login, atendente, prioridade, motivo_fechar
+            'SELECT id, uuid_suporte, assunto, abertura, fechamento, email, status, chamado, nome, login, atendente, tecnico, login_atend, prioridade, motivo_fechar
              FROM sis_suporte
              WHERE chamado = :chamado
              ORDER BY id DESC
@@ -945,15 +1006,38 @@ final class MkAuthDatabase
             'estado' => trim((string) ($row['estado'] ?? '')),
             'cep' => trim((string) ($row['cep'] ?? '')),
             'email' => trim((string) ($row['email'] ?? '')),
+            'emails' => array_values(array_filter(array_unique([
+                trim((string) ($row['email'] ?? '')),
+            ]))),
+            'phones' => array_values(array_filter(array_unique([
+                trim((string) ($row['celular'] ?? '')),
+                trim((string) ($row['celular2'] ?? '')),
+                trim((string) ($row['fone'] ?? '')),
+            ]))),
             'endereco' => trim((string) ($row['endereco'] ?? '')),
             'numero' => trim((string) ($row['numero'] ?? '')),
             'complemento' => trim((string) ($row['complemento'] ?? '')),
+            'reference' => trim((string) ($row['dot_ref'] ?? '')),
+            'coordinates' => trim((string) ($row['coordenadas'] ?? '')),
+            'city_ibge' => trim((string) ($row['cidade_ibge'] ?? '')),
             'venc' => trim((string) ($row['venc'] ?? '')),
             'plano' => $planName,
             'plano_nome' => $planName,
             'contrato' => trim((string) ($row['contrato'] ?? '')),
+            'responsavel' => trim((string) ($row['responsavel'] ?? '')),
+            'nome_resumido' => trim((string) ($row['nome_res'] ?? '')),
+            'nascimento' => trim((string) ($row['nascimento'] ?? '')),
+            'rg' => trim((string) ($row['rg'] ?? '')),
+            'pessoa' => trim((string) ($row['pessoa'] ?? '')),
+            'equipamento' => trim((string) ($row['equipamento'] ?? '')),
+            'onu_ont' => trim((string) ($row['onu_ont'] ?? '')),
+            'porta_olt' => trim((string) ($row['porta_olt'] ?? '')),
+            'caixa_herm' => trim((string) ($row['caixa_herm'] ?? '')),
+            'porta_splitter' => trim((string) ($row['porta_splitter'] ?? '')),
+            'interface' => trim((string) ($row['interface'] ?? '')),
             'user_mac' => trim((string) ($row['user_mac'] ?? '')),
             'user_ip' => trim((string) ($row['user_ip'] ?? '')),
+            'ip' => trim((string) ($row['user_ip'] ?? '')),
             'plano_valor' => trim((string) ($row['plano_valor'] ?? '')),
             'plano_tecnologia' => $planTechnology,
             'cli_ativado' => (string) ($row['cli_ativado'] ?? ''),
@@ -962,6 +1046,10 @@ final class MkAuthDatabase
             'status' => $status,
             'cadastro' => trim((string) ($row['cadastro'] ?? '')),
             'last_update' => trim((string) ($row['last_update'] ?? '')),
+            'tipo_cob' => trim((string) ($row['tipo_cob'] ?? '')),
+            'tit_abertos' => isset($row['tit_abertos']) ? (int) $row['tit_abertos'] : null,
+            'tit_vencidos' => isset($row['tit_vencidos']) ? (int) $row['tit_vencidos'] : null,
+            'source' => 'MkAuth',
         ];
     }
 

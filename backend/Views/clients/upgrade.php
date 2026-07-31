@@ -5,296 +5,177 @@ declare(strict_types=1);
 use App\Core\Url;
 
 $context = is_array($context ?? null) ? $context : [];
-$clientProfile = is_array($context['clientProfile'] ?? null) ? $context['clientProfile'] : [];
-$contract = is_array($context['contract'] ?? null) ? $context['contract'] : [];
-$planOptions = is_array($context['planOptions'] ?? null) ? $context['planOptions'] : [];
+$form = is_array($form ?? null) ? $form : [];
+$errors = is_array($errors ?? null) ? $errors : [];
+$client = is_array($context['clientProfile'] ?? null) ? $context['clientProfile'] : [];
+$plans = is_array($context['planOptions'] ?? null) ? $context['planOptions'] : [];
 $login = (string) ($context['login'] ?? $currentLogin ?? '');
-$currentPlan = (string) ($context['current_plan'] ?? '');
-$currentTechnology = (string) ($context['current_technology'] ?? '');
-$currentTechnologyFamily = (string) ($context['current_technology_family'] ?? '');
-$currentMonthlyValue = $context['current_monthly_value'] ?? null;
-$newPlan = (string) ($context['new_plan'] ?? $currentPlan);
-$newTechnology = (string) ($context['new_technology'] ?? $currentTechnology);
-$newTechnologyFamily = (string) ($context['new_technology_family'] ?? '');
-$benefitDescription = (string) ($context['benefit_description'] ?? '');
-$benefitValue = number_format((float) ($context['benefit_value'] ?? 0), 2, ',', '.');
-$newMonthlyValueRaw = $context['new_monthly_value'] ?? null;
-$newMonthlyValue = $newMonthlyValueRaw !== null && $newMonthlyValueRaw !== ''
-    ? number_format((float) $newMonthlyValueRaw, 2, ',', '.')
-    : '';
-$fidelityMonths = max(1, (int) ($context['fidelity_months'] ?? 12));
-$observation = (string) ($context['observacao'] ?? '');
-$customerName = trim((string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? '-'));
-$customerPhone = trim((string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $contract['telefone_cliente'] ?? '-'));
-$customerDocument = trim((string) ($clientProfile['cpf_cnpj'] ?? '-'));
+$currentPlan = trim((string) ($context['current_plan'] ?? ''));
+$currentTechnology = trim((string) ($context['current_technology'] ?? ''));
+$currentValue = $context['current_monthly_value'] ?? null;
+$selectedPlan = trim((string) ($form['new_plan_id'] ?? $form['novo_plano'] ?? $context['new_plan'] ?? ''));
+$benefitValue = number_format((float) ($form['valor_beneficio'] ?? $context['benefit_value'] ?? 0), 2, ',', '.');
+$retention = !empty($form) ? !empty($form['retention_condition']) : !empty($context['retention_condition']);
+$applyFidelity = !empty($form) ? !empty($form['apply_fidelity']) : !empty($context['apply_fidelity']);
+$fidelityMonths = max(1, min(12, (int) ($form['fidelidade_meses'] ?? $context['fidelity_months'] ?? 12)));
+$fidelityDescription = trim((string) ($form['fidelity_benefit_description'] ?? $context['fidelity_benefit_description'] ?? ''));
+$otherBenefit = trim((string) ($form['beneficio_outro_text'] ?? ''));
+$observation = trim((string) ($form['observacao'] ?? $context['observacao'] ?? ''));
 $correctionOf = (int) ($correctionOf ?? 0);
 $correctionReason = trim((string) ($correctionReason ?? ''));
-$operationType = in_array((string) ($context['operation_type'] ?? ''), ['upgrade', 'migration'], true)
-    ? (string) ($context['operation_type'] ?? '')
-    : '';
-$currentPlanId = $currentPlan;
-foreach ($planOptions as $planOption) {
-    $optionId = trim((string) ($planOption['id'] ?? ''));
-    $optionName = trim((string) ($planOption['name'] ?? ''));
-    if (($optionId !== '' && strcasecmp($optionId, $currentPlan) === 0)
-        || ($optionName !== '' && strcasecmp($optionName, $currentPlan) === 0)
-    ) {
-        $currentPlanId = $optionId !== '' ? $optionId : $optionName;
+$errorFor = static fn (string $field): string => trim((string) ($errors[$field] ?? ''));
+$firstErrorField = $errors !== [] ? (string) array_key_first($errors) : '';
+$operationLabels = ['migration' => 'Migração', 'upgrade' => 'Upgrade', 'downgrade' => 'Downgrade'];
+$operation = (string) ($form['operation_type'] ?? '');
+$currentPlanOption = [];
+foreach ($plans as $plan) {
+    if (strcasecmp((string) ($plan['id'] ?? ''), $currentPlan) === 0 || strcasecmp((string) ($plan['name'] ?? ''), $currentPlan) === 0) {
+        $currentPlanOption = $plan;
         break;
     }
 }
-
-$technologyLabelForInstallType = static function (string $installType): string {
-    return match (strtolower(trim($installType))) {
-        'fibra' => 'Fibra',
-        'radio' => 'Rádio',
-        default => '',
-    };
-};
-
-$selected = static function (string $value, string $current): string {
-    return strcasecmp(trim($value), trim($current)) === 0 ? 'selected' : '';
-};
 
 ob_start();
 ?>
 <section class="page-header">
     <div>
-        <p class="section-heading__eyebrow">Clientes</p>
-        <h1>Upgrade / Migração</h1>
-        <p class="page-description">Crie um novo contrato de alteração comercial sem mexer automaticamente no MkAuth. O ajuste operacional continua manual após o aceite.</p>
+        <p class="section-heading__eyebrow">Tela 1 de 4</p>
+        <h1>Nova condição</h1>
+        <p class="page-description">Escolha o novo plano. Tecnologia, valor e tipo da operação são derivados dos dados oficiais do plano.</p>
     </div>
-    <div class="hero-actions">
-        <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Voltar ao detalhe</a>
-    </div>
+    <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Voltar ao cliente</a>
 </section>
 
 <?php if ($correctionOf > 0): ?>
-    <section class="alert alert--warning" style="margin-bottom: 20px;">
-        <strong>Correção do contrato #<?= htmlspecialchars((string) $correctionOf, ENT_QUOTES, 'UTF-8'); ?></strong>
-        <p>O link anterior já está invalidado. Finalize esta revisão para criar uma nova versão e um novo aceite.</p>
+    <section class="alert alert--warning" aria-live="polite">
+        <strong>Correção do contrato #<?= $correctionOf; ?></strong>
+        <p>Uma nova versão e um novo aceite serão criados sem apagar o histórico anterior.</p>
     </section>
 <?php endif; ?>
 
-<?php if (!empty($flash)): ?>
-    <section class="alert <?= htmlspecialchars(($flash['type'] ?? 'success') === 'error' ? 'alert--error' : 'alert--success', ENT_QUOTES, 'UTF-8'); ?>" style="margin-bottom: 20px;">
-        <?= htmlspecialchars((string) ($flash['message'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+<?php if ($errors !== []): ?>
+    <section class="alert alert--error" role="alert" tabindex="-1" data-focus-on-load>
+        <strong>Revise os campos indicados:</strong>
+        <ul>
+            <?php foreach ($errors as $message): ?>
+                <li><?= htmlspecialchars((string) $message, ENT_QUOTES, 'UTF-8'); ?></li>
+            <?php endforeach; ?>
+        </ul>
     </section>
 <?php endif; ?>
 
-<section class="card">
+<section class="card upgrade-current-summary" aria-labelledby="current-condition-title">
     <div class="section-heading">
-        <p class="section-heading__eyebrow">Resumo atual</p>
-        <h2>Cliente e contrato</h2>
+        <p class="section-heading__eyebrow">Conferência</p>
+        <h2 id="current-condition-title">Condição atual</h2>
     </div>
-
     <div class="summary-grid">
-        <div class="summary-item"><span>Nome</span><strong><?= htmlspecialchars($customerName, ENT_QUOTES, 'UTF-8'); ?></strong></div>
-        <div class="summary-item"><span>Login</span><strong><?= htmlspecialchars($login !== '' ? $login : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-        <div class="summary-item"><span>Documento</span><strong><?= htmlspecialchars($customerDocument !== '' ? $customerDocument : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-        <div class="summary-item"><span>Telefone</span><strong><?= htmlspecialchars($customerPhone !== '' ? $customerPhone : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+        <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($client['nome'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+        <div class="summary-item"><span>Login</span><strong><?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?></strong></div>
         <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars($currentPlan !== '' ? $currentPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars($currentTechnology !== '' ? $currentTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-        <div class="summary-item"><span>Valor mensal atual</span><strong><?= htmlspecialchars($currentMonthlyValue !== null ? 'R$ ' . number_format((float) $currentMonthlyValue, 2, ',', '.') : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+        <div class="summary-item"><span>Valor atual</span><strong><?= $currentValue !== null ? 'R$ ' . number_format((float) $currentValue, 2, ',', '.') : '-'; ?></strong></div>
+        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars($currentTechnology !== '' ? $currentTechnology : 'Tecnologia não identificada', ENT_QUOTES, 'UTF-8'); ?></strong></div>
     </div>
 </section>
 
-<form class="content-grid content-grid--form" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade'), ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-form="1" data-upgrade-current-plan-id="<?= htmlspecialchars($currentPlanId, ENT_QUOTES, 'UTF-8'); ?>">
+<form class="card" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade'), ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-simple-form data-prevent-double-submit
+    data-current-plan="<?= htmlspecialchars((string) ($currentPlanOption['id'] ?? $currentPlan), ENT_QUOTES, 'UTF-8'); ?>"
+    data-current-family="<?= htmlspecialchars((string) ($currentPlanOption['install_type'] ?? $context['current_technology_family'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+    data-current-speed="<?= htmlspecialchars((string) ($currentPlanOption['speed_down'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+    data-current-value="<?= htmlspecialchars((string) ($currentValue ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+    <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
     <?php if ($correctionOf > 0): ?>
-        <input type="hidden" name="correction_of" value="<?= htmlspecialchars((string) $correctionOf, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="correction_of" value="<?= $correctionOf; ?>">
         <input type="hidden" name="correction_reason" value="<?= htmlspecialchars($correctionReason, ENT_QUOTES, 'UTF-8'); ?>">
     <?php endif; ?>
-    <input type="hidden" name="valor_mensal_atual" value="<?= htmlspecialchars($currentMonthlyValue !== null ? number_format((float) $currentMonthlyValue, 2, '.', '') : '', ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-current-monthly-value>
-    <input type="hidden" name="nova_tecnologia" value="<?= htmlspecialchars($newTechnology, ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-new-technology>
-    <input type="hidden" name="novo_valor_mensal" value="<?= htmlspecialchars($newMonthlyValueRaw !== null ? number_format((float) $newMonthlyValueRaw, 2, '.', '') : '', ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-monthly-value>
-    <input type="hidden" name="beneficio_concedido" value="<?= htmlspecialchars($benefitDescription, ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-benefit-description>
-    <input type="hidden" name="benefit_flags" value="<?= htmlspecialchars((string) json_encode($context['benefit_flags'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8'); ?>" data-upgrade-benefit-flags>
-    <input type="hidden" name="beneficio_outro_text" value="" data-upgrade-benefit-other-text-value>
 
-    <section class="card">
-        <div class="section-heading">
-            <p class="section-heading__eyebrow">Alteração comercial</p>
-            <h2>Dados do upgrade</h2>
+    <div class="section-heading">
+        <p class="section-heading__eyebrow">Alteração</p>
+        <h2>Nova condição contratada</h2>
+    </div>
+
+    <div class="form-grid">
+        <label class="field field--span-2" for="novo-plano">
+            <span>Novo plano</span>
+            <select id="novo-plano" name="novo_plano" required data-simple-plan-select aria-describedby="novo-plano-help novo-plano-error" <?= $firstErrorField === 'novo_plano' ? 'data-focus-field' : ''; ?>>
+                <option value="">Selecione o novo plano</option>
+                <?php foreach ($plans as $plan): ?>
+                    <?php
+                    $id = (string) ($plan['id'] ?? '');
+                    $name = trim((string) ($plan['name'] ?? $id));
+                    $speed = trim((string) ($plan['speed_down'] ?? ''));
+                    $value = trim((string) ($plan['value'] ?? ''));
+                    $technology = trim((string) ($plan['technology_label'] ?? 'Tecnologia não identificada'));
+                    $parts = array_filter([$name, $speed !== '' ? $speed : null, $value !== '' ? 'R$ ' . number_format((float) str_replace(',', '.', $value), 2, ',', '.') : null, $technology]);
+                    ?>
+                    <option value="<?= htmlspecialchars($id, ENT_QUOTES, 'UTF-8'); ?>"
+                        data-plan-name="<?= htmlspecialchars($name, ENT_QUOTES, 'UTF-8'); ?>"
+                        data-plan-speed="<?= htmlspecialchars($speed, ENT_QUOTES, 'UTF-8'); ?>"
+                        data-plan-value="<?= htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
+                        data-plan-technology="<?= htmlspecialchars($technology, ENT_QUOTES, 'UTF-8'); ?>"
+                        data-plan-family="<?= htmlspecialchars((string) ($plan['install_type'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                        <?= strcasecmp($id, $selectedPlan) === 0 ? 'selected' : ''; ?>><?= htmlspecialchars(implode(' · ', $parts), ENT_QUOTES, 'UTF-8'); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <small id="novo-plano-help" class="field-help">A lista exibe nome, velocidade, valor, tecnologia e usa o UUID/código no snapshot.</small>
+            <?php if ($errorFor('novo_plano') !== ''): ?><small id="novo-plano-error" class="field-error"><?= htmlspecialchars($errorFor('novo_plano'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+        </label>
+
+        <div class="field field--span-2" aria-live="polite">
+            <span>Operação calculada</span>
+            <strong class="upgrade-operation-result" data-simple-operation><?= htmlspecialchars($operationLabels[$operation] ?? 'Selecione um plano', ENT_QUOTES, 'UTF-8'); ?></strong>
+            <small class="field-help">Troca de tecnologia = migração; condição superior = upgrade; condição inferior = downgrade.</small>
         </div>
 
-        <div class="form-grid">
-            <label class="field field--span-2">
-                <span>Tipo da operação</span>
-                <select name="operation_type" required data-upgrade-operation-type>
-                    <option value="" <?= $operationType === '' ? 'selected' : ''; ?>>Selecione a operação</option>
-                    <option value="upgrade" <?= $operationType === 'upgrade' ? 'selected' : ''; ?>>Upgrade de plano</option>
-                    <option value="migration" <?= $operationType === 'migration' ? 'selected' : ''; ?>>Migração de tecnologia</option>
-                </select>
-                <small class="field-help">Migração exige tecnologias diferentes; Upgrade exige plano diferente.</small>
+        <label class="field" for="benefit-value">
+            <span>Valor do benefício</span>
+            <input id="benefit-value" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" aria-describedby="benefit-value-error" <?= $firstErrorField === 'valor_beneficio' ? 'data-focus-field' : ''; ?>>
+            <?php if ($errorFor('valor_beneficio') !== ''): ?><small id="benefit-value-error" class="field-error"><?= htmlspecialchars($errorFor('valor_beneficio'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+        </label>
+
+        <label class="field" for="other-benefit">
+            <span>Outro benefício</span>
+            <input id="other-benefit" name="beneficio_outro_text" value="<?= htmlspecialchars($otherBenefit, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" placeholder="Descreva, se houver">
+        </label>
+
+        <label class="field field--span-2 checkbox-field" for="retention-condition">
+            <input id="retention-condition" type="checkbox" name="retention_condition" value="1" <?= $retention ? 'checked' : ''; ?>>
+            <span><strong>Condição comercial de retenção</strong><small>Não muda o tipo técnico da operação e exige justificativa na observação.</small></span>
+        </label>
+
+        <fieldset class="field field--span-2 fidelity-fieldset">
+            <legend>Fidelidade</legend>
+            <label class="checkbox-field" for="apply-fidelity">
+                <input id="apply-fidelity" type="checkbox" name="apply_fidelity" value="1" data-fidelity-toggle <?= $applyFidelity ? 'checked' : ''; ?>>
+                <span><strong>Aplicar nova fidelidade</strong><small>Somente com benefício real, aceite expresso e prazo máximo de 12 meses.</small></span>
             </label>
-
-            <label class="field">
-                <span>Plano atual</span>
-                <input type="text" name="plano_atual" value="<?= htmlspecialchars($currentPlan, ENT_QUOTES, 'UTF-8'); ?>" readonly>
-            </label>
-
-            <label class="field">
-                <span>Novo plano</span>
-                <select name="novo_plano" required data-upgrade-plan-select>
-                    <option value="">Selecione o novo plano</option>
-                    <?php foreach ($planOptions as $plan): ?>
-                        <?php $planLabel = (string) ($plan['label'] ?? $plan['id'] ?? ''); ?>
-                        <?php $planInstallType = (string) ($plan['install_type'] ?? ''); ?>
-                        <?php $planTechnology = (string) ($plan['technology'] ?? $plan['tecnologia'] ?? ''); ?>
-                        <?php $planTechnologyLabel = $planTechnology !== '' ? $planTechnology : $technologyLabelForInstallType($planInstallType); ?>
-                        <option
-                            value="<?= htmlspecialchars((string) ($plan['id'] ?? $planLabel), ENT_QUOTES, 'UTF-8'); ?>"
-                            data-upgrade-install-type="<?= htmlspecialchars($planInstallType, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-upgrade-technology="<?= htmlspecialchars($planTechnologyLabel, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-upgrade-monthly-value="<?= htmlspecialchars((string) ($plan['value'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                            data-upgrade-plan-name="<?= htmlspecialchars((string) ($plan['name'] ?? $planLabel), ENT_QUOTES, 'UTF-8'); ?>"
-                            data-monthly-value="<?= htmlspecialchars((string) ($plan['value'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                            <?= $selected((string) ($plan['id'] ?? $planLabel), $newPlan); ?>
-                        ><?= htmlspecialchars($planLabel !== '' ? $planLabel : '-', ENT_QUOTES, 'UTF-8'); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-
-            <label class="field">
-                <span>Tecnologia atual</span>
-                <input type="text" name="tecnologia_atual" value="<?= htmlspecialchars($currentTechnology, ENT_QUOTES, 'UTF-8'); ?>" readonly data-upgrade-current-technology data-upgrade-current-technology-family="<?= htmlspecialchars($currentTechnologyFamily, ENT_QUOTES, 'UTF-8'); ?>">
-            </label>
-
-            <label class="field">
-                <span>Nova tecnologia</span>
-                <input type="text" value="<?= htmlspecialchars($newTechnology, ENT_QUOTES, 'UTF-8'); ?>" readonly data-upgrade-new-technology-display>
-            </label>
-
-            <label class="field">
-                <span>Valor do benefício</span>
-                <input type="text" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" required data-upgrade-benefit-value <?= empty($canUpgradeCommercial) ? 'readonly' : ''; ?>>
-            </label>
-
-            <div class="field">
-                <span>Novo valor mensal</span>
-                <div class="upgrade-summary-value" data-upgrade-monthly-display>
-                    <?= htmlspecialchars($newMonthlyValue !== '' ? 'R$ ' . $newMonthlyValue : 'R$ 0,00', ENT_QUOTES, 'UTF-8'); ?>
-                </div>
-                <p class="field-help">Valor apenas para conferência. O snapshot salva o valor do novo plano selecionado.</p>
-            </div>
-
-            <div class="field field--span-2">
-                <span>Benefícios</span>
-                <div class="upgrade-benefit-grid" data-upgrade-benefit-group>
-                    <label class="upgrade-benefit-card">
-                        <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="radio_to_fiber" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
-                        </span>
-                        <span class="upgrade-benefit-card__body">
-                            <strong>Migração rádio → fibra</strong>
-                            <small>Formaliza a troca de tecnologia do acesso.</small>
-                        </span>
-                    </label>
-                    <label class="upgrade-benefit-card">
-                        <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="adhesion_waiver" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
-                        </span>
-                        <span class="upgrade-benefit-card__body">
-                            <strong>Isenção de adesão/instalação</strong>
-                            <small>Registra benefício financeiro concedido ao cliente.</small>
-                        </span>
-                    </label>
-                    <label class="upgrade-benefit-card">
-                        <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="plan_upgrade" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
-                        </span>
-                        <span class="upgrade-benefit-card__body">
-                            <strong>Upgrade de plano</strong>
-                            <small>Formaliza aumento de velocidade ou melhoria comercial.</small>
-                        </span>
-                    </label>
-                    <label class="upgrade-benefit-card">
-                        <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="retention" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
-                        </span>
-                        <span class="upgrade-benefit-card__body">
-                            <strong>Condição de retenção</strong>
-                            <small>Registra condição especial para manter o cliente.</small>
-                        </span>
-                    </label>
-                    <label class="upgrade-benefit-card upgrade-benefit-card--wide">
-                        <span class="upgrade-benefit-card__checkbox">
-                            <input type="checkbox" data-upgrade-benefit-checkbox="other_benefit" <?= empty($canUpgradeCommercial) ? 'disabled' : ''; ?>>
-                        </span>
-                        <span class="upgrade-benefit-card__body">
-                            <strong>Outro benefício</strong>
-                            <small>Permite informar um benefício personalizado.</small>
-                        </span>
-                    </label>
-                </div>
-                <p class="field-help" data-upgrade-benefit-summary>Os benefícios marcados serão salvos no snapshot e usados no termo público.</p>
-            </div>
-
-            <label class="field field--span-2" data-upgrade-other-benefit-wrapper hidden>
-                <span>Detalhe do outro benefício</span>
-                <input type="text" placeholder="Descreva o outro benefício" data-upgrade-benefit-other-text>
-            </label>
-
-            <label class="field">
-                <span>Prazo de fidelidade</span>
-                <input type="number" name="fidelidade_meses" min="1" value="<?= htmlspecialchars((string) $fidelityMonths, ENT_QUOTES, 'UTF-8'); ?>" required data-upgrade-fidelity <?= empty($canUpgradeCommercial) ? 'readonly' : ''; ?>>
-            </label>
-
-            <label class="field field--span-2">
-                <span>Observação</span>
-                <textarea rows="4" name="observacao" placeholder="Descreva a justificativa comercial e qualquer observação operacional."><?= htmlspecialchars($observation, ENT_QUOTES, 'UTF-8'); ?></textarea>
-            </label>
-
-            <label class="field">
-                <span>Forma de assinatura</span>
-                <select name="signature_mode" required>
-                    <option value="remote">Titular não está no local / assinatura remota</option>
-                    <option value="local">Assinatura colhida no local</option>
-                </select>
-                <small class="field-help">O processo continuará pendente até existir aceite digital válido.</small>
-            </label>
-
-            <label class="field">
-                <span>Motivo da assinatura remota</span>
-                <input type="text" name="remote_signature_reason" placeholder="Ex.: titular não está no local">
-                <small class="field-help">Obrigatório quando a assinatura for remota.</small>
-            </label>
-
-            <label class="field field--span-2" data-upgrade-same-value-confirm hidden>
-                <span><input type="checkbox" name="confirm_same_value" value="1"> Confirmo que o novo plano possui o mesmo valor mensal e desejo continuar.</span>
-            </label>
-
-            <section class="soft-card field--span-2" aria-labelledby="upgrade-review-title">
-                <div class="section-heading">
-                    <p class="section-heading__eyebrow">Revisão obrigatória</p>
-                    <h2 id="upgrade-review-title">Confira antes de gerar o aceite</h2>
-                </div>
-                <div class="summary-grid">
-                    <div class="summary-item"><span>Operação</span><strong data-upgrade-review-operation>-</strong></div>
-                    <div class="summary-item"><span>Assinatura</span><strong data-upgrade-review-signature>-</strong></div>
-                    <div class="summary-item"><span>Antes — Tecnologia</span><strong><?= htmlspecialchars($currentTechnology !== '' ? $currentTechnology : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Antes — Plano</span><strong><?= htmlspecialchars($currentPlan !== '' ? $currentPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Antes — Valor</span><strong><?= htmlspecialchars($currentMonthlyValue !== null ? 'R$ ' . number_format((float) $currentMonthlyValue, 2, ',', '.') : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    <div class="summary-item"><span>Depois — Tecnologia</span><strong data-upgrade-review-new-technology>-</strong></div>
-                    <div class="summary-item"><span>Depois — Plano</span><strong data-upgrade-review-new-plan>-</strong></div>
-                    <div class="summary-item"><span>Depois — Valor</span><strong data-upgrade-review-new-value>-</strong></div>
-                    <div class="summary-item"><span>Fidelidade</span><strong data-upgrade-review-fidelity>-</strong></div>
-                    <div class="summary-item summary-item--span-2"><span>Benefício</span><strong data-upgrade-review-benefit>-</strong></div>
-                </div>
-                <label class="field" style="margin-top: 16px;">
-                    <span><input type="checkbox" name="review_confirmed" value="1" required> Confirmei que o plano, a tecnologia, o valor e as condições acima estão corretos.</span>
+            <div class="form-grid" data-fidelity-fields <?= !$applyFidelity ? 'hidden' : ''; ?>>
+                <label class="field field--span-2" for="fidelity-description">
+                    <span>Benefício que justifica a fidelidade</span>
+                    <input id="fidelity-description" name="fidelity_benefit_description" value="<?= htmlspecialchars($fidelityDescription, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="fidelity-description-error">
+                    <?php if ($errorFor('fidelity_benefit_description') !== ''): ?><small id="fidelity-description-error" class="field-error"><?= htmlspecialchars($errorFor('fidelity_benefit_description'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
                 </label>
-            </section>
-
-            <div class="form-actions field--span-2">
-                <button class="button" type="submit"><?= $correctionOf > 0 ? 'Gerar nova versão e aceite' : 'Gerar aceite obrigatório'; ?></button>
-                <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Cancelar</a>
+                <label class="field" for="fidelity-months">
+                    <span>Prazo de permanência</span>
+                    <input id="fidelity-months" type="number" name="fidelidade_meses" min="1" max="12" value="<?= $fidelityMonths; ?>" aria-describedby="fidelity-months-error">
+                    <?php if ($errorFor('fidelidade_meses') !== ''): ?><small id="fidelity-months-error" class="field-error"><?= htmlspecialchars($errorFor('fidelidade_meses'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+                </label>
             </div>
+        </fieldset>
+
+        <label class="field field--span-2" for="upgrade-observation">
+            <span>Observação</span>
+            <textarea id="upgrade-observation" name="observacao" rows="4" maxlength="2000" aria-describedby="upgrade-observation-error" <?= $firstErrorField === 'observacao' ? 'data-focus-field' : ''; ?>><?= htmlspecialchars($observation, ENT_QUOTES, 'UTF-8'); ?></textarea>
+            <?php if ($errorFor('observacao') !== ''): ?><small id="upgrade-observation-error" class="field-error"><?= htmlspecialchars($errorFor('observacao'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+        </label>
+
+        <div class="form-actions field--span-2">
+            <button class="button" type="submit" name="next_action" value="continue" data-submit-label="Salvando...">Salvar e continuar</button>
+            <button class="button button--ghost" type="submit" name="next_action" value="later" data-submit-label="Salvando...">Salvar e voltar depois</button>
         </div>
-    </section>
+    </div>
 </form>
 <?php
 $content = (string) ob_get_clean();
-
 require __DIR__ . '/../layouts/app.php';

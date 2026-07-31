@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Config;
+use App\Core\Csrf;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
@@ -14,16 +15,20 @@ use App\Infrastructure\Contracts\ContractAcceptanceRepository;
 use App\Infrastructure\Contracts\ContractRepository;
 use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Contracts\MessageTemplateRepository;
+use App\Infrastructure\Contracts\ClientDocumentRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
+use App\Infrastructure\MkAuth\TechnologyMapper;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
 use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\Contracts\AcceptanceEvidenceService;
 use App\Services\Processes\OperationalProcessService;
+use App\Services\Notifications\NotificationTemplateService;
 
 /**
  * Fluxo de cadastro de novo cliente.
@@ -48,7 +53,11 @@ final class ClientController
         private EvotrixService $evotrixService,
         private MkAuthTicketService $mkAuthTicketService,
         private AcceptanceWorkflowService $acceptanceWorkflowService,
-        private OperationalProcessService $operationalProcessService
+        private OperationalProcessService $operationalProcessService,
+        private TechnologyMapper $technologyMapper,
+        private AcceptanceEvidenceService $acceptanceEvidenceService,
+        private NotificationTemplateService $notificationTemplateService,
+        private ClientDocumentRepository $clientDocumentRepository
     ) {
     }
 
@@ -233,6 +242,11 @@ final class ClientController
             is_array($checkpoints) ? $checkpoints : [],
             is_array($auditLogs) ? $auditLogs : []
         );
+        try {
+            $detail['scannedDocuments'] = $this->clientDocumentRepository->listByLogin($login);
+        } catch (\Throwable) {
+            $detail['scannedDocuments'] = [];
+        }
 
         $html = $this->view->render('clients/detail', [
             'pageTitle' => 'Cliente',
@@ -253,9 +267,75 @@ final class ClientController
             'canCorrectUpgrade' => $this->canCorrectUpgrade(),
             'canCancelPendingContract' => $this->canCancelPendingContract(),
             'canSupersedeContract' => $this->canSupersedeContract(),
+            'contractSignatureCsrfToken' => Csrf::token('client_contract_signature:' . $login),
         ]);
 
         return Response::html($html);
+    }
+
+    public function connectionDetails(Request $request): Response
+    {
+        if (!$this->canSearchClients()) {
+            return Response::json(['status' => 'error', 'message' => 'Acesso negado.'], 403);
+        }
+
+        $login = $this->sanitizeLogin((string) $request->query('login', ''));
+        if ($login === '') {
+            return Response::json(['status' => 'error', 'message' => 'Login inválido.'], 422);
+        }
+
+        try {
+            $profile = $this->mkauthDatabase->findClientProfile($login) ?? [];
+            $connection = $this->mkauthDatabase->radiusConnectionStatus($login);
+        } catch (\Throwable) {
+            return Response::json(['status' => 'error', 'message' => 'Consulta de conexão indisponível.'], 503);
+        }
+
+        $session = is_array($connection['session'] ?? null) ? $connection['session'] : [];
+        $technology = $this->technologyMapper->describe((string) ($profile['plano_tecnologia'] ?? ''));
+        $canViewIp = $this->canViewClientIp();
+
+        return Response::json([
+            'status' => 'success',
+            'data' => [
+                'online' => !empty($connection['online']),
+                'login' => $login,
+                'plan' => (string) ($profile['plano_nome'] ?? $profile['plano'] ?? ''),
+                'technology' => $technology,
+                'ip' => $canViewIp && filter_var((string) ($session['framedipaddress'] ?? ''), FILTER_VALIDATE_IP)
+                    ? (string) $session['framedipaddress']
+                    : '',
+                'mac' => trim((string) ($session['callingstationid'] ?? $profile['user_mac'] ?? '')),
+                'nas' => trim((string) ($session['nasipaddress'] ?? '')),
+                'started_at' => trim((string) ($session['acctstarttime'] ?? '')),
+                'updated_at' => trim((string) ($session['acctupdatetime'] ?? '')),
+                'connected_seconds' => $connection['connected_seconds'] ?? null,
+                'equipment' => trim((string) ($profile['equipamento'] ?? '')),
+                'onu_ont' => trim((string) ($profile['onu_ont'] ?? '')),
+                'interface' => trim((string) ($profile['interface'] ?? '')),
+                'source' => 'MkAuth/RADIUS (somente leitura)',
+            ],
+        ]);
+    }
+
+    public function financialDetails(Request $request): Response
+    {
+        if (!$this->canManageFinancial()) {
+            return Response::json(['status' => 'error', 'message' => 'Detalhes financeiros restritos.'], 403);
+        }
+
+        $login = $this->sanitizeLogin((string) $request->query('login', ''));
+        if ($login === '') {
+            return Response::json(['status' => 'error', 'message' => 'Login inválido.'], 422);
+        }
+
+        try {
+            $summary = $this->mkauthDatabase->clientFinancialSummary($login);
+        } catch (\Throwable) {
+            return Response::json(['status' => 'error', 'message' => 'Consulta financeira indisponível.'], 503);
+        }
+
+        return Response::json(['status' => 'success', 'data' => $summary]);
     }
 
     public function upgrade(Request $request): Response
@@ -300,6 +380,17 @@ final class ClientController
             $context = $this->applyCorrectionContext($context, $correctionContract);
         }
 
+        return $this->renderUpgradeForm($request, $context, [], [], $correctionOf, is_array($correctionContract) ? (string) ($correctionContract['cancellation_reason'] ?? '') : '');
+    }
+
+    private function renderUpgradeForm(
+        Request $request,
+        array $context,
+        array $form = [],
+        array $errors = [],
+        int $correctionOf = 0,
+        string $correctionReason = ''
+    ): Response {
         $html = $this->view->render('clients/upgrade', [
             'pageTitle' => 'Upgrade / Migração',
             'currentPath' => $request->path(),
@@ -311,12 +402,15 @@ final class ClientController
             'canCreateClient' => $this->canCreateClient(),
             'canSearchClients' => $this->canSearchClients(),
             'canUpgradeCommercial' => $this->canUpgradeCommercial(),
-            'currentLogin' => $login,
+            'currentLogin' => (string) ($context['login'] ?? ''),
+            'form' => $form,
+            'errors' => $errors,
             'correctionOf' => $correctionOf,
-            'correctionReason' => is_array($correctionContract) ? (string) ($correctionContract['cancellation_reason'] ?? '') : '',
+            'correctionReason' => $correctionReason,
+            'csrfToken' => Csrf::token('client_upgrade:' . (string) ($context['login'] ?? '')),
         ]);
 
-        return Response::html($html);
+        return Response::html($html, $errors === [] ? 200 : 422);
     }
 
     public function storeUpgrade(Request $request): Response
@@ -330,6 +424,11 @@ final class ClientController
         if (!$this->canRequestUpgrade()) {
             Flash::set('error', 'Seu usuário não possui permissão para iniciar Upgrade / Migração.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if (!Csrf::verify($request, 'client_upgrade:' . $login)) {
+            Flash::set('error', 'A sessão do formulário expirou. Reabra a nova condição e tente novamente.');
+            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login));
         }
 
 
@@ -366,8 +465,7 @@ final class ClientController
         $errors = $this->validateUpgrade($data, $context);
 
         if ($errors !== []) {
-            Flash::set('error', implode(' ', $errors));
-            return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login) . ($correctionOf > 0 ? '&correction_of=' . $correctionOf : ''));
+            return $this->renderUpgradeForm($request, $context, $data, $errors, $correctionOf, $correctionReason);
         }
 
         $pdo = $this->database->pdo();
@@ -450,26 +548,18 @@ final class ClientController
             return Response::redirect('/clientes/upgrade?login=' . rawurlencode($login) . ($correctionOf > 0 ? '&correction_of=' . $correctionOf : ''));
         }
 
-        try {
-            $this->dispatchUpgradeAcceptanceAfterCommit($result, $request);
-        } catch (\Throwable $exception) {
-            $this->recordAudit('contract.upgrade.dispatch_failed', 'contract_acceptance', (int) ($result['acceptance_id'] ?? 0), [
-                'contract_id' => (int) ($result['contract_id'] ?? 0),
-                'error' => $exception->getMessage(),
-                'requeue_required' => true,
-            ], $request);
-        }
-
-        if (($result['signature_mode'] ?? 'remote') === 'local' && trim((string) ($result['token'] ?? '')) !== '') {
-            Flash::set('success', 'Upgrade / Migração criado. Colha agora o aceite digital do titular neste dispositivo.');
-            return Response::redirect('/aceite/' . rawurlencode((string) $result['token']));
-        }
-
         Flash::set('success', $correctionOf > 0
-            ? 'Correção criada. O contrato anterior foi substituído e somente o novo aceite está ativo.'
-            : 'Upgrade / Migração criado com aceite remoto pendente.');
+            ? 'Correção criada. Confira as condições e prepare o envio do novo aceite.'
+            : 'Nova condição salva. Confira o documento, colete a assinatura e escolha os canais.');
 
-        return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        $processId = (int) ($result['process_id'] ?? 0);
+        if ((string) $request->input('next_action', '') === 'later') {
+            Flash::set('success', 'Nova condição salva. O processo pode ser retomado pelo perfil do cliente.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+        return Response::redirect($processId > 0
+            ? '/processos/migracao?id=' . $processId . '&screen=2'
+            : '/clientes/detalhe?login=' . rawurlencode($login));
     }
 
     public function cancelUpgradeRequest(Request $request): Response
@@ -519,6 +609,130 @@ final class ClientController
         return Response::redirect($returnTo . '#upgrade-process');
     }
 
+    public function prepareMigrationAcceptance(Request $request): Response
+    {
+        $processId = (int) $request->input('process_id', 0);
+        $returnTo = '/processos/migracao?id=' . $processId . '&screen=2';
+        $process = $processId > 0 ? $this->operationalProcessService->detail($processId) : null;
+        if (!is_array($process)
+            || (string) ($process['process_type'] ?? '') !== OperationalProcessService::TYPE_MIGRATION
+            || !$this->canRequestUpgrade()
+        ) {
+            Flash::set('error', 'Processo de migração indisponível para este usuário.');
+            return Response::redirect('/processos');
+        }
+        if (!Csrf::verify($request, 'operational_process:' . $processId)) {
+            Flash::set('error', 'A sessão do formulário expirou. Reabra a tela e tente novamente.');
+            return Response::redirect($returnTo);
+        }
+
+        $contract = $this->contractRepository->findById((int) ($process['contract_id'] ?? 0));
+        $acceptance = $this->contractAcceptanceRepository->findById((int) ($process['acceptance_id'] ?? 0));
+        if (!is_array($contract) || !is_array($acceptance)
+            || (int) ($acceptance['contract_id'] ?? 0) !== (int) ($contract['id'] ?? 0)
+            || trim((string) ($acceptance['revoked_at'] ?? '')) !== ''
+        ) {
+            Flash::set('error', 'Contrato ou aceite ativo não localizado.');
+            return Response::redirect($returnTo);
+        }
+
+        $remote = (string) $request->input('client_absent', '0') === '1';
+        $remoteReason = trim((string) $request->input('remote_signature_reason', ''));
+        $phoneOriginal = preg_replace('/\D+/', '', (string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? '')) ?? '';
+        $phone = preg_replace('/\D+/', '', (string) $request->input('phone', $phoneOriginal)) ?? '';
+        if (in_array(strlen($phone), [10, 11], true)) {
+            $phone = '55' . $phone;
+        }
+        $emailOriginal = strtolower(trim((string) ($process['metadata']['client']['email'] ?? '')));
+        $email = strtolower(trim((string) $request->input('email', $emailOriginal)));
+        $sendWhatsapp = (string) $request->input('channel_whatsapp', '0') === '1';
+        $sendEmail = (string) $request->input('channel_email', '0') === '1';
+        $signatureData = trim((string) $request->input('assinatura_cliente', ''));
+
+        $errors = [];
+        if (!$sendWhatsapp && !$sendEmail) {
+            $errors[] = 'Selecione pelo menos um canal válido.';
+        }
+        if ($sendWhatsapp && (strlen($phone) < 12 || strlen($phone) > 13)) {
+            $errors[] = 'Informe um WhatsApp com DDD válido.';
+        }
+        if ($sendEmail && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            $errors[] = 'Informe um e-mail válido.';
+        }
+        if ($remote && $remoteReason === '') {
+            $errors[] = 'Informe por que o cliente não está presente.';
+        }
+        if (!$remote && $signatureData === '') {
+            $errors[] = 'Colete a assinatura local antes de enviar.';
+        }
+        if ($errors !== []) {
+            Flash::set('error', implode(' ', $errors));
+            return Response::redirect($returnTo);
+        }
+
+        try {
+            $operator = $this->resolveUser();
+            $signaturePath = null;
+            if (!$remote) {
+                $signaturePath = $this->acceptanceEvidenceService->saveSignature((int) $acceptance['id'], $signatureData, 'local');
+            }
+            $evidencePath = $this->acceptanceEvidenceService->saveEvidence((int) $acceptance['id'], [
+                'event' => 'local_signature_and_channels_prepared',
+                'acceptance_id' => (int) $acceptance['id'],
+                'contract_id' => (int) $contract['id'],
+                'process_id' => $processId,
+                'signature_mode' => $remote ? 'remote' : 'local',
+                'signature_path' => $signaturePath,
+                'remote_reason' => $remote ? $remoteReason : null,
+                'channels' => ['whatsapp' => $sendWhatsapp, 'email' => $sendEmail],
+                'contacts' => [
+                    'phone' => $phone,
+                    'email' => $email,
+                    'phone_changed' => $phone !== $phoneOriginal,
+                    'email_changed' => $email !== $emailOriginal,
+                ],
+                'operator' => ['id' => $operator['id'] ?? null, 'login' => $operator['login'] ?? '', 'name' => $operator['name'] ?? ''],
+                'recorded_at' => date('Y-m-d H:i:s'),
+                'ip_address' => (string) $request->server('REMOTE_ADDR', ''),
+                'user_agent' => (string) $request->header('User-Agent', ''),
+            ]);
+
+            $updated = array_merge($acceptance, [
+                'status' => $remote ? 'assinatura_pendente' : 'criado',
+                'telefone_enviado' => $phone,
+                'remote_signature_reason' => $remote ? $remoteReason : null,
+                'evidence_json_path' => $evidencePath,
+            ]);
+            if ($this->contractAcceptanceRepository->updateById((int) $acceptance['id'], $updated) !== 1) {
+                throw new \RuntimeException('O aceite foi alterado durante a preparação.');
+            }
+
+            $notificationDraft = [
+                'nome_completo' => (string) ($contract['nome_cliente'] ?? $process['client_name'] ?? 'Cliente'),
+                'telefone_cliente' => $phone,
+                'celular' => $phone,
+                'email' => $email,
+                'email_original' => $email,
+                'has_real_email' => filter_var($email, FILTER_VALIDATE_EMAIL) !== false,
+            ];
+            $results = $this->dispatchAcceptanceChannels($contract, array_merge($updated, ['id' => (int) $acceptance['id']]), $notificationDraft, $sendWhatsapp, $sendEmail, true, $request);
+            $this->recordAudit('contract.migration.acceptance.prepared', 'contract_acceptance', (int) $acceptance['id'], [
+                'process_id' => $processId,
+                'signature_mode' => $remote ? 'remote' : 'local',
+                'channels' => array_keys($results),
+                'dry_run' => (bool) $this->config->get('evotrix.dry_run', true) || (bool) $this->config->get('email.dry_run', true),
+                'contact_changed' => $phone !== $phoneOriginal || $email !== $emailOriginal,
+                'evidence_json_path' => $evidencePath,
+            ], $request);
+            $this->operationalProcessService->synchronizeAcceptance((int) $acceptance['id']);
+            Flash::set('success', 'Assinatura e canais registrados. Em homologação, os envios permanecem em dry-run.');
+        } catch (\Throwable $exception) {
+            Flash::set('error', 'Não foi possível preparar o aceite: ' . $exception->getMessage());
+        }
+
+        return Response::redirect($returnTo);
+    }
+
     public function startUpgradeCorrection(Request $request): Response
     {
         $contractId = (int) $request->input('contract_id', 0);
@@ -563,6 +777,11 @@ final class ClientController
 
         if (!$this->canRequestContractSignature()) {
             Flash::set('error', 'Usuario sem permissao para solicitar contrato digital.');
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+
+        if (!Csrf::verify($request, 'client_contract_signature:' . $login)) {
+            Flash::set('error', 'A sessão do formulário expirou. Reabra o cliente e tente novamente.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
@@ -2123,7 +2342,7 @@ final class ClientController
                 'city' => trim((string) ($row['cidade'] ?? '')),
                 'neighborhood' => trim((string) ($row['bairro'] ?? '')),
                 'due_day' => trim((string) ($row['venc'] ?? '')),
-                'technology' => trim((string) ($row['plano_tecnologia'] ?? '')),
+                'technology' => $this->technologyMapper->label((string) ($row['plano_tecnologia'] ?? '')),
                 'email' => trim((string) ($row['email'] ?? '')),
                 'address' => trim((string) ($row['endereco'] ?? '')),
                 'contract' => trim((string) ($row['contrato'] ?? '')),
@@ -2222,19 +2441,41 @@ final class ClientController
             $operationalProcesses = [];
         }
 
+        $technology = $this->technologyMapper->describe((string) ($clientProfile['plano_tecnologia'] ?? ''));
+        $phones = is_array($clientProfile['phones'] ?? null) ? $clientProfile['phones'] : [];
+        if ($phones === []) {
+            $phones = array_values(array_filter([
+                trim((string) ($clientProfile['celular'] ?? '')),
+                trim((string) ($clientProfile['fone'] ?? $primaryContract['telefone_cliente'] ?? '')),
+            ]));
+        }
+        $emails = is_array($clientProfile['emails'] ?? null) ? $clientProfile['emails'] : [];
         $profile = [
             'name' => trim((string) ($clientProfile['nome'] ?? $primaryContract['nome_cliente'] ?? $registration['client_name'] ?? '-')),
+            'short_name' => trim((string) ($clientProfile['nome_resumido'] ?? '')),
             'login' => $login,
-            'document' => trim((string) ($clientProfile['cpf_cnpj'] ?? $registration['cpf_cnpj'] ?? '')) ?: '-',
-            'phone' => trim((string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $primaryContract['telefone_cliente'] ?? '')) ?: '-',
-            'email' => ($email = trim((string) ($clientProfile['email'] ?? ''))) !== '' ? $email : '-',
-            'address' => $address !== '' ? $address : '-',
+            'document' => trim((string) ($clientProfile['cpf_cnpj'] ?? $registration['cpf_cnpj'] ?? '')),
+            'phone' => (string) ($phones[0] ?? ''),
+            'phones' => $phones,
+            'email' => ($email = trim((string) ($clientProfile['email'] ?? ''))) !== '' ? $email : '',
+            'emails' => $emails,
+            'address' => $address,
             'plan' => trim((string) ($clientProfile['plano_nome'] ?? $clientProfile['plano'] ?? $registration['plan_name'] ?? '-')),
             'status' => (string) ($statusVisual['label'] ?? 'Outro'),
             'status_visual' => $statusVisual,
-            'due_day' => trim((string) ($clientProfile['venc'] ?? '-')),
-            'technology' => trim((string) ($clientProfile['plano_tecnologia'] ?? '-')),
+            'due_day' => trim((string) ($clientProfile['venc'] ?? '')),
+            'technology' => (string) $technology['label'],
+            'technology_detail' => $technology,
+            'coordinates' => trim((string) ($clientProfile['coordinates'] ?? '')),
+            'reference' => trim((string) ($clientProfile['reference'] ?? '')),
+            'monthly_value' => trim((string) ($clientProfile['plano_valor'] ?? '')),
+            'billing_type' => trim((string) ($clientProfile['tipo_cob'] ?? '')),
+            'open_titles' => $clientProfile['tit_abertos'] ?? null,
+            'overdue_titles' => $clientProfile['tit_vencidos'] ?? null,
+            'last_update' => trim((string) ($clientProfile['last_update'] ?? '')),
         ];
+        $profile['actions'] = $this->buildClientQuickActions($profile, $clientProfile);
+        $migrationAction = $this->buildMigrationAction($upgradeProcess, $operationalProcesses, $login);
 
         return [
             'login' => $login,
@@ -2245,6 +2486,7 @@ final class ClientController
             'digitalContract' => $digitalContract,
             'upgradeProcess' => $upgradeProcess,
             'operationalProcesses' => $operationalProcesses,
+            'migrationAction' => $migrationAction,
             'acceptance' => $acceptance,
             'acceptanceHistory' => is_array($acceptanceRecords) ? $acceptanceRecords : [],
             'financialTask' => $financialTask,
@@ -2257,6 +2499,97 @@ final class ClientController
                 'local' => $registration !== [] || $checkpoints !== [] || $contracts !== [],
             ],
         ];
+    }
+
+    private function buildClientQuickActions(array $profile, array $clientProfile): array
+    {
+        $actions = [];
+        foreach ((array) ($profile['phones'] ?? []) as $phone) {
+            $phone = trim((string) $phone);
+            $digits = preg_replace('/\D+/', '', $phone) ?? '';
+            if (strlen($digits) < 10 || strlen($digits) > 13) {
+                continue;
+            }
+            $international = str_starts_with($digits, '55') ? $digits : '55' . $digits;
+            $actions[] = ['type' => 'phone', 'label' => 'Ligar', 'value' => $phone, 'url' => 'tel:+' . $international];
+            $actions[] = ['type' => 'whatsapp', 'label' => 'WhatsApp', 'value' => $phone, 'url' => 'https://wa.me/' . $international];
+        }
+
+        foreach ((array) ($profile['emails'] ?? []) as $email) {
+            $email = trim((string) $email);
+            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $actions[] = ['type' => 'email', 'label' => 'E-mail', 'value' => $email, 'url' => 'mailto:' . rawurlencode($email)];
+            }
+        }
+
+        $mapQuery = $this->normalizeMapQuery((string) ($profile['coordinates'] ?? ''), (string) ($profile['address'] ?? ''));
+        if ($mapQuery !== '') {
+            $actions[] = ['type' => 'map', 'label' => 'Abrir mapa', 'value' => '', 'url' => 'https://www.google.com/maps/search/?api=1&query=' . rawurlencode($mapQuery)];
+        }
+
+        $actions[] = ['type' => 'copy', 'label' => 'Copiar login', 'value' => (string) ($profile['login'] ?? ''), 'url' => ''];
+
+        $ip = trim((string) ($clientProfile['ip'] ?? ''));
+        if ($this->canViewClientIp() && filter_var($ip, FILTER_VALIDATE_IP)) {
+            $actions[] = ['type' => 'ip', 'label' => 'Acessar IP', 'value' => $ip, 'url' => 'http://' . $ip . '/'];
+        }
+
+        return $actions;
+    }
+
+    private function normalizeMapQuery(string $coordinates, string $address): string
+    {
+        if (preg_match('/^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/', $coordinates, $matches) === 1) {
+            $lat = (float) $matches[1];
+            $lng = (float) $matches[2];
+            if ($lat >= -90 && $lat <= 90 && $lng >= -180 && $lng <= 180) {
+                return $lat . ',' . $lng;
+            }
+        }
+
+        return mb_strlen(trim($address)) >= 8 ? trim($address) : '';
+    }
+
+    private function buildMigrationAction(array $upgradeProcess, array $operationalProcesses, string $login): array
+    {
+        $process = null;
+        foreach ($operationalProcesses as $candidate) {
+            if (is_array($candidate) && (string) ($candidate['process_type'] ?? '') === 'migration') {
+                $process = $candidate;
+                if (!in_array((string) ($candidate['status'] ?? ''), ['completed', 'cancelled'], true)) {
+                    break;
+                }
+            }
+        }
+
+        if (!is_array($process)) {
+            return ['label' => 'Iniciar Upgrade / Migração', 'tone' => 'start', 'url' => '/clientes/upgrade?login=' . rawurlencode($login)];
+        }
+
+        $status = (string) ($process['status'] ?? 'in_progress');
+        $url = '/processos/migracao?id=' . (int) ($process['id'] ?? 0);
+        if ($status === 'completed') {
+            return ['label' => 'Ver histórico da migração', 'tone' => 'complete', 'url' => $url];
+        }
+        if ($status === 'attention') {
+            return ['label' => 'Resolver pendência da migração', 'tone' => 'attention', 'url' => $url];
+        }
+        if (str_starts_with($status, 'waiting_') || in_array((string) ($process['next_pending_key'] ?? ''), ['send_acceptance', 'confirm_acceptance'], true)) {
+            return ['label' => 'Aguardando confirmação do cliente', 'tone' => 'waiting', 'url' => $url];
+        }
+
+        return [
+            'label' => 'Continuar processo — ' . (int) ($process['progress_completed'] ?? 0) . ' de ' . (int) ($process['progress_total'] ?? 11) . ' etapas',
+            'tone' => 'progress',
+            'url' => $url,
+        ];
+    }
+
+    private function canViewClientIp(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return !empty($access['is_manager']) || !empty($access['is_admin']) || !empty($access['can_manage_settings']);
     }
 
     private function buildClientTimeline(
@@ -3040,24 +3373,15 @@ final class ClientController
         }
 
         if ($plans === []) {
-            return [
-                ['id' => 'FibraRural_40mbpsPromo', 'name' => 'FibraRural_40mbpsPromo', 'label' => 'FibraRural_40mbpsPromo', 'value' => '', 'technology' => 'Fibra', 'install_type' => 'fibra', 'local_dici' => 'r'],
-                ['id' => 'FibraUrbano_100mbps', 'name' => 'FibraUrbano_100mbps', 'label' => 'FibraUrbano_100mbps', 'value' => '', 'technology' => 'Fibra', 'install_type' => 'fibra', 'local_dici' => 'u'],
-                ['id' => 'RadioRural_10mbps', 'name' => 'RadioRural_10mbps', 'label' => 'RadioRural_10mbps', 'value' => '', 'technology' => 'Rádio', 'install_type' => 'radio', 'local_dici' => 'r'],
-            ];
+            return [];
         }
 
-        return array_map(static function (array $plan): array {
+        return array_map(function (array $plan): array {
             $name = trim((string) ($plan['nome'] ?? ''));
             $uuid = trim((string) ($plan['uuid_plano'] ?? ''));
             $value = trim((string) ($plan['valor'] ?? ''));
-            $technology = trim((string) ($plan['tecnologia'] ?? ''));
-            $normalized = self::normalizeTextForMatch($name);
-            $normalizedTechnology = self::normalizeTextForMatch($technology);
-            $installType = str_contains($normalizedTechnology, 'radio') || str_contains($normalized, 'radio')
-                ? 'radio'
-                : (str_contains($normalizedTechnology, 'fibra') || str_contains($normalized, 'fibra') ? 'fibra' : '');
-            $localDici = str_contains($normalized, 'rural') ? 'r' : (str_contains($normalized, 'urbano') ? 'u' : '');
+            $technologyCode = trim((string) ($plan['tecnologia'] ?? ''));
+            $technology = $this->technologyMapper->describe($technologyCode);
             $label = $name;
 
             if ($value !== '') {
@@ -3069,9 +3393,13 @@ final class ClientController
                 'name' => $name,
                 'label' => $label,
                 'value' => $value,
-                'technology' => $technology,
-                'install_type' => $installType,
-                'local_dici' => $localDici,
+                'technology' => $technologyCode,
+                'technology_label' => (string) $technology['label'],
+                'install_type' => (string) $technology['family'],
+                'technology_verified' => (bool) $technology['verified'],
+                'speed_down' => trim((string) ($plan['veldown'] ?? '')),
+                'speed_up' => trim((string) ($plan['velup'] ?? '')),
+                'description' => trim((string) ($plan['descricao'] ?? '')),
             ];
         }, array_values(array_filter($plans, static fn (array $plan): bool => trim((string) ($plan['nome'] ?? '')) !== '')));
     }
@@ -4701,7 +5029,9 @@ final class ClientController
         $context['benefit_flags'] = $this->normalizeUpgradeBenefitFlags($snapshot['benefit_flags'] ?? null);
         $context['benefit_description'] = (string) ($snapshot['benefit_description'] ?? $context['benefit_description'] ?? '');
         $context['benefit_value'] = (float) ($snapshot['benefit_value'] ?? $context['benefit_value'] ?? 0);
-        $context['fidelity_months'] = max(1, (int) ($snapshot['fidelity_months'] ?? $context['fidelity_months'] ?? 12));
+        $context['fidelity_months'] = max(0, min(12, (int) ($snapshot['fidelity_months'] ?? $context['fidelity_months'] ?? 0)));
+        $context['apply_fidelity'] = $context['fidelity_months'] > 0;
+        $context['fidelity_benefit_description'] = (string) ($snapshot['fidelity_benefit_description'] ?? $context['fidelity_benefit_description'] ?? '');
         $context['observacao'] = (string) ($snapshot['observacao'] ?? $snapshot['observation'] ?? $context['observacao'] ?? '');
         $context['operation_type'] = (string) ($snapshot['operation_type'] ?? 'upgrade');
         $context['supersedes_contract_id'] = (int) ($contract['id'] ?? 0);
@@ -4868,10 +5198,7 @@ final class ClientController
             $currentPlan
         );
         $upgradeSnapshot = $this->extractUpgradeSnapshot(is_array($contract) ? $contract : []);
-        $defaultNewPlan = trim((string) ($upgradeSnapshot['new_plan_id'] ?? $upgradeSnapshot['new_plan'] ?? $currentPlan));
-        if ($defaultNewPlan === '' && isset($planOptions[0]['id'])) {
-            $defaultNewPlan = (string) $planOptions[0]['id'];
-        }
+        $defaultNewPlan = trim((string) ($upgradeSnapshot['new_plan_id'] ?? $upgradeSnapshot['new_plan'] ?? ''));
         $defaultNewPlanOption = $this->findPlanOptionByName($defaultNewPlan, $planOptions);
         $defaultNewTechnology = $this->resolveTechnologyLabelForPlan(is_array($defaultNewPlanOption) ? $defaultNewPlanOption : []);
         $currentMonthlyValue = $this->resolvePlanMonthlyValue($currentPlan, $planOptions);
@@ -4879,9 +5206,7 @@ final class ClientController
             $currentMonthlyValue = $this->resolvePlanMonthlyValue($defaultNewPlan, $planOptions);
         }
         $defaultNewMonthlyValue = $this->resolvePlanMonthlyValue($defaultNewPlan, $planOptions);
-        if ($defaultNewMonthlyValue === null) {
-            $defaultNewMonthlyValue = $currentMonthlyValue;
-        }
+        $defaultNewMonthlyValue ??= 0.0;
         $defaultBenefitDefaults = $this->resolveUpgradeBenefitDefaults(
             $currentTechnology,
             $defaultNewTechnology,
@@ -4892,10 +5217,7 @@ final class ClientController
         );
         $currentTechnologyFamily = $this->resolveTechnologyFamily(is_array($currentPlanOption) ? $currentPlanOption : [], $currentTechnology, $currentPlan);
         $defaultNewTechnologyFamily = $this->resolveTechnologyFamily(is_array($defaultNewPlanOption) ? $defaultNewPlanOption : [], $defaultNewTechnology, $defaultNewPlan);
-        $fidelityMonths = (int) ($upgradeSnapshot['fidelity_months'] ?? ($contract['fidelidade_meses'] ?? $this->config->get('contracts.commercial.fidelidade_meses_padrao', 12)));
-        if ($fidelityMonths < 1) {
-            $fidelityMonths = 12;
-        }
+        $fidelityMonths = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
         $originalContractReference = '';
         if (is_array($contract) && isset($contract['id']) && (int) $contract['id'] > 0) {
             $originalContractReference = 'Contrato local #' . (int) $contract['id'];
@@ -4913,9 +5235,9 @@ final class ClientController
             'current_technology_family' => $currentTechnologyFamily,
             'current_monthly_value' => $currentMonthlyValue,
             'new_plan' => $defaultNewPlan,
-            'operation_type' => in_array((string) ($upgradeSnapshot['operation_type'] ?? 'upgrade'), ['upgrade', 'migration'], true)
-                ? (string) ($upgradeSnapshot['operation_type'] ?? 'upgrade')
-                : 'upgrade',
+            'operation_type' => in_array((string) ($upgradeSnapshot['operation_type'] ?? ''), ['upgrade', 'migration', 'downgrade'], true)
+                ? (string) ($upgradeSnapshot['operation_type'] ?? '')
+                : '',
             'new_technology' => trim((string) ($upgradeSnapshot['new_technology'] ?? $defaultNewTechnology)),
             'new_technology_family' => $defaultNewTechnologyFamily,
             'benefit_flags' => $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null) ?: $defaultBenefitDefaults['flags'],
@@ -4923,6 +5245,9 @@ final class ClientController
             'benefit_value' => isset($upgradeSnapshot['benefit_value']) ? (float) $upgradeSnapshot['benefit_value'] : (float) $defaultBenefitDefaults['value'],
             'new_monthly_value' => isset($upgradeSnapshot['new_monthly_value']) ? (float) $upgradeSnapshot['new_monthly_value'] : $defaultNewMonthlyValue,
             'fidelity_months' => $fidelityMonths,
+            'apply_fidelity' => $fidelityMonths > 0,
+            'fidelity_benefit_description' => trim((string) ($upgradeSnapshot['fidelity_benefit_description'] ?? '')),
+            'retention_condition' => !empty($upgradeSnapshot['retention_condition']),
             'observacao' => trim((string) ($upgradeSnapshot['observation'] ?? '')),
             'multa_proporcional' => isset($upgradeSnapshot['multa_proporcional']) ? (float) $upgradeSnapshot['multa_proporcional'] : (float) ($contract['multa_total'] ?? 0),
             'original_contract_reference' => $originalContractReference,
@@ -4944,6 +5269,7 @@ final class ClientController
         );
         $selectedTechnology = $this->resolveTechnologyLabelForPlan(is_array($selectedPlanOption) ? $selectedPlanOption : []);
         $selectedTechnologyFamily = $this->resolveTechnologyFamily(is_array($selectedPlanOption) ? $selectedPlanOption : [], $selectedTechnology, $selectedPlan);
+        $currentTechnologyFamily = $this->resolveTechnologyFamily(is_array($currentPlanOption) ? $currentPlanOption : [], $currentTechnology, $currentPlan);
         $monthlyValue = $this->resolvePlanMonthlyValue($selectedPlan, $planOptions);
         if ($monthlyValue === null) {
             $monthlyValue = (float) ($context['new_monthly_value'] ?? 0);
@@ -4960,12 +5286,17 @@ final class ClientController
         if ($benefitFlags === []) {
             $benefitFlags = $benefitDefaults['flags'];
         }
+        $benefitFlags['retention'] = (string) $request->input('retention_condition', '0') === '1';
         $benefitDescription = trim((string) $request->input('beneficio_concedido', ''));
         if ($benefitDescription === '') {
             $benefitDescription = $benefitDefaults['description'];
         }
         $benefitValue = $this->normalizeMoney((string) $request->input('valor_beneficio', (string) $benefitDefaults['value']));
         $benefitOtherText = trim((string) $request->input('beneficio_outro_text', ''));
+        $benefitFlags['other_benefit'] = $benefitOtherText !== '';
+        $applyFidelity = (string) $request->input('apply_fidelity', '0') === '1';
+        $fidelityMonths = $applyFidelity ? max(1, min(12, (int) $request->input('fidelidade_meses', '12'))) : 0;
+        $fidelityBenefitDescription = trim((string) $request->input('fidelity_benefit_description', ''));
 
         if (!$this->canUpgradeCommercial()) {
             $benefitFlags = $benefitDefaults['flags'];
@@ -4976,9 +5307,16 @@ final class ClientController
 
         return [
             'login' => $this->sanitizeLogin((string) ($context['login'] ?? $request->input('login', ''))),
-            'operation_type' => in_array((string) $request->input('operation_type', $context['operation_type'] ?? ''), ['upgrade', 'migration'], true)
-                ? (string) $request->input('operation_type', $context['operation_type'] ?? '')
-                : '',
+            'operation_type' => $this->determineUpgradeOperation(
+                (string) ($currentPlanOption['id'] ?? $currentPlan),
+                (string) ($selectedPlanOption['id'] ?? $selectedPlan),
+                $currentTechnologyFamily,
+                $selectedTechnologyFamily,
+                is_array($currentPlanOption) ? $currentPlanOption : [],
+                is_array($selectedPlanOption) ? $selectedPlanOption : [],
+                (float) ($context['current_monthly_value'] ?? 0),
+                $monthlyValue
+            ),
             'plano_atual' => trim((string) $request->input('plano_atual', $context['current_plan'] ?? '')),
             'current_plan_id' => trim((string) ($currentPlanOption['id'] ?? $currentPlan)),
             'current_plan_name' => trim((string) ($currentPlanOption['name'] ?? $currentPlan)),
@@ -5001,14 +5339,14 @@ final class ClientController
             'beneficio_outro_text' => $benefitOtherText,
             'valor_beneficio' => $benefitValue,
             'novo_valor_mensal' => $this->normalizeMoney((string) $request->input('novo_valor_mensal', (string) $monthlyValue)),
-            'fidelidade_meses' => $this->canUpgradeCommercial()
-                ? max(1, (int) $request->input('fidelidade_meses', (string) ($context['fidelity_months'] ?? 12)))
-                : max(1, (int) ($context['fidelity_months'] ?? 12)),
+            'retention_condition' => !empty($benefitFlags['retention']),
+            'apply_fidelity' => $applyFidelity,
+            'fidelity_benefit_description' => $fidelityBenefitDescription,
+            'fidelidade_meses' => $fidelityMonths,
             'observacao' => trim((string) $request->input('observacao', $context['observacao'] ?? '')),
-            'signature_mode' => (string) $request->input('signature_mode', 'remote') === 'local' ? 'local' : 'remote',
-            'remote_signature_reason' => trim((string) $request->input('remote_signature_reason', '')),
-            'review_confirmed' => (string) $request->input('review_confirmed', '') === '1',
-            'confirm_same_value' => (string) $request->input('confirm_same_value', '') === '1',
+            'signature_mode' => 'local',
+            'remote_signature_reason' => '',
+            'review_confirmed' => true,
         ];
     }
 
@@ -5017,40 +5355,28 @@ final class ClientController
         $errors = [];
 
         $operationType = (string) ($data['operation_type'] ?? '');
-        if (!in_array($operationType, ['upgrade', 'migration'], true)) {
-            $errors[] = 'Selecione se a operação é Upgrade ou Migração.';
-        }
-
-        if (empty($data['review_confirmed'])) {
-            $errors[] = 'Confirme a revisão final do plano, tecnologia, valor e condições.';
+        if (!in_array($operationType, ['upgrade', 'migration', 'downgrade'], true)) {
+            $errors['novo_plano'] = 'O plano selecionado não produz uma mudança efetiva ou não pôde ser classificado.';
         }
 
         if (trim((string) ($data['plano_atual'] ?? '')) === '') {
-            $errors[] = 'Informe o plano atual.';
+            $errors['plano_atual'] = 'Não foi possível identificar o plano atual.';
         }
 
         if (trim((string) ($data['novo_plano'] ?? '')) === '') {
-            $errors[] = 'Informe o novo plano.';
+            $errors['novo_plano'] = 'Selecione o novo plano.';
         }
 
         if (trim((string) ($data['tecnologia_atual'] ?? '')) === '') {
-            $errors[] = 'Informe a tecnologia atual.';
+            $errors['tecnologia_atual'] = 'Não foi possível identificar a tecnologia atual.';
         }
 
         if ($this->normalizeMoney((string) ($data['novo_valor_mensal'] ?? '0')) <= 0) {
-            $errors[] = 'Informe o novo valor mensal.';
-        }
-
-        if ((int) ($data['fidelidade_meses'] ?? 0) < 1) {
-            $errors[] = 'Informe o prazo de fidelidade.';
+            $errors['novo_plano'] = 'O plano selecionado não possui valor mensal válido.';
         }
 
         if (trim((string) ($context['current_plan'] ?? '')) === '') {
-            $errors[] = 'Nao foi possivel identificar o plano atual do cliente.';
-        }
-
-        if (($data['signature_mode'] ?? 'remote') === 'remote' && trim((string) ($data['remote_signature_reason'] ?? '')) === '') {
-            $errors[] = 'Informe o motivo da assinatura remota.';
+            $errors['plano_atual'] = 'Não foi possível identificar o plano atual do cliente.';
         }
 
         $currentPlanId = trim((string) ($data['current_plan_id'] ?? $data['plano_atual'] ?? ''));
@@ -5068,20 +5394,30 @@ final class ClientController
 
         if ($operationType === 'migration') {
             if ($currentFamily === '' || $newFamily === '') {
-                $errors[] = 'Não foi possível confirmar as tecnologias da Migração. Revise os planos selecionados.';
+                $errors['novo_plano'] = 'Não foi possível confirmar as tecnologias da migração.';
             } elseif ($currentFamily === $newFamily) {
-                $errors[] = 'Migração exige tecnologias diferentes. Para manter a mesma tecnologia, use Upgrade.';
+                $errors['novo_plano'] = 'A operação foi classificada incorretamente: tecnologias iguais não são migração.';
             }
         }
 
-        if ($operationType === 'upgrade' && $currentPlanId !== '' && $newPlanId !== '' && strcasecmp($currentPlanId, $newPlanId) === 0) {
-            $errors[] = 'Upgrade exige um plano novo diferente do plano atual.';
+        if ($currentPlanId !== '' && $newPlanId !== '' && strcasecmp($currentPlanId, $newPlanId) === 0) {
+            $errors['novo_plano'] = 'Selecione um plano diferente do atual.';
         }
 
-        $currentValue = (float) ($context['current_monthly_value'] ?? 0);
-        $newValue = (float) ($data['novo_valor_mensal'] ?? 0);
-        if ($operationType === 'upgrade' && abs($currentValue - $newValue) < 0.005 && empty($data['confirm_same_value'])) {
-            $errors[] = 'O novo plano possui o mesmo valor mensal. Confirme explicitamente que deseja continuar.';
+        if (!empty($data['retention_condition']) && trim((string) ($data['observacao'] ?? '')) === '') {
+            $errors['observacao'] = 'Justifique a condição comercial de retenção.';
+        }
+
+        if (!empty($data['apply_fidelity'])) {
+            if ((float) ($data['valor_beneficio'] ?? 0) <= 0) {
+                $errors['valor_beneficio'] = 'A fidelidade exige benefício real com valor informado.';
+            }
+            if (trim((string) ($data['fidelity_benefit_description'] ?? '')) === '') {
+                $errors['fidelity_benefit_description'] = 'Descreva o benefício que justifica a fidelidade.';
+            }
+            if ((int) ($data['fidelidade_meses'] ?? 0) < 1 || (int) ($data['fidelidade_meses'] ?? 0) > 12) {
+                $errors['fidelidade_meses'] = 'Informe prazo entre 1 e 12 meses.';
+            }
         }
 
         return $errors;
@@ -5127,7 +5463,7 @@ final class ClientController
 
         $acceptanceRecord = $this->contractAcceptanceRepository->findById($acceptanceId) ?? array_merge($acceptanceData, ['id' => $acceptanceId]);
         $contractData['acceptance_id'] = $acceptanceId;
-        $this->operationalProcessService->ensureForContract(
+        $process = $this->operationalProcessService->ensureForContract(
             OperationalProcessService::TYPE_MIGRATION,
             $contractData,
             is_array($acceptanceRecord) ? $acceptanceRecord : array_merge($acceptanceData, ['id' => $acceptanceId]),
@@ -5176,6 +5512,7 @@ final class ClientController
         }
 
         return [
+            'process_id' => (int) ($process['id'] ?? 0),
             'contract_id' => $contractId,
             'acceptance_id' => $acceptanceId,
             'signature_mode' => (string) ($data['signature_mode'] ?? 'remote'),
@@ -5471,7 +5808,11 @@ final class ClientController
             'benefit_other_text' => $benefitOtherText,
             'benefit_value' => (float) ($data['valor_beneficio'] ?? $benefitDefaults['value']),
             'new_monthly_value' => (float) ($newMonthlyValue ?? 0),
-            'fidelity_months' => (int) ($data['fidelidade_meses'] ?? 12),
+            'retention_condition' => !empty($data['retention_condition']),
+            'commercial_reason' => !empty($data['retention_condition']) ? 'retention' : 'standard_change',
+            'apply_fidelity' => !empty($data['apply_fidelity']),
+            'fidelity_benefit_description' => (string) ($data['fidelity_benefit_description'] ?? ''),
+            'fidelity_months' => !empty($data['apply_fidelity']) ? (int) ($data['fidelidade_meses'] ?? 0) : 0,
             'observacao' => (string) ($data['observacao'] ?? ''),
             'multa_proporcional' => (float) ($context['multa_proporcional'] ?? 0),
             'original_contract_reference' => $originalContractReference,
@@ -5500,12 +5841,12 @@ final class ClientController
             'technician_login' => $operatorLogin,
             'nome_cliente' => (string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? '-'),
             'telefone_cliente' => (string) ($clientProfile['celular'] ?? $clientProfile['fone'] ?? $contract['telefone_cliente'] ?? ''),
-            'tipo_adesao' => 'isenta',
+            'tipo_adesao' => !empty($benefitFlags['adhesion_waiver']) ? 'isenta' : 'nao_aplicavel',
             'valor_adesao' => '0.00',
             'parcelas_adesao' => '1',
             'valor_parcela_adesao' => '0.00',
             'vencimento_primeira_parcela' => null,
-            'fidelidade_meses' => (string) max(1, (int) ($data['fidelidade_meses'] ?? 12)),
+            'fidelidade_meses' => (string) (!empty($data['apply_fidelity']) ? max(1, min(12, (int) ($data['fidelidade_meses'] ?? 0))) : 0),
             'beneficio_valor' => $this->normalizeMoney((string) ($data['valor_beneficio'] ?? '0')),
             'multa_total' => $this->normalizeMoney((string) ($context['multa_proporcional'] ?? 0)),
             'beneficio_concedido_por' => (string) ($operator['name'] ?? $operatorLogin),
@@ -5617,146 +5958,106 @@ final class ClientController
 
     private function resolveTechnologyLabelForPlan(array $plan): string
     {
-        $installType = strtolower(trim((string) ($plan['install_type'] ?? '')));
-        if ($installType === 'fibra') {
-            return 'Fibra';
-        }
-
-        if ($installType === 'radio') {
-            return 'Rádio';
-        }
-
-        return $this->resolveTechnologyLabel(
-            (string) ($plan['technology'] ?? $plan['tecnologia'] ?? ''),
-            $plan,
-            (string) ($plan['label'] ?? $plan['id'] ?? '')
-        );
+        return $this->technologyMapper->label((string) ($plan['technology'] ?? $plan['tecnologia'] ?? ''));
     }
 
     private function resolveTechnologyFamily(array $plan = [], string $technology = '', string $planName = ''): string
     {
-        $installType = strtolower(trim((string) ($plan['install_type'] ?? '')));
-        if (in_array($installType, ['fibra', 'radio'], true)) {
-            return $installType;
+        $raw = trim((string) ($plan['technology'] ?? $plan['tecnologia'] ?? ''));
+        return $this->technologyMapper->family($raw !== '' ? $raw : $technology);
+    }
+
+    private function resolveTechnologyLabel(string $rawTechnology, array $plan = [], string $planName = ''): string
+    {
+        $raw = trim((string) ($plan['technology'] ?? $plan['tecnologia'] ?? ''));
+        return $this->technologyMapper->label($raw !== '' ? $raw : $rawTechnology);
+    }
+
+    private function determineUpgradeOperation(
+        string $currentPlanId,
+        string $newPlanId,
+        string $currentFamily,
+        string $newFamily,
+        array $currentPlan,
+        array $newPlan,
+        float $currentMonthlyValue,
+        float $newMonthlyValue
+    ): string {
+        if ($currentPlanId === '' || $newPlanId === '' || strcasecmp($currentPlanId, $newPlanId) === 0) {
+            return '';
         }
 
-        $normalizedTechnology = self::normalizeTextForMatch($technology);
-        if (str_contains($normalizedTechnology, 'fibra')) {
-            return 'fibra';
-        }
-        if (str_contains($normalizedTechnology, 'radio') || str_contains($normalizedTechnology, 'hibrid')) {
-            return 'radio';
+        if ($currentFamily !== '' && $newFamily !== '' && $currentFamily !== $newFamily) {
+            return 'migration';
         }
 
-        $normalizedPlan = self::normalizeTextForMatch($planName);
-        if (str_contains($normalizedPlan, 'fibra')) {
-            return 'fibra';
+        if ($currentFamily === '' || $newFamily === '') {
+            return '';
         }
-        if (str_contains($normalizedPlan, 'radio')) {
-            return 'radio';
+
+        $currentSpeed = $this->normalizePlanSpeed((string) ($currentPlan['speed_down'] ?? ''));
+        $newSpeed = $this->normalizePlanSpeed((string) ($newPlan['speed_down'] ?? ''));
+        if ($currentSpeed !== null && $newSpeed !== null && abs($currentSpeed - $newSpeed) > 0.001) {
+            return $newSpeed > $currentSpeed ? 'upgrade' : 'downgrade';
+        }
+
+        if (abs($currentMonthlyValue - $newMonthlyValue) > 0.005) {
+            return $newMonthlyValue > $currentMonthlyValue ? 'upgrade' : 'downgrade';
         }
 
         return '';
     }
 
-    private function resolveTechnologyLabel(string $rawTechnology, array $plan = [], string $planName = ''): string
+    private function normalizePlanSpeed(string $rawSpeed): ?float
     {
-        $installType = strtolower(trim((string) ($plan['install_type'] ?? '')));
-        if ($installType === 'fibra') {
-            return 'Fibra';
+        $rawSpeed = strtolower(trim($rawSpeed));
+        if ($rawSpeed === '' || !preg_match('/([0-9]+(?:[.,][0-9]+)?)\s*([kmg])?/', $rawSpeed, $matches)) {
+            return null;
         }
 
-        if ($installType === 'radio') {
-            return 'Rádio';
-        }
-
-        $normalized = strtolower(trim($rawTechnology));
-        $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
-
-        if ($normalized === '') {
-            $planNameNormalized = self::normalizeTextForMatch($planName);
-            if (str_contains($planNameNormalized, 'fibra')) {
-                return 'Fibra';
-            }
-            if (str_contains($planNameNormalized, 'radio')) {
-                return 'Rádio';
-            }
-
-            return '';
-        }
-
-        $map = [
-            'f' => 'Fibra',
-            'fibra' => 'Fibra',
-            'ftth' => 'Fibra',
-            'gpon' => 'Fibra',
-            'h' => 'Híbrida',
-            'hibrida' => 'Híbrida',
-            'híbrida' => 'Híbrida',
-            'r' => 'Rádio',
-            'radio' => 'Rádio',
-            'rádio' => 'Rádio',
-            'wireless' => 'Rádio',
-        ];
-
-        if (isset($map[$normalized])) {
-            return $map[$normalized];
-        }
-
-        $planNameNormalized = self::normalizeTextForMatch($planName);
-        if (str_contains($planNameNormalized, 'fibra')) {
-            return 'Fibra';
-        }
-        if (str_contains($planNameNormalized, 'radio')) {
-            return 'Rádio';
-        }
-
-        if (preg_match('/^[a-z]{1,3}$/', $normalized)) {
-            return '';
-        }
-
-        return $rawTechnology;
+        $value = (float) str_replace(',', '.', $matches[1]);
+        return match ($matches[2] ?? '') {
+            'g' => $value * 1000,
+            'k' => $value / 1000,
+            default => $value,
+        };
     }
 
     private function resolveUpgradeBenefitDefaults(string $currentTechnology, string $newTechnology, string $currentPlan = '', string $newPlan = '', float $currentMonthlyValue = 0.0, float $newMonthlyValue = 0.0): array
     {
         $currentTechnologyNormalized = self::normalizeTextForMatch($currentTechnology);
         $newTechnologyNormalized = self::normalizeTextForMatch($newTechnology);
-        $currentPlanNormalized = self::normalizeTextForMatch($currentPlan);
-        $newPlanNormalized = self::normalizeTextForMatch($newPlan);
         $movingFromRadioToFiber = (
-            ($currentTechnologyNormalized === 'radio' || str_contains($currentPlanNormalized, 'radio'))
-            && ($newTechnologyNormalized === 'fibra' || str_contains($newPlanNormalized, 'fibra'))
+            str_contains($currentTechnologyNormalized, 'radio')
+            && str_contains($newTechnologyNormalized, 'fibra')
         );
 
+        $adhesionWaiver = $movingFromRadioToFiber
+            && (bool) $this->config->get('contracts.commercial.isentar_adesao_migracao_radio_fibra', false);
         $flags = [
             'radio_to_fiber' => $movingFromRadioToFiber,
-            'adhesion_waiver' => $movingFromRadioToFiber,
+            'adhesion_waiver' => $adhesionWaiver,
             'plan_upgrade' => !$movingFromRadioToFiber && $newMonthlyValue > 0.0 && $currentMonthlyValue > 0.0 && $newMonthlyValue >= $currentMonthlyValue,
-            'retention' => !$movingFromRadioToFiber && $newMonthlyValue > 0.0 && $currentMonthlyValue > 0.0 && $newMonthlyValue < $currentMonthlyValue,
+            'retention' => false,
             'other_benefit' => false,
         ];
-
-        if ($flags['retention']) {
-            return [
-                'flags' => $flags,
-                'description' => 'condição comercial especial para retenção do cliente',
-                'value' => 1200.00,
-            ];
-        }
 
         if ($flags['radio_to_fiber']) {
             return [
                 'flags' => $flags,
-                'description' => 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação',
-                'value' => 1200.00,
+                'description' => $adhesionWaiver
+                    ? 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação conforme regra configurada'
+                    : 'migração de tecnologia de rádio para fibra óptica',
+                'value' => $adhesionWaiver
+                    ? (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0)
+                    : 0.00,
             ];
         }
 
         return [
             'flags' => $flags,
-            'description' => 'upgrade de plano com renovação da fidelidade contratual',
-            'value' => 1200.00,
+            'description' => !empty($flags['plan_upgrade']) ? 'upgrade de plano' : '',
+            'value' => 0.00,
         ];
     }
 
@@ -5965,9 +6266,39 @@ final class ClientController
         $emailContext = $this->resolveEmailContext(array_merge($contract, $draft));
         $emailRecipient = strtolower(trim((string) ($emailContext['email_cliente'] ?? '')));
         $hasRealEmail = (bool) ($emailContext['has_real_email'] ?? false);
+        $acceptanceType = (string) ($contract['tipo_aceite'] ?? 'nova_instalacao');
+        $templatePurpose = match ($acceptanceType) {
+            'upgrade_migracao' => $forceResend ? 'migracao_reenviar_aceite' : 'migracao_solicitar_aceite',
+            'contrato_digital' => $forceResend ? 'assinatura_avulsa_reenviar' : 'assinatura_avulsa_solicitar',
+            default => $forceResend ? 'instalacao_reenviar_aceite' : 'instalacao_solicitar_aceite',
+        };
+        $templateValues = $this->migrationTemplateValues($contract, $acceptance, $draft);
+        try {
+            $this->notificationTemplateService->seedDefaults();
+        } catch (\Throwable) {
+            // Mantém compatibilidade com bancos ainda sem a migration 017.
+        }
 
         if ($sendWhatsapp && $phone !== '') {
-            $messages = $this->buildAcceptanceWhatsappMessages($draft, $contract, $acceptance);
+            $templateSnapshot = null;
+            $template = $templatePurpose !== '' ? $this->messageTemplateRepository->findByPurpose($templatePurpose, 'whatsapp') : null;
+            $enabled = is_array($template) ? json_decode((string) ($template['enabled_channels_json'] ?? '[]'), true) : [];
+            if (is_array($template) && !empty($template['active']) && is_array($enabled) && in_array('whatsapp', $enabled, true)) {
+                $rendered = $this->notificationTemplateService->render($template, $templateValues);
+                $messages = [(string) $rendered['body']];
+                $templateSnapshot = $rendered['template_snapshot'];
+            } elseif ($templatePurpose !== '' && is_array($template)) {
+                $results['whatsapp'] = ['status' => 'disabled', 'message' => 'Canal desabilitado no template.'];
+                $messages = [];
+            } else {
+                $messages = $this->buildAcceptanceWhatsappMessages($draft, $contract, $acceptance);
+            }
+            if ($messages === []) {
+                $sendWhatsapp = false;
+            }
+        }
+
+        if ($sendWhatsapp && $phone !== '') {
             $response = $this->evotrixService->sendMessage($phone, $messages, $contractId, $acceptanceId, $forceResend);
             $results['whatsapp'] = $response;
             $this->recordAudit(
@@ -5978,13 +6309,31 @@ final class ClientController
                     'contract_id' => $contractId,
                     'recipient' => $phone,
                     'result' => $response,
+                    'template_snapshot' => $templateSnapshot,
                 ],
                 $request
             );
         }
 
         if ($sendEmail && $hasRealEmail) {
-            [$subject, $htmlBody, $textBody] = $this->buildAcceptanceEmailMessage($draft, $contract, $acceptance);
+            $templateSnapshot = null;
+            $template = $templatePurpose !== '' ? $this->messageTemplateRepository->findByPurpose($templatePurpose, 'email') : null;
+            $enabled = is_array($template) ? json_decode((string) ($template['enabled_channels_json'] ?? '[]'), true) : [];
+            if (is_array($template) && !empty($template['active']) && is_array($enabled) && in_array('email', $enabled, true)) {
+                $rendered = $this->notificationTemplateService->render($template, $templateValues);
+                $subject = (string) $rendered['subject'];
+                $textBody = (string) $rendered['body'];
+                $htmlBody = '<p>' . nl2br(htmlspecialchars($textBody, ENT_QUOTES, 'UTF-8')) . '</p>';
+                $templateSnapshot = $rendered['template_snapshot'];
+            } elseif ($templatePurpose !== '' && is_array($template)) {
+                $results['email'] = ['status' => 'disabled', 'message' => 'Canal desabilitado no template.'];
+                $sendEmail = false;
+            } else {
+                [$subject, $htmlBody, $textBody] = $this->buildAcceptanceEmailMessage($draft, $contract, $acceptance);
+            }
+        }
+
+        if ($sendEmail && $hasRealEmail) {
             $response = $this->emailService->sendAcceptanceEmail($emailRecipient, $subject, $htmlBody, $textBody, $contractId, $acceptanceId, $forceResend);
             $results['email'] = $response;
             $this->recordAudit(
@@ -5995,12 +6344,38 @@ final class ClientController
                     'contract_id' => $contractId,
                     'recipient' => $emailRecipient,
                     'result' => $response,
+                    'template_snapshot' => $templateSnapshot,
                 ],
                 $request
             );
         }
 
         return $results;
+    }
+
+    private function migrationTemplateValues(array $contract, array $acceptance, array $draft): array
+    {
+        $snapshot = $this->extractUpgradeSnapshot($contract);
+        return [
+            'nomecliente' => (string) ($draft['nome_completo'] ?? $contract['nome_cliente'] ?? ''),
+            'nomeresumido' => (string) ($draft['nome_resumido'] ?? ''),
+            'documentocliente' => '',
+            'logincliente' => (string) ($contract['mkauth_login'] ?? ''),
+            'telefonecliente' => (string) ($draft['telefone_cliente'] ?? $draft['celular'] ?? $contract['telefone_cliente'] ?? ''),
+            'emailcliente' => (string) ($draft['email'] ?? ''),
+            'planoatual' => (string) ($snapshot['current_plan_name'] ?? $snapshot['current_plan'] ?? ''),
+            'novoplano' => (string) ($snapshot['new_plan_name'] ?? $snapshot['new_plan'] ?? ''),
+            'valoratual' => isset($snapshot['current_monthly_value']) ? 'R$ ' . number_format((float) $snapshot['current_monthly_value'], 2, ',', '.') : '',
+            'novovalor' => isset($snapshot['new_monthly_value']) ? 'R$ ' . number_format((float) $snapshot['new_monthly_value'], 2, ',', '.') : '',
+            'tecnologiaatual' => (string) ($snapshot['current_technology'] ?? ''),
+            'novatecnologia' => (string) ($snapshot['new_technology'] ?? ''),
+            'beneficio' => (string) ($snapshot['benefit_description'] ?? ''),
+            'fidelidade' => (int) ($snapshot['fidelity_months'] ?? 0) > 0 ? (int) $snapshot['fidelity_months'] . ' meses' : 'não aplicada',
+            'linkaceite' => $this->buildAcceptanceLink($acceptance),
+            'data' => date('d/m/Y'),
+            'nomeprovedor' => $this->resolveProviderDisplayName(),
+            'protocoloprocesso' => 'MIG-' . str_pad((string) ((int) ($contract['id'] ?? 0)), 6, '0', STR_PAD_LEFT),
+        ];
     }
 
     private function dispatchAutomaticFinancialTicket(int $contractId, array $contractData, int $taskId, Request $request): void
@@ -6442,15 +6817,28 @@ final class ClientController
             $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
             $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
             $monthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
-            $fidelityMonths = max(1, (int) ($upgradeSnapshot['fidelity_months'] ?? $fidelidade));
+            $fidelityMonths = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
             $observation = trim((string) ($upgradeSnapshot['observacao'] ?? $observacao));
-            $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+            $waiverApplied = !empty($benefitFlags['adhesion_waiver']);
             $benefitSentence = $waiverApplied
                 ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
                 : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
-            $penaltySentence = $waiverApplied
-                ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
-                : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
+            $fidelityBenefit = trim((string) ($upgradeSnapshot['fidelity_benefit_description'] ?? ''));
+            if ($fidelityBenefit === '') {
+                $fidelityBenefit = $benefitDescription;
+            }
+            $fidelityLines = $fidelityMonths > 0
+                ? [
+                    'Cláusula Segunda: nova fidelidade expressamente aceita',
+                    'Fidelidade: ' . $fidelityMonths . ' meses',
+                    'Benefício vinculado à fidelidade: ' . ($fidelityBenefit !== '' ? $fidelityBenefit : '-'),
+                    'A eventual multa observará o benefício registrado e o período restante, conforme as condições documentadas.',
+                ]
+                : [
+                    'Cláusula Segunda: fidelidade',
+                    'Nova fidelidade: não aplicada.',
+                    'Esta alteração não renova automaticamente prazo de permanência.',
+                ];
 
             return trim(implode("\n", [
                 'Termo Aditivo ao Contrato de Prestação de Serviço',
@@ -6468,10 +6856,8 @@ final class ClientController
                 'Nova tecnologia: ' . ($newTechnology !== '' ? $newTechnology : '-'),
                 $benefitSentence,
                 'Novo valor mensal: R$ ' . $monthlyValue,
-                $penaltySentence,
                 '',
-                'Cláusula Segunda: renovação da fidelidade por 12 meses',
-                'Fidelidade: ' . $fidelityMonths . ' meses',
+                ...$fidelityLines,
                 'As demais condições comerciais permanecem válidas, exceto o que este aditivo alterar expressamente.',
                 '',
                 'Cláusula Terceira: disposições gerais',

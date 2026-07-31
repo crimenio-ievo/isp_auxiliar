@@ -49,7 +49,8 @@ $upgradeSnapshot = is_array($upgradeSnapshot) ? $upgradeSnapshot : [];
 $technicalCompleted = (string) ($upgradeSnapshot['technical_status'] ?? '') === 'concluido'
     || trim((string) ($upgradeSnapshot['technical_completed_at'] ?? '')) !== '';
 $upgradeBenefitFlags = is_array($upgradeSnapshot['benefit_flags'] ?? null) ? $upgradeSnapshot['benefit_flags'] : [];
-$upgradeHasWaiver = !empty($upgradeBenefitFlags['radio_to_fiber']) || !empty($upgradeBenefitFlags['adhesion_waiver']);
+$upgradeHasWaiver = !empty($upgradeBenefitFlags['adhesion_waiver']);
+$upgradeFidelity = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
 $isUpgradeContract = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
 $lifecycleLabel = match ($lifecycleStatus) {
     'correction_pending' => 'Correção em andamento',
@@ -261,7 +262,7 @@ ob_start();
 
     <?php if ($typeLabel((string) ($contract['tipo_aceite'] ?? '')) === 'Upgrade / Migração' && $upgradeSnapshot !== []): ?>
         <div class="summary-grid" style="margin-top: 18px;">
-            <div class="summary-item"><span>Operação</span><strong><?= ($upgradeSnapshot['operation_type'] ?? 'upgrade') === 'migration' ? 'Migração de tecnologia' : 'Upgrade de plano'; ?></strong></div>
+            <div class="summary-item"><span>Operação</span><strong><?= htmlspecialchars(match ((string) ($upgradeSnapshot['operation_type'] ?? '')) { 'migration' => 'Migração de tecnologia', 'downgrade' => 'Downgrade', 'upgrade' => 'Upgrade', default => 'Não identificada' }, ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['current_plan_name'] ?? $upgradeSnapshot['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
@@ -269,8 +270,8 @@ ob_start();
             <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['benefit_description'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Valor da taxa de adesão/instalação isentada</span><strong><?= htmlspecialchars($upgradeHasWaiver ? 'R$ ' . $formatMoney($upgradeSnapshot['benefit_value'] ?? 0) : 'Não se aplica', ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['new_monthly_value'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-            <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['fidelity_months'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
-            <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars($upgradeHasWaiver ? 'R$ ' . $formatMoney($upgradeSnapshot['multa_proporcional'] ?? 0) : 'Conforme contrato', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Fidelidade</span><strong><?= $upgradeFidelity > 0 ? htmlspecialchars((string) $upgradeFidelity, ENT_QUOTES, 'UTF-8') . ' meses' : 'Não aplicada'; ?></strong></div>
+            <div class="summary-item"><span>Multa vinculada à nova fidelidade</span><strong><?= htmlspecialchars($upgradeFidelity > 0 ? 'Conforme benefício e condições documentadas' : 'Não se aplica nesta alteração', ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item summary-item--span-2"><span>Observação</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['observacao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
         </div>
     <?php endif; ?>

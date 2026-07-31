@@ -27,6 +27,7 @@ use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
+use App\Infrastructure\MkAuth\TechnologyMapper;
 use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\MkAuth\MkAuthPlanChangeService;
@@ -126,7 +127,7 @@ function bootstrapApplication(): Application
     $container->set(ContractRepository::class, new ContractRepository($localDatabase));
     $container->set(ContractAcceptanceRepository::class, new ContractAcceptanceRepository($localDatabase));
     $container->set(FinancialTaskRepository::class, new FinancialTaskRepository($localDatabase));
-    $container->set(MessageTemplateRepository::class, new MessageTemplateRepository($localDatabase));
+    $container->set(MessageTemplateRepository::class, new MessageTemplateRepository($localDatabase, $localRepository));
     $container->set(NotificationLogRepository::class, new NotificationLogRepository($localDatabase));
     $container->set(OperationalProcessRepository::class, new OperationalProcessRepository(
         $localDatabase,
@@ -148,6 +149,7 @@ function bootstrapApplication(): Application
         (bool) $config->get('app.mkauth.write_enabled', false),
         (string) $config->get('paths.logs', $rootPath . '/logs') . '/mkauth-write-guard.log'
     ));
+    $container->set(TechnologyMapper::class, new TechnologyMapper());
     $container->set(MkAuthClient::class, new MkAuthClient(
         $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),

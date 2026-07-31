@@ -10,7 +10,11 @@ use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
+use App\Infrastructure\Contracts\ContractAcceptanceRepository;
+use App\Infrastructure\Contracts\ContractRepository;
+use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Services\MkAuth\MkAuthPlanChangeService;
 use App\Services\Processes\OperationalProcessService;
 
@@ -21,7 +25,11 @@ final class OperationalProcessController
         private Config $config,
         private LocalRepository $localRepository,
         private OperationalProcessService $processService,
-        private MkAuthPlanChangeService $planChangeService
+        private MkAuthPlanChangeService $planChangeService,
+        private ContractRepository $contractRepository,
+        private ContractAcceptanceRepository $acceptanceRepository,
+        private FinancialTaskRepository $financialTaskRepository,
+        private MkAuthDatabase $mkauthDatabase
     ) {
     }
 
@@ -91,6 +99,61 @@ final class OperationalProcessController
             'user' => $this->resolveViewUser(),
             'flash' => Flash::get(),
             'process' => $process,
+            'csrfToken' => Csrf::token($this->csrfScope((int) $process['id'])),
+            'canOverride' => $this->canOverride(),
+        ]));
+    }
+
+    public function migration(Request $request): Response
+    {
+        $process = $this->loadAuthorizedProcess((int) $request->query('id', 0));
+        if ($process instanceof Response) {
+            return $process;
+        }
+        if ((string) ($process['process_type'] ?? '') !== OperationalProcessService::TYPE_MIGRATION) {
+            return Response::redirect('/processos/detalhe?id=' . (int) ($process['id'] ?? 0));
+        }
+
+        $screen = max(1, min(4, (int) $request->query('screen', 1)));
+        $contract = $this->contractRepository->findById((int) ($process['contract_id'] ?? 0)) ?? [];
+        $acceptance = $this->acceptanceRepository->findById((int) ($process['acceptance_id'] ?? 0)) ?? [];
+        $financialTask = $this->financialTaskRepository->findByContractId((int) ($process['contract_id'] ?? 0)) ?? [];
+        $connection = [];
+        if ($screen === 3) {
+            try {
+                $connection = $this->mkauthDatabase->radiusConnectionStatus((string) ($process['mkauth_login'] ?? ''));
+            } catch (\Throwable) {
+                $connection = ['available' => false, 'online' => false, 'session' => null];
+            }
+        }
+
+        $dryRun = null;
+        if ($screen === 4) {
+            $migration = is_array($process['metadata']['migration'] ?? null) ? $process['metadata']['migration'] : [];
+            $targetPlan = trim((string) ($migration['new_plan_id'] ?? $migration['new_plan_name'] ?? ''));
+            if ($targetPlan !== '') {
+                try {
+                    $dryRun = $this->planChangeService->prepareDryRun((string) ($process['mkauth_login'] ?? ''), $targetPlan);
+                } catch (\Throwable $exception) {
+                    $dryRun = ['status' => 'unavailable', 'dry_run' => true, 'write_enabled' => false, 'message' => $exception->getMessage()];
+                }
+            }
+        }
+
+        return Response::html($this->view->render('processes/migration', [
+            'pageTitle' => 'Upgrade / Migração',
+            'currentPath' => $request->path(),
+            'basePath' => $request->basePath(),
+            'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'user' => $this->resolveViewUser(),
+            'flash' => Flash::get(),
+            'process' => $process,
+            'screen' => $screen,
+            'contract' => $contract,
+            'acceptance' => $acceptance,
+            'financialTask' => $financialTask,
+            'connection' => $connection,
+            'dryRun' => $dryRun,
             'csrfToken' => Csrf::token($this->csrfScope((int) $process['id'])),
             'canOverride' => $this->canOverride(),
         ]));
@@ -180,9 +243,13 @@ final class OperationalProcessController
         }
 
         $stepKey = trim((string) $request->input('step_key', ''));
+        $continueTo = (string) $request->input('continue_to', '');
+        $returnUrl = preg_match('/^migration:([1-4])$/', $continueTo, $continueMatches) === 1
+            ? '/processos/migracao?id=' . $processId . '&screen=' . (int) $continueMatches[1]
+            : '/processos/etapa?id=' . $processId . '&step=' . rawurlencode($stepKey);
         if (!$this->canUpdateStep($process, $stepKey)) {
             Flash::set('error', 'Seu usuário não possui permissão para executar esta etapa.');
-            return Response::redirect('/processos/etapa?id=' . $processId . '&step=' . rawurlencode($stepKey));
+            return Response::redirect($returnUrl);
         }
         $action = trim((string) $request->input('action', 'save'));
         $operator = $this->resolveUser();
@@ -215,12 +282,12 @@ final class OperationalProcessController
                 $action = 'defer';
             } catch (\Throwable $exception) {
                 Flash::set('error', 'Não foi possível preparar o dry-run: ' . $exception->getMessage());
-                return Response::redirect('/processos/etapa?id=' . $processId . '&step=' . rawurlencode($stepKey));
+                return Response::redirect($returnUrl);
             }
         } elseif ($action === 'refresh_external') {
             $this->processService->synchronizeExternalState($processId);
             Flash::set('success', 'Situação atualizada pelas fontes somente leitura disponíveis.');
-            return Response::redirect('/processos/etapa?id=' . $processId . '&step=' . rawurlencode($stepKey));
+            return Response::redirect($returnUrl);
         }
 
         try {
@@ -233,11 +300,14 @@ final class OperationalProcessController
             );
         } catch (\Throwable $exception) {
             Flash::set('error', $exception->getMessage());
-            return Response::redirect('/processos/etapa?id=' . $processId . '&step=' . rawurlencode($stepKey));
+            return Response::redirect($returnUrl);
         }
 
         if ((string) $request->input('continue_to', '') === 'checklist') {
             return Response::redirect('/processos/detalhe?id=' . $processId);
+        }
+        if (preg_match('/^migration:([1-4])$/', $continueTo, $matches) === 1) {
+            return Response::redirect('/processos/migracao?id=' . $processId . '&screen=' . (int) $matches[1]);
         }
         $next = $this->processService->nextStep($processId);
         if (is_array($next)) {

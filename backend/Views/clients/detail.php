@@ -6,562 +6,194 @@ use App\Core\Url;
 
 $detail = is_array($detail ?? null) ? $detail : [];
 $profile = is_array($detail['profile'] ?? null) ? $detail['profile'] : [];
+$client = is_array($detail['clientProfile'] ?? null) ? $detail['clientProfile'] : [];
 $contracts = is_array($detail['contracts'] ?? null) ? $detail['contracts'] : [];
-$digitalContract = is_array($detail['digitalContract'] ?? null) ? $detail['digitalContract'] : [];
-$upgradeProcess = is_array($detail['upgradeProcess'] ?? null) ? $detail['upgradeProcess'] : [];
-$operationalProcesses = is_array($detail['operationalProcesses'] ?? null) ? $detail['operationalProcesses'] : [];
-$acceptanceHistory = is_array($detail['acceptanceHistory'] ?? null) ? $detail['acceptanceHistory'] : [];
-$financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
-$registration = is_array($detail['registration'] ?? null) ? $detail['registration'] : [];
-$checkpoints = is_array($detail['checkpoints'] ?? null) ? $detail['checkpoints'] : [];
+$digital = is_array($detail['digitalContract'] ?? null) ? $detail['digitalContract'] : [];
+$processes = is_array($detail['operationalProcesses'] ?? null) ? $detail['operationalProcesses'] : [];
+$migrationAction = is_array($detail['migrationAction'] ?? null) ? $detail['migrationAction'] : [];
 $timeline = is_array($detail['timeline'] ?? null) ? $detail['timeline'] : [];
-$auditLogs = is_array($detail['auditLogs'] ?? null) ? $detail['auditLogs'] : [];
-$source = is_array($detail['source'] ?? null) ? $detail['source'] : [];
-$login = (string) ($detail['login'] ?? $profile['login'] ?? '');
-$canCorrectCurrent = !empty($canCorrectUpgrade)
-    && !empty($upgradeProcess['active'])
-    && (empty($upgradeProcess['accepted']) || !empty($canSupersedeContract));
-$canCorrectCompleted = !empty($canSupersedeContract) && !empty($upgradeProcess['completed']);
-$canCancelCurrent = !empty($canCancelPendingContract)
-    && !empty($upgradeProcess['active'])
-    && empty($upgradeProcess['accepted'])
-    && empty($upgradeProcess['completed']);
-$activeOperationalMigration = null;
-foreach ($operationalProcesses as $candidateProcess) {
-    if (!is_array($candidateProcess)
-        || (string) ($candidateProcess['process_type'] ?? '') !== 'migration'
-        || in_array((string) ($candidateProcess['status'] ?? ''), ['completed', 'cancelled'], true)
-    ) {
-        continue;
+$acceptances = is_array($detail['acceptanceHistory'] ?? null) ? $detail['acceptanceHistory'] : [];
+$financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
+$scannedDocuments = is_array($detail['scannedDocuments'] ?? null) ? $detail['scannedDocuments'] : [];
+$activeProcess = null;
+foreach ($processes as $processCandidate) {
+    if (is_array($processCandidate) && !in_array((string) ($processCandidate['status'] ?? ''), ['completed', 'cancelled'], true)) {
+        $activeProcess = $processCandidate;
+        break;
     }
-    $activeOperationalMigration = $candidateProcess;
-    break;
 }
+$login = (string) ($detail['login'] ?? '');
+$h = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+$present = static fn (mixed $value): bool => trim((string) $value) !== '';
+$formatDocument = static function (string $document): string {
+    $digits = preg_replace('/\D+/', '', $document) ?? '';
+    if (strlen($digits) === 11) {
+        return preg_replace('/(\d{3})(\d{3})(\d{3})(\d{2})/', '$1.$2.$3-$4', $digits) ?: $document;
+    }
+    if (strlen($digits) === 14) {
+        return preg_replace('/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/', '$1.$2.$3/$4-$5', $digits) ?: $document;
+    }
+    return $document;
+};
+$statusVisual = is_array($profile['status_visual'] ?? null) ? $profile['status_visual'] : [];
+$technology = is_array($profile['technology_detail'] ?? null) ? $profile['technology_detail'] : [];
+$shortName = trim((string) ($profile['short_name'] ?? ''));
+$mainName = trim((string) ($profile['name'] ?? 'Cliente'));
+$cards = [
+    ['key' => 'client', 'eyebrow' => 'Cliente', 'title' => $mainName, 'summary' => $formatDocument((string) ($profile['document'] ?? ''))],
+    ['key' => 'connection', 'eyebrow' => 'Conexão', 'title' => (string) ($profile['plan'] ?? 'Plano não informado'), 'summary' => (string) ($profile['technology'] ?? '')],
+    ['key' => 'address', 'eyebrow' => 'Endereço', 'title' => (string) ($profile['address'] ?? 'Endereço não informado'), 'summary' => trim((string) ($client['cidade'] ?? '') . ((string) ($client['estado'] ?? '') !== '' ? '/' . (string) $client['estado'] : ''))],
+    ['key' => 'financial', 'eyebrow' => 'Financeiro', 'title' => $present($profile['monthly_value'] ?? '') ? 'R$ ' . number_format((float) $profile['monthly_value'], 2, ',', '.') . '/mês' : 'Valor não informado', 'summary' => $present($profile['due_day'] ?? '') ? 'Vencimento dia ' . (string) $profile['due_day'] : 'Vencimento não informado'],
+];
+
 ob_start();
 ?>
-<section class="page-header">
-    <div>
-        <p class="section-heading__eyebrow">Clientes</p>
-        <h1><?= htmlspecialchars((string) ($profile['name'] ?? 'Cliente'), ENT_QUOTES, 'UTF-8'); ?></h1>
-        <p class="page-description">Resumo operacional do cliente no MkAuth e no histórico local.</p>
-    </div>
-    <div class="hero-actions">
-        <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>">Voltar para clientes</a>
+<main class="client-hub" data-client-hub data-client-login="<?= $h($login); ?>">
+    <section class="client-hub__header">
+        <div>
+            <a class="client-hub__back" href="<?= $h(Url::to('/clientes')); ?>">← Voltar para clientes</a>
+            <p class="section-heading__eyebrow">Central do cliente</p>
+            <h1><?= $h($mainName); ?></h1>
+            <?php if ($shortName !== '' && strcasecmp($shortName, $mainName) !== 0): ?>
+                <p class="client-hub__short-name">Conhecido como <?= $h($shortName); ?></p>
+            <?php endif; ?>
+            <div class="client-hub__identity">
+                <span class="client-status-badge <?= $h($statusVisual['class'] ?? 'client-status-other'); ?>"><?= $h($statusVisual['label'] ?? $profile['status'] ?? 'Status não identificado'); ?></span>
+                <span>Login <?= $h($login); ?></span>
+                <?php if ($present($profile['document'] ?? '')): ?><span><?= $h($formatDocument((string) $profile['document'])); ?></span><?php endif; ?>
+            </div>
+        </div>
         <?php if (!empty($canRequestUpgrade)): ?>
-            <?php $hasRecordedUpgrade = !empty($upgradeProcess['open']) || !empty($upgradeProcess['completed']); ?>
-            <a class="button button--ghost" href="<?= $hasRecordedUpgrade ? '#upgrade-process' : htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>"><?= !empty($upgradeProcess['open']) ? 'Retomar Upgrade / Migração' : (!empty($upgradeProcess['completed']) ? 'Ver Upgrade / Migração' : 'Upgrade / Migração'); ?></a>
+            <a class="button migration-action migration-action--<?= $h($migrationAction['tone'] ?? 'start'); ?>" href="<?= $h(Url::to((string) ($migrationAction['url'] ?? '/clientes/upgrade?login=' . rawurlencode($login)))); ?>">
+                <?= $h($migrationAction['label'] ?? 'Iniciar Upgrade / Migração'); ?>
+            </a>
         <?php endif; ?>
-        <?php if (!empty($canCreateClient)): ?>
-            <a class="button" href="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>">Novo cliente</a>
-        <?php endif; ?>
-    </div>
-</section>
-
-<?php if (!empty($flash)): ?>
-    <section class="alert alert--<?= htmlspecialchars((string) ($flash['type'] ?? 'success'), ENT_QUOTES, 'UTF-8'); ?>" style="margin-bottom: 20px;">
-        <?= htmlspecialchars((string) ($flash['message'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
     </section>
-<?php endif; ?>
 
-<section class="card">
-    <div class="section-heading">
-        <p class="section-heading__eyebrow">Resumo</p>
-        <h2>Perfil do cliente</h2>
-    </div>
-    <div class="summary-grid">
-        <div class="summary-item">
-            <span>Nome</span>
-            <strong><?= htmlspecialchars((string) ($profile['name'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Status</span>
-            <?php $statusVisual = is_array($profile['status_visual'] ?? null) ? $profile['status_visual'] : []; ?>
-            <strong>
-                <span class="client-status-badge <?= htmlspecialchars((string) ($statusVisual['class'] ?? 'client-status-other'), ENT_QUOTES, 'UTF-8'); ?>">
-                    <?= htmlspecialchars((string) ($statusVisual['label'] ?? $profile['status'] ?? 'Outro'), ENT_QUOTES, 'UTF-8'); ?>
-                </span>
-            </strong>
-        </div>
-        <div class="summary-item">
-            <span>Documento</span>
-            <strong><?= htmlspecialchars((string) ($profile['document'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Telefone</span>
-            <strong><?= htmlspecialchars((string) ($profile['phone'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>E-mail</span>
-            <strong><?= htmlspecialchars((string) ($profile['email'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Plano</span>
-            <strong><?= htmlspecialchars((string) ($profile['plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Vencimento</span>
-            <strong><?= htmlspecialchars((string) ($profile['due_day'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Tecnologia</span>
-            <strong><?= htmlspecialchars((string) ($profile['technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Fontes</span>
-            <strong>
-                <?= !empty($source['mkauth']) ? 'MkAuth' : 'MkAuth indisponivel'; ?>
-                <?= !empty($source['local']) ? ' + local' : ''; ?>
-            </strong>
-        </div>
-        <div class="summary-item summary-item--span-2">
-            <span>Endereco</span>
-            <strong><?= htmlspecialchars((string) ($profile['address'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-    </div>
-
-    <?php if (($upgradeProcess['priority'] ?? 'normal') !== 'normal'): ?>
-        <div class="alert alert--<?= ($upgradeProcess['priority'] ?? '') === 'urgent' ? 'error' : 'warning'; ?>" style="margin-top: 14px;">
-            <?= htmlspecialchars((string) ($upgradeProcess['pending_label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
-        </div>
+    <?php if (!empty($flash)): ?>
+        <section class="alert alert--<?= $h($flash['type'] ?? 'success'); ?>" tabindex="-1" data-focus-on-load><?= $h($flash['message'] ?? ''); ?></section>
     <?php endif; ?>
-</section>
 
-<?php if ($operationalProcesses !== []): ?>
-    <section class="card" id="operational-processes">
+    <?php if (is_array($activeProcess)): ?>
+        <?php $active = $activeProcess; ?>
+        <section class="client-alert-strip client-alert-strip--<?= $h(($active['status'] ?? '') === 'attention' ? 'danger' : 'info'); ?>">
+            <div><strong><?= $h($active['type_label'] ?? 'Processo em andamento'); ?></strong><span><?= $h($active['next_pending_label'] ?? 'Revisar processo'); ?></span></div>
+            <a href="<?= $h(Url::to((string) ($active['resume_url'] ?? '/processos/detalhe?id=' . (int) ($active['id'] ?? 0)))); ?>">Abrir pendência</a>
+        </section>
+    <?php endif; ?>
+
+    <section class="quick-actions" aria-label="Ações rápidas">
+        <?php foreach ((array) ($profile['actions'] ?? []) as $action): ?>
+            <?php if (($action['type'] ?? '') === 'copy'): ?>
+                <button class="quick-action" type="button" data-copy-value="<?= $h($action['value'] ?? ''); ?>"><span aria-hidden="true">⧉</span><?= $h($action['label'] ?? 'Copiar'); ?></button>
+            <?php else: ?>
+                <a class="quick-action" href="<?= $h($action['url'] ?? '#'); ?>" <?= in_array((string) ($action['type'] ?? ''), ['whatsapp', 'map', 'ip'], true) ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>
+                    <span aria-hidden="true"><?= match ($action['type'] ?? '') { 'phone' => '☎', 'whatsapp' => '◉', 'email' => '✉', 'map' => '⌖', 'ip' => '↗', default => '•' }; ?></span><?= $h($action['label'] ?? 'Abrir'); ?>
+                </a>
+            <?php endif; ?>
+        <?php endforeach; ?>
+        <a class="quick-action" href="#documents"><span aria-hidden="true">▤</span>Abrir documentos</a>
+    </section>
+
+    <section class="client-card-rail" aria-label="Resumo do cliente">
+        <?php foreach ($cards as $card): ?>
+            <button class="client-catalog-card client-catalog-card--<?= $h($card['key']); ?>" type="button" data-open-client-panel="<?= $h($card['key']); ?>" aria-haspopup="dialog">
+                <span><?= $h($card['eyebrow']); ?></span>
+                <strong><?= $h($card['title']); ?></strong>
+                <?php if ($present($card['summary'])): ?><small><?= $h($card['summary']); ?></small><?php endif; ?>
+                <em>Ver detalhes →</em>
+            </button>
+        <?php endforeach; ?>
+    </section>
+
+    <section class="card documents-center" id="documents">
         <div class="section-heading">
-            <p class="section-heading__eyebrow">Pendências visíveis</p>
-            <h2>Processos operacionais do cliente</h2>
+            <p class="section-heading__eyebrow">Documentos e contratos</p>
+            <h2>Histórico documental em um só lugar</h2>
         </div>
-        <div class="process-card-grid">
-            <?php foreach ($operationalProcesses as $process): ?>
-                <?php
-                $processStatus = (string) ($process['status'] ?? 'in_progress');
-                $tone = $processStatus === 'attention'
-                    ? 'danger'
-                    : (str_starts_with($processStatus, 'waiting_') ? 'warning' : ($processStatus === 'completed' ? 'success' : 'info'));
-                ?>
-                <article class="process-summary-card process-summary-card--<?= htmlspecialchars($tone, ENT_QUOTES, 'UTF-8'); ?>">
-                    <div class="process-summary-card__header">
-                        <div>
-                            <strong><?= htmlspecialchars((string) ($process['type_label'] ?? 'Processo'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                            <small><?= (int) ($process['progress_completed'] ?? 0); ?> de <?= (int) ($process['progress_total'] ?? 0); ?> etapas concluídas</small>
-                        </div>
-                        <span class="process-status process-status--<?= htmlspecialchars($tone, ENT_QUOTES, 'UTF-8'); ?>"><?= htmlspecialchars((string) ($process['status_label'] ?? 'Em andamento'), ENT_QUOTES, 'UTF-8'); ?></span>
-                    </div>
-                    <div class="process-progress"><span style="width: <?= max(0, min(100, (int) ($process['progress_percent'] ?? 0))); ?>%"></span></div>
-                    <p class="page-description"><strong>Próxima pendência:</strong> <?= htmlspecialchars((string) ($process['next_pending_label'] ?? 'Nenhuma'), ENT_QUOTES, 'UTF-8'); ?></p>
-                    <div class="hero-actions">
-                        <?php if (!in_array($processStatus, ['completed', 'cancelled'], true)): ?>
-                            <a class="button button--small" href="<?= htmlspecialchars(Url::to((string) ($process['resume_url'] ?? '#')), ENT_QUOTES, 'UTF-8'); ?>">Continuar próxima pendência</a>
-                        <?php endif; ?>
-                        <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to((string) ($process['detail_url'] ?? '#')), ENT_QUOTES, 'UTF-8'); ?>">Ver todas as etapas</a>
-                    </div>
-                </article>
-            <?php endforeach; ?>
+        <div class="document-status-grid">
+            <div><span>Contrato digital</span><strong><?= !empty($digital['signed']) ? 'Assinado' : 'Não assinado'; ?></strong></div>
+            <div><span>Contrato impresso</span><strong><?= $scannedDocuments !== [] ? 'Digitalizado' : 'Não digitalizado'; ?></strong></div>
+            <div><span>Aceite pendente</span><strong><?= !empty($digital['pending']) ? 'Sim' : 'Não'; ?></strong></div>
+            <div><span>Documentos locais</span><strong><?= count($contracts); ?></strong></div>
         </div>
-    </section>
-<?php endif; ?>
-
-<?php if ($canCorrectCurrent || $canCorrectCompleted): ?>
-    <div class="contract-send-modal" id="client-upgrade-correct-modal" data-upgrade-action-modal hidden>
-        <div class="contract-send-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="client-upgrade-correct-title">
-            <div class="contract-send-modal__header"><div><p class="section-heading__eyebrow">Correção controlada</p><h2 id="client-upgrade-correct-title"><?= $canCorrectCompleted ? 'Abrir processo corretivo' : 'Corrigir e reenviar'; ?></h2></div><button class="button button--ghost button--small" type="button" data-upgrade-action-close>Cancelar</button></div>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/corrigir'), ENT_QUOTES, 'UTF-8'); ?>">
-                <div class="contract-send-modal__body">
-                    <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
-                    <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
-                    <div class="summary-grid">
-                        <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($profile['name'] ?? $login), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Contrato</span><strong>#<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Plano informado</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Tecnologia informada</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    </div>
-                    <label class="field" style="margin-top: 16px;"><span>Motivo da correção</span><textarea name="correction_reason" rows="3" required data-upgrade-action-reason></textarea></label>
-                    <p class="field-help">O link anterior será invalidado imediatamente. A correção ficará pendente até a nova versão ser confirmada e gerada.</p>
-                </div>
-                <div class="contract-send-modal__footer"><button class="button button--ghost" type="button" data-upgrade-action-close>Cancelar</button><button class="button" type="submit">Continuar para correção</button></div>
-            </form>
-        </div>
-    </div>
-<?php endif; ?>
-
-<?php if ($canCancelCurrent): ?>
-    <div class="contract-send-modal" id="client-upgrade-cancel-modal" data-upgrade-action-modal hidden>
-        <div class="contract-send-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="client-upgrade-cancel-title">
-            <div class="contract-send-modal__header"><div><p class="section-heading__eyebrow">Confirmação obrigatória</p><h2 id="client-upgrade-cancel-title">Cancelar solicitação</h2></div><button class="button button--ghost button--small" type="button" data-upgrade-action-close>Cancelar</button></div>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/cancelar'), ENT_QUOTES, 'UTF-8'); ?>">
-                <div class="contract-send-modal__body">
-                    <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
-                    <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
-                    <div class="summary-grid">
-                        <div class="summary-item"><span>Cliente</span><strong><?= htmlspecialchars((string) ($profile['name'] ?? $login), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Contrato</span><strong>#<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Plano informado</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeProcess['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="summary-item"><span>Tecnologia informada</span><strong><?= htmlspecialchars((string) ($upgradeProcess['new_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                    </div>
-                    <label class="field" style="margin-top: 16px;"><span>Motivo do cancelamento</span><textarea name="cancellation_reason" rows="3" required data-upgrade-action-reason></textarea></label>
-                    <div class="alert alert--warning" style="margin-top: 16px;">O link antigo será invalidado imediatamente. Contrato, aceite, assinatura e evidências não serão apagados.</div>
-                </div>
-                <div class="contract-send-modal__footer"><button class="button button--ghost" type="button" data-upgrade-action-close>Voltar</button><button class="button" type="submit">Confirmar cancelamento</button></div>
-            </form>
-        </div>
-    </div>
-<?php endif; ?>
-
-<section class="card">
-    <div class="section-heading">
-        <p class="section-heading__eyebrow">Contrato Digital</p>
-        <h2>Assinatura remota do contrato</h2>
-    </div>
-    <div class="summary-grid">
-        <div class="summary-item summary-item--span-2">
-            <span>Status</span>
-            <strong><?= htmlspecialchars((string) ($digitalContract['label'] ?? 'Nao possui contrato digital'), ENT_QUOTES, 'UTF-8'); ?></strong>
-            <small class="field-help"><?= htmlspecialchars((string) ($digitalContract['description'] ?? 'Solicite a assinatura remota do contrato atual do cliente.'), ENT_QUOTES, 'UTF-8'); ?></small>
-        </div>
-        <div class="summary-item">
-            <span>Ultima assinatura</span>
-            <strong><?= htmlspecialchars((string) ($digitalContract['accepted_at'] ?? '') !== '' ? (string) $digitalContract['accepted_at'] : '-', ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Contrato local</span>
-            <strong><?= ((int) ($digitalContract['contract_id'] ?? 0) > 0) ? '#' . htmlspecialchars((string) $digitalContract['contract_id'], ENT_QUOTES, 'UTF-8') : '-'; ?></strong>
-        </div>
-    </div>
-    <?php if (!empty($canRequestContractSignature)): ?>
-        <div class="hero-actions" style="margin-top: 16px;">
-            <form
-                method="post"
-                action="<?= htmlspecialchars(Url::to((string) ($digitalContract['request_url'] ?? '/clientes/contrato/solicitar')), ENT_QUOTES, 'UTF-8'); ?>"
-                data-digital-contract-form
-            >
-                <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="confirm_send" value="0" data-digital-contract-confirm-input>
-                <input type="hidden" name="signature_mode" value="remote" data-digital-contract-signature-mode-input>
-                <input type="hidden" name="remote_signature_reason" value="" data-digital-contract-reason-input>
-                <button
-                    class="button button--small"
-                    type="button"
-                    data-digital-contract-open
-                    data-client-name="<?= htmlspecialchars((string) ($profile['name'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>"
-                    data-client-document="<?= htmlspecialchars((string) ($profile['document'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>"
-                    data-client-phone="<?= htmlspecialchars((string) ($profile['phone'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>"
-                    data-client-email="<?= htmlspecialchars((string) ($profile['email'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?>"
-                    data-contract-action="<?= !empty($digitalContract['pending']) ? 'reutilizado' : 'gerado'; ?>"
-                    data-contract-pending="<?= !empty($digitalContract['pending']) ? '1' : '0'; ?>"
-                >
-                    <?= !empty($digitalContract['pending']) ? 'Reenviar aceite' : 'Solicitar assinatura'; ?>
-                </button>
-            </form>
-            <?php if (trim((string) ($digitalContract['detail_url'] ?? '')) !== ''): ?>
-                <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) $digitalContract['detail_url'], ENT_QUOTES, 'UTF-8'); ?>">Ver contrato</a>
+        <div class="hero-actions">
+            <?php if ($contracts !== [] && (int) ($contracts[0]['id'] ?? 0) > 0): ?><a class="button button--ghost" href="<?= $h(Url::to('/contratos/detalhe?id=' . (int) $contracts[0]['id'])); ?>">Ver documentos</a><?php endif; ?>
+            <?php if (!empty($canRequestContractSignature)): ?>
+                <form method="post" action="<?= $h(Url::to('/clientes/contrato/solicitar')); ?>" data-single-submit-form onsubmit="return confirm('Confirma a preparação e o envio controlado do contrato digital pelos canais cadastrados?');">
+                    <input type="hidden" name="_csrf" value="<?= $h($contractSignatureCsrfToken ?? ''); ?>">
+                    <input type="hidden" name="login" value="<?= $h($login); ?>">
+                    <input type="hidden" name="confirm_send" value="1">
+                    <input type="hidden" name="signature_mode" value="remote">
+                    <input type="hidden" name="remote_signature_reason" value="Solicitação avulsa pelo perfil do cliente">
+                    <button class="button" type="submit"><?= !empty($digital['pending']) ? 'Reenviar assinatura' : 'Solicitar assinatura'; ?></button>
+                </form>
             <?php endif; ?>
+            <a class="button button--ghost" href="<?= $h(Url::to('/clientes/documentos/digitalizar?login=' . rawurlencode($login))); ?>">Digitalizar contrato</a>
         </div>
-    <?php endif; ?>
-</section>
 
-<div class="contract-send-modal" data-digital-contract-modal hidden>
-    <div class="contract-send-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="digital-contract-modal-title">
-        <div class="contract-send-modal__header">
-            <div>
-                <p class="section-heading__eyebrow">Confirmação obrigatória</p>
-                <h2 id="digital-contract-modal-title">Enviar contrato digital</h2>
-            </div>
-            <button class="button button--ghost button--small" type="button" data-digital-contract-cancel>Cancelar</button>
-        </div>
-        <div class="contract-send-modal__body">
-            <p class="page-description">
-                Você está prestes a enviar o contrato digital para este cliente. Confira os dados antes de continuar.
-                O link de aceite será enviado pelos canais disponíveis do cadastro.
-            </p>
-            <div class="status-card status-card--warning" data-digital-contract-pending-message hidden>
-                <strong>Já existe um contrato digital pendente para este cliente.</strong>
-                <small>O mesmo link será reenviado.</small>
-            </div>
-            <div class="summary-grid">
-                <div class="summary-item summary-item--span-2">
-                    <span>Cliente</span>
-                    <strong data-digital-contract-client-name>-</strong>
-                </div>
-                <div class="summary-item">
-                    <span>CPF/CNPJ</span>
-                    <strong data-digital-contract-client-document>-</strong>
-                </div>
-                <div class="summary-item">
-                    <span>WhatsApp</span>
-                    <strong data-digital-contract-client-phone>-</strong>
-                </div>
-                <div class="summary-item summary-item--span-2">
-                    <span>E-mail</span>
-                    <strong data-digital-contract-client-email>-</strong>
-                </div>
-                <div class="summary-item summary-item--span-2">
-                    <span>Ação</span>
-                    <strong data-digital-contract-action>Será gerado ou reutilizado um link de aceite digital.</strong>
-                </div>
-            </div>
-            <label class="field" style="margin-top: 16px;">
-                <span>Forma de assinatura</span>
-                <select data-digital-contract-signature-mode>
-                    <option value="remote">Titular não está no local / assinatura remota</option>
-                    <option value="local">Assinatura colhida no local</option>
-                </select>
-            </label>
-            <label class="field" style="margin-top: 16px;" data-digital-contract-reason-wrapper>
-                <span>Motivo da assinatura remota</span>
-                <textarea rows="3" required data-digital-contract-reason placeholder="Ex.: titular não está no local"></textarea>
-                <small class="field-help" data-digital-contract-reason-error hidden>Informe o motivo antes de enviar.</small>
-            </label>
-        </div>
-        <div class="contract-send-modal__footer">
-            <button class="button button--ghost" type="button" data-digital-contract-cancel>Cancelar</button>
-            <button class="button" type="button" data-digital-contract-confirm>Confirmar envio do contrato</button>
-        </div>
-    </div>
-</div>
-
-<section class="card" id="upgrade-process">
-    <div class="section-heading">
-        <p class="section-heading__eyebrow">Upgrade / Migração</p>
-        <h2>Aceite e execução técnica</h2>
-    </div>
-    <div class="summary-grid">
-        <div class="summary-item">
-            <span>Status do processo</span>
-            <strong><?= htmlspecialchars((string) ($upgradeProcess['status_label'] ?? 'Não iniciado'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Status contratual</span>
-            <strong><?= htmlspecialchars((string) ($upgradeProcess['contract_status_label'] ?? 'Novo aceite obrigatório'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Status técnico</span>
-            <strong><?= htmlspecialchars((string) ($upgradeProcess['technical_status_label'] ?? 'Não iniciado'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Pendência atual</span>
-            <strong><?= htmlspecialchars((string) ($upgradeProcess['pending_label'] ?? 'Iniciar processo'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-    </div>
-
-    <div class="hero-actions" style="margin-top: 16px;">
-        <?php if (!empty($canRequestUpgrade) && empty($upgradeProcess['open']) && empty($upgradeProcess['completed'])): ?>
-            <a class="button button--small" href="<?= htmlspecialchars(Url::to('/clientes/upgrade?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Iniciar Upgrade / Migração</a>
-        <?php elseif (!empty($upgradeProcess['open'])): ?>
-            <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to((string) (
-                is_array($activeOperationalMigration)
-                    ? ($activeOperationalMigration['resume_url'] ?? '/processos/detalhe?id=' . (int) ($activeOperationalMigration['id'] ?? 0))
-                    : ($upgradeProcess['resume_url'] ?? '#upgrade-checklist')
-            )), ENT_QUOTES, 'UTF-8'); ?>">Retomar upgrade</a>
-            <?php if (trim((string) ($upgradeProcess['detail_url'] ?? '')) !== ''): ?>
-                <a class="button button--ghost button--small" href="<?= htmlspecialchars((string) $upgradeProcess['detail_url'], ENT_QUOTES, 'UTF-8'); ?>">Ver contrato</a>
-            <?php endif; ?>
-        <?php endif; ?>
-
-        <?php if (!empty($upgradeProcess['active']) && empty($upgradeProcess['acceptance_revoked']) && empty($upgradeProcess['completed']) && !empty($canRequestContractSignature)): ?>
-            <form method="post" action="<?= htmlspecialchars(Url::to('/contratos/aceite/enviar'), ENT_QUOTES, 'UTF-8'); ?>" onsubmit="return confirm('Deseja reenviar o aceite ativo ao cliente?');">
-                <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="return_to" value="<?= htmlspecialchars('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process', ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="send_request_id" value="<?= htmlspecialchars(bin2hex(random_bytes(16)), ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="force_resend" value="1">
-                <input type="hidden" name="send_whatsapp" value="1">
-                <input type="hidden" name="send_email" value="0">
-                <button class="button button--ghost button--small" type="submit">Reenviar aceite</button>
-            </form>
-        <?php endif; ?>
-        <?php if ($canCorrectCurrent || $canCorrectCompleted): ?>
-            <button class="button button--ghost button--small" type="button" data-upgrade-action-open="client-upgrade-correct-modal"><?= $canCorrectCompleted ? 'Abrir processo corretivo' : 'Corrigir e reenviar'; ?></button>
-        <?php endif; ?>
-        <?php if ($canCancelCurrent): ?>
-            <button class="button button--ghost button--small" type="button" data-upgrade-action-open="client-upgrade-cancel-modal">Cancelar solicitação</button>
-        <?php endif; ?>
-    </div>
-
-    <?php if (is_array($activeOperationalMigration)): ?>
-        <div class="alert alert--info" style="margin-top: 18px;">
-            A execução agora utiliza o checklist operacional compartilhado. As pendências podem ser salvas e retomadas sem marcar a migração como concluída.
-        </div>
-    <?php elseif (!empty($upgradeProcess['active']) && !empty($canCompleteUpgradeTechnical)): ?>
-        <?php $technicalChecklist = is_array($upgradeProcess['checklist'] ?? null) ? $upgradeProcess['checklist'] : []; ?>
-        <form id="upgrade-checklist" method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/execucao-tecnica'), ENT_QUOTES, 'UTF-8'); ?>" style="margin-top: 18px;">
-            <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
-            <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) ($upgradeProcess['contract_id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>">
-            <div class="form-grid">
-                <?php
-                $technicalItems = [
-                    'plan_checked' => 'Novo plano conferido no MkAuth',
-                    'technology_changed' => 'Tecnologia/equipamento alterado',
-                    'pppoe_validated' => 'Login PPPoE validado',
-                    'client_connected' => 'Cliente conectado',
-                    'speed_checked' => 'Velocidade/plano conferidos',
-                    'monthly_value_checked' => 'Valor mensal conferido',
-                ];
-                ?>
-                <?php foreach ($technicalItems as $key => $label): ?>
-                    <label class="field">
-                        <span><input type="checkbox" name="<?= htmlspecialchars($key, ENT_QUOTES, 'UTF-8'); ?>" value="1" <?= !empty($technicalChecklist[$key]) ? 'checked' : ''; ?>> <?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></span>
-                    </label>
-                <?php endforeach; ?>
-                <label class="field">
-                    <span><input type="checkbox" checked disabled> Aceite do cliente concluído</span>
-                    <small class="field-help"><?= !empty($upgradeProcess['accepted']) ? 'Aceite válido confirmado.' : 'Bloqueado: aguarde a assinatura digital.'; ?></small>
-                </label>
-                <label class="field field--span-2">
-                    <span>Observação técnica</span>
-                    <textarea name="technical_observation" rows="3" placeholder="Registre ocorrências, equipamento e validações realizadas."><?= htmlspecialchars((string) ($upgradeProcess['technical_observation'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
-                </label>
-                <div class="form-actions field--span-2">
-                    <button class="button button--ghost" type="submit" name="action" value="save" <?= empty($upgradeProcess['accepted']) ? 'disabled' : ''; ?>>Salvar parcial</button>
-                    <button class="button" type="submit" name="action" value="complete" <?= empty($upgradeProcess['accepted']) ? 'disabled' : ''; ?>>Confirmar execução técnica</button>
-                </div>
-            </div>
-        </form>
-    <?php endif; ?>
-</section>
-
-<section class="card">
-    <div class="section-heading">
-        <p class="section-heading__eyebrow">Contratos</p>
-        <h2>Contratos locais</h2>
-    </div>
-    <div class="table-wrap">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Cliente</th>
-                    <th>Adesao</th>
-                    <th>Status financeiro</th>
-                    <th>Atualizado em</th>
-                    <th>Ação</th>
-                </tr>
-            </thead>
-            <tbody>
+        <?php if ($contracts !== []): ?>
+            <div class="document-list">
                 <?php foreach ($contracts as $contract): ?>
-                    <tr>
-                        <td data-label="ID"><?= htmlspecialchars((string) ($contract['id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td data-label="Cliente"><?= htmlspecialchars((string) ($contract['name'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td data-label="Adesao"><?= htmlspecialchars((string) ($contract['tipo_adesao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td data-label="Status"><span class="pill"><?= htmlspecialchars((string) ($contract['status_financeiro'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                        <td data-label="Atualizado em"><?= htmlspecialchars((string) ($contract['updated_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td data-label="Ação">
-                            <?php if ((int) ($contract['id'] ?? 0) > 0): ?>
-                                <a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . rawurlencode((string) $contract['id'])), ENT_QUOTES, 'UTF-8'); ?>">Ver contrato</a>
-                            <?php else: ?>
-                                -
-                            <?php endif; ?>
-                        </td>
-                    </tr>
+                    <a href="<?= $h(Url::to('/contratos/detalhe?id=' . (int) ($contract['id'] ?? 0))); ?>">
+                        <span>Contrato #<?= (int) ($contract['id'] ?? 0); ?></span>
+                        <strong><?= $h($contract['tipo_aceite'] ?? 'Documento'); ?></strong>
+                        <small><?= $h($contract['updated_at'] ?? $contract['created_at'] ?? ''); ?></small>
+                    </a>
                 <?php endforeach; ?>
-                <?php if ($contracts === []): ?>
-                    <tr><td colspan="6">Nenhum contrato local localizado para este login.</td></tr>
-                <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-</section>
-
-<section class="card">
-    <div class="section-heading">
-        <p class="section-heading__eyebrow">Aceite e instalacao</p>
-        <h2>Historico vinculado</h2>
-    </div>
-    <div class="summary-grid">
-        <div class="summary-item">
-            <span>Registro local</span>
-            <strong><?= htmlspecialchars((string) ($registration['status'] ?? 'nao localizado'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Tarefa financeira</span>
-            <strong><?= htmlspecialchars((string) ($financialTask['status'] ?? 'nao localizada'), ENT_QUOTES, 'UTF-8'); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Aceites</span>
-            <strong><?= count($acceptanceHistory); ?></strong>
-        </div>
-        <div class="summary-item">
-            <span>Checkpoints</span>
-            <strong><?= count($checkpoints); ?></strong>
-        </div>
-    </div>
-
-    <?php if ($acceptanceHistory !== []): ?>
-        <div class="table-wrap" style="margin-top: 18px;">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Status</th>
-                        <th>Protocolo</th>
-                        <th>Aceito em</th>
-                        <th>Criado em</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($acceptanceHistory as $acceptance): ?>
-                        <tr>
-                            <td data-label="Status"><span class="pill"><?= htmlspecialchars((string) ($acceptance['status'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                            <td data-label="Protocolo"><?= htmlspecialchars((string) ($acceptance['protocolo'] ?? $acceptance['id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Aceito em"><?= htmlspecialchars((string) ($acceptance['accepted_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td data-label="Criado em"><?= htmlspecialchars((string) ($acceptance['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    <?php endif; ?>
-</section>
-
-<section class="card">
-    <div class="section-heading">
-        <p class="section-heading__eyebrow">Linha do tempo</p>
-        <h2>Eventos recentes</h2>
-    </div>
-    <?php if ($timeline !== []): ?>
-        <div class="log-list">
-            <?php foreach ($timeline as $event): ?>
-                <article class="log-list__item">
-                    <div class="log-list__meta">
-                        <span class="pill pill--muted"><?= htmlspecialchars((string) ($event['group'] ?? 'Evento'), ENT_QUOTES, 'UTF-8'); ?></span>
-                        <time><?= htmlspecialchars((string) ($event['time'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></time>
-                    </div>
-                    <p>
-                        <strong><?= htmlspecialchars((string) ($event['label'] ?? 'Evento'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                        <?php if (trim((string) ($event['description'] ?? '')) !== ''): ?>
-                            · <?= htmlspecialchars((string) $event['description'], ENT_QUOTES, 'UTF-8'); ?>
-                        <?php endif; ?>
-                    </p>
-                </article>
-            <?php endforeach; ?>
-        </div>
-    <?php else: ?>
-        <p class="page-description">Nenhum evento local encontrado para este cliente.</p>
-    <?php endif; ?>
-</section>
-
-<?php if ($auditLogs !== []): ?>
-    <section class="card">
-        <div class="section-heading">
-            <p class="section-heading__eyebrow">Auditoria</p>
-            <h2>Logs vinculados</h2>
-        </div>
-        <div class="log-list">
-            <?php foreach ($auditLogs as $log): ?>
-                <article class="log-list__item">
-                    <div class="log-list__meta">
-                        <span class="pill pill--muted"><?= htmlspecialchars((string) ($log['action'] ?? 'evento'), ENT_QUOTES, 'UTF-8'); ?></span>
-                        <time><?= htmlspecialchars((string) ($log['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></time>
-                    </div>
-                    <p><?= htmlspecialchars(trim((string) ($log['entity_type'] ?? '')) . ' #' . trim((string) ($log['entity_id'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></p>
-                </article>
-            <?php endforeach; ?>
-        </div>
+            </div>
+        <?php endif; ?>
+        <?php if ($scannedDocuments !== []): ?>
+            <div class="document-list">
+                <?php foreach ($scannedDocuments as $document): ?>
+                    <a href="<?= $h(Url::to('/clientes/documentos/arquivo?id=' . (int) ($document['id'] ?? 0))); ?>" target="_blank" rel="noopener">
+                        <span>PDF digitalizado</span><strong><?= (int) ($document['page_count'] ?? 1); ?> página(s)</strong><small><?= $h($document['created_at'] ?? ''); ?></small>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     </section>
-<?php endif; ?>
+
+    <section class="card recent-events">
+        <div class="section-heading"><p class="section-heading__eyebrow">Linha do tempo</p><h2>Eventos recentes</h2></div>
+        <?php if ($timeline === []): ?><p class="page-description">Nenhum evento local encontrado.</p><?php endif; ?>
+        <?php foreach (array_slice($timeline, 0, 12) as $event): ?>
+            <article><time><?= $h($event['time'] ?? ''); ?></time><div><strong><?= $h($event['label'] ?? 'Evento'); ?></strong><?php if ($present($event['description'] ?? '')): ?><p><?= $h($event['description']); ?></p><?php endif; ?></div></article>
+        <?php endforeach; ?>
+        <?php if ($processes !== []): ?><a class="button button--ghost button--small" href="<?= $h(Url::to('/processos/detalhe?id=' . (int) ($processes[0]['id'] ?? 0))); ?>">Ver checklist técnico completo</a><?php endif; ?>
+    </section>
+
+    <?php foreach (['client', 'connection', 'address', 'financial'] as $panelKey): ?>
+        <div class="client-detail-panel" data-client-panel="<?= $h($panelKey); ?>" hidden>
+            <button class="client-detail-panel__backdrop" type="button" data-close-client-panel aria-label="Fechar painel"></button>
+            <section class="client-detail-panel__dialog" role="dialog" aria-modal="true" aria-labelledby="client-panel-title-<?= $h($panelKey); ?>" tabindex="-1">
+                <header><p class="section-heading__eyebrow">Detalhes</p><h2 id="client-panel-title-<?= $h($panelKey); ?>"><?= $h(ucfirst($panelKey === 'address' ? 'endereço' : ($panelKey === 'financial' ? 'financeiro' : ($panelKey === 'connection' ? 'conexão' : 'cliente')))); ?></h2><button type="button" data-close-client-panel aria-label="Fechar">×</button></header>
+                <?php if ($panelKey === 'client'): ?>
+                    <dl class="detail-list">
+                        <?php foreach (['Nome completo' => $mainName, 'Nome resumido' => $shortName, 'CPF/CNPJ' => $formatDocument((string) ($profile['document'] ?? '')), 'Responsável' => $client['responsavel'] ?? '', 'Nascimento' => $client['nascimento'] ?? '', 'RG' => $client['rg'] ?? '', 'Fonte' => $client['source'] ?? 'MkAuth', 'Última atualização' => $profile['last_update'] ?? ''] as $label => $value): ?>
+                            <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
+                        <?php endforeach; ?>
+                    </dl>
+                    <?php foreach ((array) ($profile['phones'] ?? []) as $phone): ?><div class="contact-row"><strong><?= $h($phone); ?></strong><button type="button" data-copy-value="<?= $h($phone); ?>">Copiar</button></div><?php endforeach; ?>
+                    <?php foreach ((array) ($profile['emails'] ?? []) as $email): ?><div class="contact-row"><strong><?= $h($email); ?></strong><button type="button" data-copy-value="<?= $h($email); ?>">Copiar</button></div><?php endforeach; ?>
+                <?php elseif ($panelKey === 'connection'): ?>
+                    <div data-lazy-client-detail="connection" data-url="<?= $h(Url::to('/clientes/detalhe/conexao?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes de conexão…</p></div>
+                    <?php if (!$technology['verified'] && $present($technology['code'] ?? '')): ?><details><summary>Detalhes técnicos</summary><p>Código informado pelo MkAuth: <?= $h($technology['code']); ?></p></details><?php endif; ?>
+                <?php elseif ($panelKey === 'address'): ?>
+                    <dl class="detail-list">
+                        <?php foreach (['CEP' => $client['cep'] ?? '', 'Logradouro' => $client['endereco'] ?? '', 'Número' => $client['numero'] ?? '', 'Bairro' => $client['bairro'] ?? '', 'Complemento' => $client['complemento'] ?? '', 'Cidade' => $client['cidade'] ?? '', 'Estado' => $client['estado'] ?? '', 'Código IBGE' => $client['city_ibge'] ?? '', 'Ponto de referência' => $profile['reference'] ?? '', 'Coordenadas' => $profile['coordinates'] ?? ''] as $label => $value): ?>
+                            <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
+                        <?php endforeach; ?>
+                    </dl>
+                    <?php if ($present($profile['coordinates'] ?? '')): ?><button class="button button--ghost" type="button" data-copy-value="<?= $h($profile['coordinates']); ?>">Copiar coordenadas</button><?php endif; ?>
+                <?php else: ?>
+                    <?php if (!empty($canManageFinancial)): ?><div data-lazy-client-detail="financial" data-url="<?= $h(Url::to('/clientes/detalhe/financeiro?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes financeiros…</p></div><?php else: ?><div class="alert alert--warning">Detalhes financeiros disponíveis apenas para usuários autorizados.</div><?php endif; ?>
+                    <?php if ($financialTask !== []): ?><dl class="detail-list"><div><dt>Pendência ligada ao processo</dt><dd><?= $h($financialTask['status'] ?? 'Pendente'); ?></dd></div><?php if ($present($financialTask['mkauth_ticket_id'] ?? '')): ?><div><dt>Chamado MkAuth</dt><dd><?= $h($financialTask['mkauth_ticket_id']); ?></dd></div><?php endif; ?></dl><?php endif; ?>
+                <?php endif; ?>
+            </section>
+        </div>
+    <?php endforeach; ?>
+</main>
 <?php
 $content = (string) ob_get_clean();
-
 require __DIR__ . '/../layouts/app.php';
