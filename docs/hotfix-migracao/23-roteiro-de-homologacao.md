@@ -58,4 +58,3 @@ deploy de produção.
 
 Critério de saída: aprovação funcional documentada sem remover os guardas. Não
 habilitar produção durante esta homologação.
-

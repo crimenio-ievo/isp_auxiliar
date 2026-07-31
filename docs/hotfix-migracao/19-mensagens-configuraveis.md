@@ -36,4 +36,3 @@ tem autorização de configurações, escopo por provedor e CSRF próprio.
 
 Nesta homologação a edição é real apenas no banco local; adapters de cliente
 continuam em dry-run.
-

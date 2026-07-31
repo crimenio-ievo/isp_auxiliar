@@ -38,4 +38,3 @@ Esta branch está pronta para homologação funcional, não para produção.
 
 Nenhum push, merge, deploy ou alteração no servidor de produção faz parte desta
 entrega.
-

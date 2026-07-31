@@ -40,4 +40,3 @@ O encerramento registra data real de `fechamento`; responsável só é salvo qua
 `login_atend` estiver preenchido. Resultado ambíguo permanece pendente e exige
 confirmação manual autorizada. A execução técnica pode estar concluída enquanto
 o processo segue “Aguardando financeiro”.
-

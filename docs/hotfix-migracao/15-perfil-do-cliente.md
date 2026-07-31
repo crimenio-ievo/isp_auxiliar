@@ -38,4 +38,3 @@ concluídos/cancelados não aparecem como alerta pendente.
 “Documentos e contratos” reúne contratos locais, aceite, PDF digitalizado e
 ações compartilhadas. A linha do tempo usa registros locais/auditoria e não
 expõe logs técnicos completos no resumo.
-

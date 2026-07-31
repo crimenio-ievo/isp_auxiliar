@@ -34,4 +34,3 @@ mostram “não aplicada” quando o prazo é zero; não existe renovação auto
 Erros retornam HTTP 422, preservam o POST, aparecem no resumo e junto ao campo,
 e direcionam foco ao primeiro erro. As ações “Salvar e continuar” e “Salvar e
 voltar depois” têm proteção contra duplo envio.
-

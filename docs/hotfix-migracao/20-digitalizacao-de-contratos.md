@@ -28,4 +28,3 @@ deve ser validado funcionalmente com amostras autorizadas antes de release.
 
 Política do MVP: imagens temporárias são mantidas pelo PHP até a conclusão do
 request e removidas depois; somente o PDF final e seus metadados permanecem.
-

@@ -103,4 +103,3 @@ local do checkout, isolou nome/caminho do cookie de sessão, bloqueou POSTs (sal
 login), exigiu perfil administrativo e incluiu o banner
 “LAYOUT ANTIGO — SOMENTE REFERÊNCIA”. Dependências/autoload e PHP abriram após o
 alias; a referência não substitui o DocumentRoot atual.
-

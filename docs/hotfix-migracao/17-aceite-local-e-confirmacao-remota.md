@@ -30,4 +30,3 @@ novo.
 Tentativa, aceite pelo provedor, falha e confirmação do cliente permanecem
 estados distintos. “Entregue” só pode vir de recibo real. Nesta homologação os
 adapters estão em dry-run, portanto nenhum envio é classificado como entrega.
-
