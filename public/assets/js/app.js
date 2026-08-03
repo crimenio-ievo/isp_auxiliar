@@ -3450,6 +3450,7 @@ document.querySelectorAll('form[data-single-submit-form]').forEach((form) => {
     }
 
     const actionInput = form.querySelector('[data-process-action-input]');
+    const continueInput = form.querySelector('[data-process-continue-input]');
     const submitButtons = Array.from(form.querySelectorAll('button[type="submit"]'));
     let submitted = false;
 
@@ -3457,6 +3458,9 @@ document.querySelectorAll('form[data-single-submit-form]').forEach((form) => {
         button.addEventListener('click', () => {
             if (actionInput instanceof HTMLInputElement) {
                 actionInput.value = button.getAttribute('data-process-action') || 'save';
+            }
+            if (continueInput instanceof HTMLInputElement && button.hasAttribute('data-process-continue')) {
+                continueInput.value = button.getAttribute('data-process-continue') || 'migration_workspace';
             }
         });
     });
@@ -3497,6 +3501,7 @@ document.querySelectorAll('[data-copy-value]').forEach((button) => {
 const clientHub = document.querySelector('[data-client-hub]');
 if (clientHub instanceof HTMLElement) {
     let activePanel = null;
+    let activePanelTrigger = null;
 
     const closeClientPanel = () => {
         if (!(activePanel instanceof HTMLElement)) {
@@ -3505,6 +3510,8 @@ if (clientHub instanceof HTMLElement) {
         activePanel.hidden = true;
         activePanel = null;
         document.body.classList.remove('client-panel-open');
+        if (activePanelTrigger instanceof HTMLElement) activePanelTrigger.focus({ preventScroll: true });
+        activePanelTrigger = null;
     };
 
     const addDetail = (list, label, value) => {
@@ -3591,6 +3598,7 @@ if (clientHub instanceof HTMLElement) {
                 return;
             }
             closeClientPanel();
+            activePanelTrigger = trigger instanceof HTMLElement ? trigger : null;
             activePanel = panel;
             panel.hidden = false;
             document.body.classList.add('client-panel-open');
@@ -3603,7 +3611,56 @@ if (clientHub instanceof HTMLElement) {
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             closeClientPanel();
+            return;
         }
+        if (event.key === 'Tab' && activePanel instanceof HTMLElement) {
+            const focusable = Array.from(activePanel.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+                .filter((item) => item instanceof HTMLElement && !item.hidden);
+            if (focusable.length === 0) {
+                event.preventDefault();
+                activePanel.querySelector('.client-detail-panel__dialog')?.focus();
+                return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+    });
+}
+
+const migrationWorkspace = document.querySelector('[data-migration-workspace]');
+if (migrationWorkspace instanceof HTMLElement) {
+    const checklist = migrationWorkspace.querySelector('[data-process-steps]');
+    const backdrop = migrationWorkspace.querySelector('.migration-checklist__backdrop');
+    const openButton = migrationWorkspace.querySelector('[data-open-process-steps]');
+    let checklistReturnFocus = null;
+
+    const closeChecklist = () => {
+        migrationWorkspace.classList.remove('is-checklist-open');
+        if (backdrop instanceof HTMLButtonElement) backdrop.hidden = true;
+        if (openButton instanceof HTMLButtonElement) openButton.setAttribute('aria-expanded', 'false');
+        document.body.classList.remove('process-steps-open');
+        if (checklistReturnFocus instanceof HTMLElement) checklistReturnFocus.focus({ preventScroll: true });
+    };
+    const openChecklist = () => {
+        checklistReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        migrationWorkspace.classList.add('is-checklist-open');
+        if (backdrop instanceof HTMLButtonElement) backdrop.hidden = false;
+        if (openButton instanceof HTMLButtonElement) openButton.setAttribute('aria-expanded', 'true');
+        document.body.classList.add('process-steps-open');
+        checklist?.querySelector('a')?.focus({ preventScroll: true });
+    };
+
+    openButton?.addEventListener('click', openChecklist);
+    migrationWorkspace.querySelectorAll('[data-close-process-steps]').forEach((button) => button.addEventListener('click', closeChecklist));
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && migrationWorkspace.classList.contains('is-checklist-open')) closeChecklist();
     });
 }
 
@@ -3621,6 +3678,12 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
     const operationOutput = simpleUpgradeForm.querySelector('[data-simple-operation]');
     const fidelityToggle = simpleUpgradeForm.querySelector('[data-fidelity-toggle]');
     const fidelityFields = simpleUpgradeForm.querySelector('[data-fidelity-fields]');
+    const planSearch = simpleUpgradeForm.querySelector('[data-simple-plan-search]');
+    const adhesionSummary = simpleUpgradeForm.querySelector('[data-adhesion-summary]');
+    const adhesionCharged = simpleUpgradeForm.querySelector('[data-adhesion-charged]');
+    const adhesionBenefit = simpleUpgradeForm.querySelector('[data-adhesion-benefit]');
+    const manualWaiver = simpleUpgradeForm.querySelector('[data-manual-waiver]');
+    const benefitInput = simpleUpgradeForm.querySelector('input[name="valor_beneficio"]');
 
     const parseSpeed = (raw) => {
         const match = String(raw || '').toLowerCase().match(/([0-9]+(?:[.,][0-9]+)?)\s*([kmg])?/);
@@ -3632,11 +3695,37 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
         return value;
     };
 
+    const updateAdhesion = (newFamily = '') => {
+        if (!(adhesionSummary instanceof HTMLElement)) return;
+        const currentFamily = simpleUpgradeForm.dataset.currentFamily || '';
+        const defaultValue = Number(adhesionSummary.dataset.adhesionDefault || 0);
+        const waiverMode = adhesionSummary.dataset.waiverMode || 'disabled';
+        const radioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
+        const manualInput = manualWaiver?.querySelector('input[type="checkbox"]');
+        if (manualWaiver instanceof HTMLElement) manualWaiver.hidden = !radioToFiber || waiverMode !== 'manual';
+        if (manualInput instanceof HTMLInputElement) manualInput.disabled = !radioToFiber || waiverMode !== 'manual';
+        const waived = radioToFiber && (waiverMode === 'automatic' || (waiverMode === 'manual' && manualInput instanceof HTMLInputElement && manualInput.checked));
+        const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+        if (adhesionCharged instanceof HTMLElement) adhesionCharged.textContent = money.format(waived ? 0 : defaultValue);
+        if (adhesionBenefit instanceof HTMLElement) adhesionBenefit.textContent = waived ? `Isenção de ${money.format(defaultValue)}` : 'Sem isenção';
+        if (benefitInput instanceof HTMLInputElement) {
+            const automaticValue = benefitInput.dataset.adhesionAutoValue || '';
+            if (waived) {
+                benefitInput.value = defaultValue.toFixed(2).replace('.', ',');
+                benefitInput.dataset.adhesionAutoValue = benefitInput.value;
+            } else if (automaticValue !== '' && benefitInput.value === automaticValue) {
+                benefitInput.value = '0,00';
+                delete benefitInput.dataset.adhesionAutoValue;
+            }
+        }
+    };
+
     const updateOperation = () => {
         if (!(planSelect instanceof HTMLSelectElement) || !(operationOutput instanceof HTMLElement)) return;
         const option = planSelect.selectedOptions[0];
         if (!(option instanceof HTMLOptionElement) || !option.value) {
             operationOutput.textContent = 'Selecione um plano';
+            updateAdhesion('');
             return;
         }
         const currentPlan = simpleUpgradeForm.dataset.currentPlan || '';
@@ -3659,15 +3748,32 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
             }
         }
         operationOutput.textContent = operation || 'Sem mudança efetiva — escolha outro plano';
+        updateAdhesion(newFamily);
     };
 
     const updateFidelity = () => {
         if (!(fidelityToggle instanceof HTMLInputElement) || !(fidelityFields instanceof HTMLElement)) return;
         fidelityFields.hidden = !fidelityToggle.checked;
+        fidelityFields.querySelectorAll('input, select, textarea').forEach((field) => {
+            if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) {
+                field.disabled = !fidelityToggle.checked;
+            }
+        });
+    };
+
+    const filterPlans = () => {
+        if (!(planSearch instanceof HTMLInputElement) || !(planSelect instanceof HTMLSelectElement)) return;
+        const query = planSearch.value.trim().toLocaleLowerCase('pt-BR');
+        Array.from(planSelect.options).forEach((option, index) => {
+            if (index === 0) return;
+            option.hidden = query !== '' && !`${option.textContent || ''} ${option.dataset.planName || ''}`.toLocaleLowerCase('pt-BR').includes(query);
+        });
     };
 
     planSelect?.addEventListener('change', updateOperation);
     fidelityToggle?.addEventListener('change', updateFidelity);
+    planSearch?.addEventListener('input', filterPlans);
+    manualWaiver?.querySelector('input')?.addEventListener('change', updateOperation);
     updateOperation();
     updateFidelity();
 }
@@ -3682,6 +3788,13 @@ document.querySelectorAll('form[data-prevent-double-submit]').forEach((form) => 
         }
         submitted = true;
         form.setAttribute('aria-busy', 'true');
+        if (event.submitter instanceof HTMLButtonElement && event.submitter.name) {
+            const submitValue = document.createElement('input');
+            submitValue.type = 'hidden';
+            submitValue.name = event.submitter.name;
+            submitValue.value = event.submitter.value;
+            form.appendChild(submitValue);
+        }
         form.querySelectorAll('button[type="submit"]').forEach((button) => {
             if (!(button instanceof HTMLButtonElement)) return;
             const isSubmitter = event.submitter === button;
