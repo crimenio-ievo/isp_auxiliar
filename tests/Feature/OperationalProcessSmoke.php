@@ -34,7 +34,7 @@ $contracts = new ContractRepository($database);
 $acceptances = new ContractAcceptanceRepository($database);
 $financialTasks = new FinancialTaskRepository($database);
 $processes = new OperationalProcessRepository($database, $local);
-$service = new OperationalProcessService($database, $processes, $acceptances, $financialTasks, $local);
+$service = new OperationalProcessService($database, $processes, $contracts, $acceptances, $financialTasks, $local);
 $acceptanceWorkflow = new AcceptanceWorkflowService($app->config());
 $assertions = 0;
 
@@ -391,10 +391,22 @@ try {
     $responseReflection = new ReflectionClass($detailResponse);
     $bodyProperty = $responseReflection->getProperty('body');
     $statusProperty = $responseReflection->getProperty('status');
+    $headersProperty = $responseReflection->getProperty('headers');
     $bodyProperty->setAccessible(true);
     $statusProperty->setAccessible(true);
-    $assert((int) $statusProperty->getValue($detailResponse) === 200, 'Gestor autorizado não abriu o processo.');
-    $assert(str_contains((string) $bodyProperty->getValue($detailResponse), 'Todas as etapas'), 'Controller não renderizou o checklist.');
+    $headersProperty->setAccessible(true);
+    $assert((int) $statusProperty->getValue($detailResponse) === 302, 'Detalhe antigo não redirecionou o gestor para a área única.');
+    $detailHeaders = (array) $headersProperty->getValue($detailResponse);
+    $assert(str_contains((string) ($detailHeaders['Location'] ?? ''), '/processos/migracao'), 'Redirecionamento não apontou para a área única de migração.');
+
+    $migrationResponse = $processController->migration(new Request(
+        'GET',
+        '/processos/migracao',
+        '',
+        ['id' => (int) $migration['id']]
+    ));
+    $assert((int) $statusProperty->getValue($migrationResponse) === 200, 'Gestor autorizado não abriu a área única.');
+    $assert(str_contains((string) $bodyProperty->getValue($migrationResponse), '11 etapas'), 'Área única não renderizou o checklist compartilhado.');
 
     $_SESSION['user'] = ['login' => 'teste.viewer', 'name' => 'Viewer', 'role' => 'viewer'];
     $deniedResponse = $processController->detail(new Request(

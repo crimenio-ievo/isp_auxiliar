@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Processes;
 
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
+use App\Infrastructure\Contracts\ContractRepository;
 use App\Infrastructure\Contracts\FinancialTaskRepository;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
@@ -28,6 +29,7 @@ final class OperationalProcessService
     public function __construct(
         private Database $database,
         private OperationalProcessRepository $processRepository,
+        private ContractRepository $contractRepository,
         private ContractAcceptanceRepository $acceptanceRepository,
         private FinancialTaskRepository $financialTaskRepository,
         private LocalRepository $localRepository
@@ -129,7 +131,7 @@ final class OperationalProcessService
         }
 
         $this->completePreparationSteps($processId, $processType, $operator, $context);
-        $this->synchronizeExternalState($processId);
+        $this->reconcileState($processId);
 
         return $this->detail($processId) ?? [];
     }
@@ -145,13 +147,27 @@ final class OperationalProcessService
             return;
         }
 
-        $this->synchronizeExternalState((int) $process['id']);
+        $this->reconcileState((int) $process['id']);
     }
 
     public function synchronizeExternalState(int $processId): void
     {
+        $this->reconcileState($processId);
+    }
+
+    /**
+     * Reconcilia a projeção operacional com contrato, aceite, tarefas e etapas.
+     * Este é o único ponto que deriva progresso e próxima pendência.
+     */
+    public function reconcileState(int $processId): void
+    {
         $process = $this->processRepository->findById($processId);
         if (!is_array($process)) {
+            return;
+        }
+
+        if ((string) ($process['status'] ?? '') === 'cancelled') {
+            $this->reconcileCancelledProcess($process);
             return;
         }
 
@@ -185,6 +201,16 @@ final class OperationalProcessService
             }
 
             if ($status === 'aceito' && !$revoked) {
+                $this->completeStepAutomatically(
+                    $processId,
+                    'prepare_document',
+                    ['acceptance_id' => $acceptanceId, 'reconciled_from' => 'accepted']
+                );
+                $this->completeStepAutomatically(
+                    $processId,
+                    'send_acceptance',
+                    ['acceptance_id' => $acceptanceId, 'reconciled_from' => 'accepted']
+                );
                 $this->completeStepAutomatically(
                     $processId,
                     'confirm_acceptance',
@@ -250,6 +276,84 @@ final class OperationalProcessService
         }
 
         $this->refreshProgress($processId);
+    }
+
+    /**
+     * Mantém o mesmo processo ao revisar a condição e vincula a nova revisão.
+     */
+    public function reviseMigration(
+        int $processId,
+        array $contract,
+        array $acceptance,
+        array $context,
+        array $operator
+    ): array {
+        $process = $this->processRepository->findById($processId);
+        if (!is_array($process)
+            || (string) ($process['process_type'] ?? '') !== self::TYPE_MIGRATION
+            || (string) ($process['status'] ?? '') === 'cancelled'
+        ) {
+            throw new \RuntimeException('O processo de migração não está disponível para revisão.');
+        }
+
+        $contractId = (int) ($contract['id'] ?? $contract['contract_id'] ?? 0);
+        $acceptanceId = (int) ($acceptance['id'] ?? 0);
+        if ($contractId <= 0 || $acceptanceId <= 0) {
+            throw new \InvalidArgumentException('Contrato e aceite revisados são obrigatórios.');
+        }
+
+        $metadata = is_array($process['metadata'] ?? null) ? $process['metadata'] : [];
+        $metadata = array_replace_recursive($metadata, $this->buildMetadata(self::TYPE_MIGRATION, $contract, $context));
+        $this->processRepository->updateProcess($processId, [
+            'status' => 'in_progress',
+            'contract_id' => $contractId,
+            'acceptance_id' => $acceptanceId,
+            'metadata' => $metadata,
+            'completed_at' => null,
+            'cancelled_at' => null,
+            'notes' => null,
+        ]);
+
+        $documentVersion = trim((string) ($acceptance['termo_versao'] ?? '2026.1'));
+        $documentId = $this->processRepository->upsertDocument(
+            $processId,
+            $contractId,
+            $this->documentType(self::TYPE_MIGRATION),
+            $documentVersion !== '' ? $documentVersion : '2026.1',
+            [
+                'contract' => $this->contractSnapshot($contract),
+                'process_type' => self::TYPE_MIGRATION,
+                'document_version' => $documentVersion,
+                'term_hash' => (string) ($acceptance['termo_hash'] ?? ''),
+                'prepared_at' => (string) ($acceptance['created_at'] ?? date('Y-m-d H:i:s')),
+                'revision_reason' => (string) ($context['revision_reason'] ?? ''),
+            ],
+            $acceptanceId
+        );
+        if ($documentId > 0) {
+            $this->processRepository->linkAcceptance($processId, $documentId, $acceptanceId);
+        }
+
+        $this->resetAcceptanceSteps($processId);
+        $this->completeStepAutomatically($processId, 'migration_data', [
+            'source' => 'condition_revision',
+            'operator' => (string) ($operator['login'] ?? ''),
+            'revision' => (int) ($contract['revision_number'] ?? 1),
+        ]);
+        $this->completeStepAutomatically($processId, 'prepare_document', [
+            'source' => 'condition_revision',
+            'operator' => (string) ($operator['login'] ?? ''),
+            'acceptance_id' => $acceptanceId,
+        ]);
+        $this->reconcileState($processId);
+        $this->recordAudit('operational_process.migration.revised', 'operational_process', $processId, [
+            'contract_id' => $contractId,
+            'acceptance_id' => $acceptanceId,
+            'revision' => (int) ($contract['revision_number'] ?? 1),
+            'reason' => (string) ($context['revision_reason'] ?? ''),
+        ], $operator);
+
+        return $this->detail($processId) ?? [];
     }
 
     public function updateStep(
@@ -463,13 +567,33 @@ final class OperationalProcessService
             throw new \RuntimeException('Este processo não pode ser cancelado.');
         }
 
-        $this->processRepository->updateProcess($processId, [
-            'status' => 'cancelled',
-            'cancelled_at' => date('Y-m-d H:i:s'),
-            'notes' => $reason,
-            'next_pending_key' => null,
-            'next_pending_label' => null,
-        ]);
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+            $this->processRepository->updateProcess($processId, [
+                'status' => 'cancelled',
+                'cancelled_at' => date('Y-m-d H:i:s'),
+                'notes' => $reason,
+                'current_step_key' => null,
+                'next_pending_key' => null,
+                'next_pending_label' => null,
+            ]);
+            $this->reconcileCancelledProcess(array_merge($process, [
+                'status' => 'cancelled',
+                'notes' => $reason,
+            ]), $operator);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
         $this->recordAudit('operational_process.cancelled', 'operational_process', $processId, [
             'reason' => $reason,
         ], $operator);
@@ -499,13 +623,17 @@ final class OperationalProcessService
         if (!is_array($process)) {
             return null;
         }
+        if (!in_array((string) ($process['status'] ?? ''), ['completed', 'cancelled'], true)) {
+            $this->reconcileState($processId);
+            $process = $this->processRepository->findById($processId) ?? $process;
+        }
 
         $steps = $this->processRepository->steps($processId);
         $process['steps'] = array_map(fn (array $step): array => $this->decorateStep($step), $steps);
         if ((string) ($process['process_type'] ?? '') === self::TYPE_MIGRATION) {
             foreach ($process['steps'] as &$step) {
                 $step['url'] = '/processos/migracao?id=' . $processId
-                    . '&screen=' . $this->migrationScreenForStep((string) ($step['step_key'] ?? ''));
+                    . '&step=' . rawurlencode((string) ($step['step_key'] ?? ''));
             }
             unset($step);
         }
@@ -516,7 +644,7 @@ final class OperationalProcessService
             : 0;
         $nextKey = (string) ($process['next_pending_key'] ?? $process['current_step_key'] ?? '');
         $process['resume_url'] = (string) ($process['process_type'] ?? '') === self::TYPE_MIGRATION
-            ? '/processos/migracao?id=' . $processId . '&screen=' . $this->migrationScreenForStep($nextKey)
+            ? '/processos/migracao?id=' . $processId . ($nextKey !== '' ? '&step=' . rawurlencode($nextKey) : '')
             : '/processos/etapa?id=' . $processId . '&step=' . rawurlencode($nextKey);
         $process['detail_url'] = '/processos/detalhe?id=' . $processId;
 
@@ -665,6 +793,94 @@ final class OperationalProcessService
         ]);
     }
 
+    private function reconcileCancelledProcess(array $process, array $operator = []): void
+    {
+        $processId = (int) ($process['id'] ?? 0);
+        if ($processId <= 0) {
+            return;
+        }
+        $reason = trim((string) ($process['notes'] ?? '')) ?: 'Processo operacional cancelado.';
+        $operatorLogin = trim((string) ($operator['login'] ?? $process['responsible_login'] ?? $process['created_by_login'] ?? ''));
+        $operatorId = isset($operator['id']) && (int) $operator['id'] > 0 ? (int) $operator['id'] : null;
+
+        $acceptanceId = (int) ($process['acceptance_id'] ?? 0);
+        if ($acceptanceId > 0) {
+            $acceptance = $this->acceptanceRepository->findById($acceptanceId);
+            if (is_array($acceptance) && trim((string) ($acceptance['revoked_at'] ?? '')) === '') {
+                $this->acceptanceRepository->revoke($acceptanceId, $reason, $operatorId, $operatorLogin, true);
+            }
+            $this->processRepository->markDocumentStatusByAcceptance($acceptanceId, 'revoked');
+        }
+
+        $contractId = (int) ($process['contract_id'] ?? 0);
+        if ($contractId > 0) {
+            $contract = $this->contractRepository->findById($contractId);
+            if (is_array($contract) && in_array((string) ($contract['lifecycle_status'] ?? 'active'), ['active', 'correction_pending'], true)) {
+                $this->contractRepository->markLifecycle($contractId, 'cancelled', $reason, $operatorId, $operatorLogin);
+            }
+            $task = $this->financialTaskRepository->findByContractId($contractId);
+            if (is_array($task) && !in_array((string) ($task['status'] ?? ''), ['concluido', 'cancelado'], true)) {
+                $this->financialTaskRepository->updateStatus((int) $task['id'], 'cancelado');
+            }
+        }
+
+        foreach ($this->processRepository->steps($processId) as $step) {
+            if (in_array((string) ($step['status'] ?? ''), ['completed', 'not_applicable', 'cancelled'], true)) {
+                continue;
+            }
+            $this->processRepository->updateStep((int) $step['id'], [
+                'status' => 'cancelled',
+                'pending_reason' => null,
+                'next_action' => null,
+                'deferred_at' => null,
+                'deferred_by_login' => null,
+                'last_checked_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        $steps = $this->processRepository->steps($processId);
+        $completed = count(array_filter(
+            $steps,
+            static fn (array $step): bool => !empty($step['is_required'])
+                && in_array((string) ($step['status'] ?? ''), ['completed', 'not_applicable'], true)
+        ));
+        $total = count(array_filter($steps, static fn (array $step): bool => !empty($step['is_required'])));
+        $this->processRepository->updateProcess($processId, [
+            'status' => 'cancelled',
+            'progress_completed' => $completed,
+            'progress_total' => $total,
+            'current_step_key' => null,
+            'next_pending_key' => null,
+            'next_pending_label' => null,
+        ]);
+    }
+
+    private function resetAcceptanceSteps(int $processId): void
+    {
+        foreach (['send_acceptance', 'confirm_acceptance'] as $stepKey) {
+            $step = $this->processRepository->findStep($processId, $stepKey);
+            if (!is_array($step)) {
+                continue;
+            }
+            $this->processRepository->updateStep((int) $step['id'], [
+                'status' => 'not_started',
+                'started_at' => null,
+                'completed_at' => null,
+                'completed_by_user_id' => null,
+                'completed_by_login' => null,
+                'completion_origin' => null,
+                'observation' => null,
+                'pending_reason' => null,
+                'next_action' => null,
+                'external_reference' => null,
+                'last_checked_at' => null,
+                'deferred_at' => null,
+                'deferred_by_login' => null,
+                'evidence' => null,
+            ]);
+        }
+    }
+
     private function stepDefinitions(string $processType): array
     {
         return match ($processType) {
@@ -728,6 +944,7 @@ final class OperationalProcessService
             'attention' => 'Requer atenção',
             'completed' => 'Concluída',
             'not_applicable' => 'Não aplicável',
+            'cancelled' => 'Cancelada',
             default => 'Não iniciada',
         };
         $step['status_class'] = match ($status) {
@@ -741,16 +958,6 @@ final class OperationalProcessService
             . '&step=' . rawurlencode((string) ($step['step_key'] ?? ''));
 
         return $step;
-    }
-
-    private function migrationScreenForStep(string $stepKey): int
-    {
-        return match ($stepKey) {
-            'migration_data' => 1,
-            'prepare_document', 'send_acceptance', 'confirm_acceptance' => 2,
-            'technical_execution', 'confirm_equipment', 'validate_connection' => 3,
-            default => 4,
-        };
     }
 
     private function buildMetadata(string $processType, array $contract, array $context): array

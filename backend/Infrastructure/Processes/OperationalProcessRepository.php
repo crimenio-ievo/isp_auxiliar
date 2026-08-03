@@ -334,7 +334,8 @@ final class OperationalProcessRepository
 
         if (array_key_exists('evidence', $data) || array_key_exists('evidence_json', $data)) {
             $sets[] = 'evidence_json = :evidence_json';
-            $params['evidence_json'] = $this->encodeJson($data['evidence'] ?? $data['evidence_json']);
+            $evidence = array_key_exists('evidence', $data) ? $data['evidence'] : $data['evidence_json'];
+            $params['evidence_json'] = $this->encodeJson($evidence);
         }
 
         if ($sets === []) {

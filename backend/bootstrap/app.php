@@ -189,6 +189,7 @@ function bootstrapApplication(): Application
     $container->set(OperationalProcessService::class, new OperationalProcessService(
         $localDatabase,
         $container->get(OperationalProcessRepository::class),
+        $container->get(ContractRepository::class),
         $container->get(ContractAcceptanceRepository::class),
         $container->get(FinancialTaskRepository::class),
         $localRepository

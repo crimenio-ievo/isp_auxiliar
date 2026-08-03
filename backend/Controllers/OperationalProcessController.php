@@ -90,6 +90,9 @@ final class OperationalProcessController
         if ($process instanceof Response) {
             return $process;
         }
+        if ((string) ($process['process_type'] ?? '') === OperationalProcessService::TYPE_MIGRATION) {
+            return Response::redirect((string) ($process['resume_url'] ?? '/processos/migracao?id=' . (int) $process['id']));
+        }
 
         return Response::html($this->view->render('processes/detail', [
             'pageTitle' => (string) ($process['type_label'] ?? 'Processo operacional'),
@@ -114,12 +117,31 @@ final class OperationalProcessController
             return Response::redirect('/processos/detalhe?id=' . (int) ($process['id'] ?? 0));
         }
 
-        $screen = max(1, min(4, (int) $request->query('screen', 1)));
+        $stepKey = trim((string) $request->query('step', ''));
+        if ($stepKey === '') {
+            $stepKey = (string) ($process['next_pending_key'] ?? $process['current_step_key'] ?? 'migration_data');
+        }
+        $steps = array_values((array) ($process['steps'] ?? []));
+        $activeStep = null;
+        $activeIndex = 0;
+        foreach ($steps as $index => $candidate) {
+            if (is_array($candidate) && (string) ($candidate['step_key'] ?? '') === $stepKey) {
+                $activeStep = $candidate;
+                $activeIndex = $index;
+                break;
+            }
+        }
+        if (!is_array($activeStep)) {
+            $activeStep = $steps[0] ?? [];
+            $activeIndex = 0;
+        }
+        $previousStep = $activeIndex > 0 ? ($steps[$activeIndex - 1] ?? null) : null;
+        $nextStep = $steps[$activeIndex + 1] ?? null;
         $contract = $this->contractRepository->findById((int) ($process['contract_id'] ?? 0)) ?? [];
         $acceptance = $this->acceptanceRepository->findById((int) ($process['acceptance_id'] ?? 0)) ?? [];
         $financialTask = $this->financialTaskRepository->findByContractId((int) ($process['contract_id'] ?? 0)) ?? [];
         $connection = [];
-        if ($screen === 3) {
+        if (in_array((string) ($activeStep['step_key'] ?? ''), ['technical_execution', 'confirm_equipment', 'validate_connection'], true)) {
             try {
                 $connection = $this->mkauthDatabase->radiusConnectionStatus((string) ($process['mkauth_login'] ?? ''));
             } catch (\Throwable) {
@@ -128,7 +150,7 @@ final class OperationalProcessController
         }
 
         $dryRun = null;
-        if ($screen === 4) {
+        if ((string) ($activeStep['step_key'] ?? '') === 'change_plan') {
             $migration = is_array($process['metadata']['migration'] ?? null) ? $process['metadata']['migration'] : [];
             $targetPlan = trim((string) ($migration['new_plan_id'] ?? $migration['new_plan_name'] ?? ''));
             if ($targetPlan !== '') {
@@ -148,7 +170,9 @@ final class OperationalProcessController
             'user' => $this->resolveViewUser(),
             'flash' => Flash::get(),
             'process' => $process,
-            'screen' => $screen,
+            'activeStep' => $activeStep,
+            'previousStep' => $previousStep,
+            'nextStep' => $nextStep,
             'contract' => $contract,
             'acceptance' => $acceptance,
             'financialTask' => $financialTask,
@@ -164,6 +188,11 @@ final class OperationalProcessController
         $process = $this->loadAuthorizedProcess((int) $request->query('id', 0));
         if ($process instanceof Response) {
             return $process;
+        }
+        if ((string) ($process['process_type'] ?? '') === OperationalProcessService::TYPE_MIGRATION) {
+            $stepKey = trim((string) $request->query('step', ''));
+            return Response::redirect('/processos/migracao?id=' . (int) $process['id']
+                . ($stepKey !== '' ? '&step=' . rawurlencode($stepKey) : ''));
         }
 
         $stepKey = trim((string) $request->query('step', ''));
@@ -244,8 +273,8 @@ final class OperationalProcessController
 
         $stepKey = trim((string) $request->input('step_key', ''));
         $continueTo = (string) $request->input('continue_to', '');
-        $returnUrl = preg_match('/^migration:([1-4])$/', $continueTo, $continueMatches) === 1
-            ? '/processos/migracao?id=' . $processId . '&screen=' . (int) $continueMatches[1]
+        $returnUrl = $continueTo === 'migration_workspace'
+            ? '/processos/migracao?id=' . $processId . '&step=' . rawurlencode($stepKey)
             : '/processos/etapa?id=' . $processId . '&step=' . rawurlencode($stepKey);
         if (!$this->canUpdateStep($process, $stepKey)) {
             Flash::set('error', 'Seu usuário não possui permissão para executar esta etapa.');
@@ -306,8 +335,14 @@ final class OperationalProcessController
         if ((string) $request->input('continue_to', '') === 'checklist') {
             return Response::redirect('/processos/detalhe?id=' . $processId);
         }
-        if (preg_match('/^migration:([1-4])$/', $continueTo, $matches) === 1) {
-            return Response::redirect('/processos/migracao?id=' . $processId . '&screen=' . (int) $matches[1]);
+        if ($continueTo === 'migration_workspace') {
+            $updated = $this->processService->detail($processId);
+            $nextKey = (string) ($updated['next_pending_key'] ?? '');
+            return Response::redirect('/processos/migracao?id=' . $processId
+                . ($nextKey !== '' ? '&step=' . rawurlencode($nextKey) : ''));
+        }
+        if ($continueTo === 'migration_exit') {
+            return Response::redirect('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')));
         }
         $next = $this->processService->nextStep($processId);
         if (is_array($next)) {
