@@ -386,9 +386,10 @@ ob_start();
                     </label>
                     <label class="field">
                         <span>Isenção em migração rádio → fibra</span>
-                        <select name="isentar_adesao_migracao_radio_fibra">
-                            <option value="0" <?= $selected(empty($commercial['isentar_adesao_migracao_radio_fibra'])); ?>>Não aplicar automaticamente</option>
-                            <option value="1" <?= $selected(!empty($commercial['isentar_adesao_migracao_radio_fibra'])); ?>>Aplicar pela regra configurada</option>
+                        <select name="modo_isencao_adesao_migracao_radio_fibra">
+                            <option value="automatic" <?= $selected(($commercial['modo_isencao_adesao_migracao_radio_fibra'] ?? 'disabled') === 'automatic'); ?>>Aplicar automaticamente</option>
+                            <option value="disabled" <?= $selected(($commercial['modo_isencao_adesao_migracao_radio_fibra'] ?? 'disabled') === 'disabled'); ?>>Não aplicar</option>
+                            <option value="manual" <?= $selected(($commercial['modo_isencao_adesao_migracao_radio_fibra'] ?? 'disabled') === 'manual'); ?>>Exigir confirmação manual</option>
                         </select>
                     </label>
                 </div>

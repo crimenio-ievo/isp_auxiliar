@@ -307,7 +307,11 @@ final class SettingsController
             'exigir_validacao_cpf_aceite' => $this->normalizeBoolean((string) $request->input('exigir_validacao_cpf_aceite', '1')),
             'quantidade_digitos_validacao_cpf' => max(1, (int) $request->input('quantidade_digitos_validacao_cpf', (string) ($commercial['quantidade_digitos_validacao_cpf'] ?? 3))),
             'multa_padrao' => $this->normalizeMoney((string) $request->input('multa_padrao', (string) ($commercial['multa_padrao'] ?? 0))),
-            'isentar_adesao_migracao_radio_fibra' => $this->normalizeBoolean((string) $request->input('isentar_adesao_migracao_radio_fibra', '0')),
+            'modo_isencao_adesao_migracao_radio_fibra' => in_array(
+                (string) $request->input('modo_isencao_adesao_migracao_radio_fibra', 'disabled'),
+                ['automatic', 'disabled', 'manual'],
+                true
+            ) ? (string) $request->input('modo_isencao_adesao_migracao_radio_fibra', 'disabled') : 'disabled',
         ];
     }
 

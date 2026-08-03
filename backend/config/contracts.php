@@ -39,9 +39,19 @@ $commercial = [
         FILTER_VALIDATE_BOOL,
         FILTER_NULL_ON_FAILURE
     ) ?? false,
+    'modo_isencao_adesao_migracao_radio_fibra' => strtolower(trim((string) Env::get(
+        'CONTRACT_MODO_ISENCAO_ADESAO_MIGRACAO_RADIO_FIBRA',
+        (filter_var(Env::get('CONTRACT_ISENTAR_ADESAO_MIGRACAO_RADIO_FIBRA', '0'), FILTER_VALIDATE_BOOL) ? 'automatic' : 'disabled')
+    ))),
 ];
 
 $commercial = array_replace($commercial, array_intersect_key($commercialOverrides, $commercial));
+$commercial['modo_isencao_adesao_migracao_radio_fibra'] = in_array(
+    (string) ($commercial['modo_isencao_adesao_migracao_radio_fibra'] ?? ''),
+    ['automatic', 'disabled', 'manual'],
+    true
+) ? (string) $commercial['modo_isencao_adesao_migracao_radio_fibra'] : 'disabled';
+$commercial['isentar_adesao_migracao_radio_fibra'] = $commercial['modo_isencao_adesao_migracao_radio_fibra'] === 'automatic';
 
 $mkauthTicket = array_replace([
     'enabled' => filter_var(Env::get('MKAUTH_TICKET_ENABLED', '0'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false,

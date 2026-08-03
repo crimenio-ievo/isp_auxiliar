@@ -23,6 +23,10 @@ $otherBenefit = trim((string) ($form['beneficio_outro_text'] ?? ''));
 $observation = trim((string) ($form['observacao'] ?? $context['observacao'] ?? ''));
 $correctionOf = (int) ($correctionOf ?? 0);
 $correctionReason = trim((string) ($correctionReason ?? ''));
+$processId = (int) ($processId ?? 0);
+$revisionMode = trim((string) ($revisionMode ?? ''));
+$adhesionDefault = (float) ($context['adhesion_default_value'] ?? 0);
+$waiverMode = (string) ($context['adhesion_waiver_mode'] ?? 'disabled');
 $errorFor = static fn (string $field): string => trim((string) ($errors[$field] ?? ''));
 $firstErrorField = $errors !== [] ? (string) array_key_first($errors) : '';
 $operationLabels = ['migration' => 'Migração', 'upgrade' => 'Upgrade', 'downgrade' => 'Downgrade'];
@@ -49,7 +53,9 @@ ob_start();
 <?php if ($correctionOf > 0): ?>
     <section class="alert alert--warning" aria-live="polite">
         <strong>Correção do contrato #<?= $correctionOf; ?></strong>
-        <p>Uma nova versão e um novo aceite serão criados sem apagar o histórico anterior.</p>
+        <p><?= $revisionMode === 'pending'
+            ? 'A condição pendente será revisada no mesmo processo. O token anterior será invalidado sem apagar o histórico.'
+            : 'A condição já aceita será substituída por nova versão e novo aceite, sem apagar o histórico anterior.'; ?></p>
     </section>
 <?php endif; ?>
 
@@ -87,7 +93,8 @@ ob_start();
     <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
     <?php if ($correctionOf > 0): ?>
         <input type="hidden" name="correction_of" value="<?= $correctionOf; ?>">
-        <input type="hidden" name="correction_reason" value="<?= htmlspecialchars($correctionReason, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="process_id" value="<?= $processId; ?>">
+        <input type="hidden" name="revision_mode" value="<?= htmlspecialchars($revisionMode, ENT_QUOTES, 'UTF-8'); ?>">
     <?php endif; ?>
 
     <div class="section-heading">
@@ -96,6 +103,20 @@ ob_start();
     </div>
 
     <div class="form-grid">
+        <?php if ($correctionOf > 0): ?>
+            <label class="field field--span-2" for="correction-reason">
+                <span>Motivo da correção</span>
+                <textarea id="correction-reason" name="correction_reason" rows="2" required aria-describedby="correction-reason-error" <?= $firstErrorField === 'correction_reason' ? 'data-focus-field' : ''; ?>><?= htmlspecialchars($correctionReason, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                <small class="field-help">O motivo ficará no histórico da revisão e da revogação do aceite anterior.</small>
+                <?php if ($errorFor('correction_reason') !== ''): ?><small id="correction-reason-error" class="field-error"><?= htmlspecialchars($errorFor('correction_reason'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+            </label>
+        <?php endif; ?>
+        <?php if (count($plans) > 10): ?>
+            <label class="field field--span-2" for="plan-search">
+                <span>Buscar plano</span>
+                <input id="plan-search" type="search" data-simple-plan-search placeholder="Digite nome, velocidade ou valor" autocomplete="off">
+            </label>
+        <?php endif; ?>
         <label class="field field--span-2" for="novo-plano">
             <span>Novo plano</span>
             <select id="novo-plano" name="novo_plano" required data-simple-plan-select aria-describedby="novo-plano-help novo-plano-error" <?= $firstErrorField === 'novo_plano' ? 'data-focus-field' : ''; ?>>
@@ -107,7 +128,7 @@ ob_start();
                     $speed = trim((string) ($plan['speed_down'] ?? ''));
                     $value = trim((string) ($plan['value'] ?? ''));
                     $technology = trim((string) ($plan['technology_label'] ?? 'Tecnologia não identificada'));
-                    $parts = array_filter([$name, $speed !== '' ? $speed : null, $value !== '' ? 'R$ ' . number_format((float) str_replace(',', '.', $value), 2, ',', '.') : null, $technology]);
+                    $label = trim((string) ($plan['label'] ?? $name));
                     ?>
                     <option value="<?= htmlspecialchars($id, ENT_QUOTES, 'UTF-8'); ?>"
                         data-plan-name="<?= htmlspecialchars($name, ENT_QUOTES, 'UTF-8'); ?>"
@@ -115,10 +136,10 @@ ob_start();
                         data-plan-value="<?= htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
                         data-plan-technology="<?= htmlspecialchars($technology, ENT_QUOTES, 'UTF-8'); ?>"
                         data-plan-family="<?= htmlspecialchars((string) ($plan['install_type'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                        <?= strcasecmp($id, $selectedPlan) === 0 ? 'selected' : ''; ?>><?= htmlspecialchars(implode(' · ', $parts), ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?= strcasecmp($id, $selectedPlan) === 0 ? 'selected' : ''; ?>><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></option>
                 <?php endforeach; ?>
             </select>
-            <small id="novo-plano-help" class="field-help">A lista exibe nome, velocidade, valor, tecnologia e usa o UUID/código no snapshot.</small>
+            <small id="novo-plano-help" class="field-help">A lista mostra somente a condição comercial. Código, tecnologia e velocidades originais permanecem no snapshot interno.</small>
             <?php if ($errorFor('novo_plano') !== ''): ?><small id="novo-plano-error" class="field-error"><?= htmlspecialchars($errorFor('novo_plano'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
         </label>
 
@@ -127,6 +148,24 @@ ob_start();
             <strong class="upgrade-operation-result" data-simple-operation><?= htmlspecialchars($operationLabels[$operation] ?? 'Selecione um plano', ENT_QUOTES, 'UTF-8'); ?></strong>
             <small class="field-help">Troca de tecnologia = migração; condição superior = upgrade; condição inferior = downgrade.</small>
         </div>
+
+        <section class="field field--span-2 adhesion-summary" aria-live="polite"
+            data-adhesion-summary
+            data-adhesion-default="<?= htmlspecialchars((string) $adhesionDefault, ENT_QUOTES, 'UTF-8'); ?>"
+            data-waiver-mode="<?= htmlspecialchars($waiverMode, ENT_QUOTES, 'UTF-8'); ?>">
+            <span>Adesão</span>
+            <div class="summary-grid">
+                <div class="summary-item"><span>Padrão configurado</span><strong>R$ <?= number_format($adhesionDefault, 2, ',', '.'); ?></strong></div>
+                <div class="summary-item"><span>Valor cobrado</span><strong data-adhesion-charged>Definido após escolher o plano</strong></div>
+                <div class="summary-item"><span>Benefício</span><strong data-adhesion-benefit>Sem isenção automática</strong></div>
+            </div>
+            <?php if ($waiverMode === 'manual'): ?>
+                <label class="checkbox-field" data-manual-waiver hidden>
+                    <input type="checkbox" name="manual_adhesion_waiver" value="1" <?= !empty($form['manual_adhesion_waiver']) ? 'checked' : ''; ?>>
+                    <span><strong>Confirmar isenção da adesão</strong><small>Disponível somente para migração de rádio para fibra.</small></span>
+                </label>
+            <?php endif; ?>
+        </section>
 
         <label class="field" for="benefit-value">
             <span>Valor do benefício</span>
@@ -153,12 +192,12 @@ ob_start();
             <div class="form-grid" data-fidelity-fields <?= !$applyFidelity ? 'hidden' : ''; ?>>
                 <label class="field field--span-2" for="fidelity-description">
                     <span>Benefício que justifica a fidelidade</span>
-                    <input id="fidelity-description" name="fidelity_benefit_description" value="<?= htmlspecialchars($fidelityDescription, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="fidelity-description-error">
+                    <input id="fidelity-description" name="fidelity_benefit_description" value="<?= htmlspecialchars($fidelityDescription, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="fidelity-description-error" <?= !$applyFidelity ? 'disabled' : ''; ?>>
                     <?php if ($errorFor('fidelity_benefit_description') !== ''): ?><small id="fidelity-description-error" class="field-error"><?= htmlspecialchars($errorFor('fidelity_benefit_description'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
                 </label>
                 <label class="field" for="fidelity-months">
                     <span>Prazo de permanência</span>
-                    <input id="fidelity-months" type="number" name="fidelidade_meses" min="1" max="12" value="<?= $fidelityMonths; ?>" aria-describedby="fidelity-months-error">
+                    <input id="fidelity-months" type="number" name="fidelidade_meses" min="1" max="12" value="<?= $fidelityMonths; ?>" aria-describedby="fidelity-months-error" <?= !$applyFidelity ? 'disabled' : ''; ?>>
                     <?php if ($errorFor('fidelidade_meses') !== ''): ?><small id="fidelity-months-error" class="field-error"><?= htmlspecialchars($errorFor('fidelidade_meses'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
                 </label>
             </div>

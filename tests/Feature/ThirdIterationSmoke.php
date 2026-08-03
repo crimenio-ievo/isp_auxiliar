@@ -76,7 +76,9 @@ try {
     $validFidelity = $validate->invoke($controller, array_replace($base, ['valor_beneficio' => 300, 'fidelity_benefit_description' => 'Instalação isenta', 'fidelidade_meses' => 12]), ['current_plan' => 'r10', 'current_monthly_value' => 80, 'planOptions' => $plans]);
     $assert($validFidelity === [], 'Fidelidade válida foi bloqueada: ' . implode(' ', $validFidelity));
     $benefitDefaults = (new ReflectionMethod(ClientController::class, 'resolveUpgradeBenefitDefaults'))->invoke($controller, 'Rádio fixo (FWA)', 'Fibra até o imóvel (FTTH)', 'R10', 'F100', 80.0, 100.0);
-    $assert(!empty($benefitDefaults['flags']['radio_to_fiber']) && empty($benefitDefaults['flags']['adhesion_waiver']), 'Migração rádio-fibra concedeu isenção sem regra configurada.');
+    $configuredAdhesion = (float) $app->config()->get('contracts.commercial.valor_adesao_padrao', 0);
+    $assert(!empty($benefitDefaults['flags']['radio_to_fiber']) && !empty($benefitDefaults['flags']['adhesion_waiver']), 'Migração rádio-fibra não aplicou a regra automática configurada.');
+    $assert(abs((float) ($benefitDefaults['value'] ?? 0) - $configuredAdhesion) < 0.01, 'Benefício da migração não corresponde à adesão configurada.');
     $term = (new ReflectionMethod(ClientController::class, 'buildContractTermBody'))->invoke($controller, [
         'tipo_aceite' => 'upgrade_migracao', 'nome_cliente' => 'Cliente', 'mkauth_login' => 'cliente', 'telefone_cliente' => '5531999991111', 'fidelidade_meses' => 0,
         'upgrade_snapshot_json' => json_encode(['current_plan_name' => 'R10', 'new_plan_name' => 'F100', 'current_technology' => 'Rádio fixo (FWA)', 'new_technology' => 'Fibra até o imóvel (FTTH)', 'new_monthly_value' => 100, 'fidelity_months' => 0, 'benefit_flags' => ['radio_to_fiber' => true, 'adhesion_waiver' => false]], JSON_THROW_ON_ERROR),
@@ -115,12 +117,19 @@ try {
     $assert(str_contains($detailHtml, 'Código informado pelo MkAuth: Z9'), 'Código desconhecido não ficou restrito ao detalhe técnico.');
     $assert(!str_contains($detailHtml, '>Novo cliente<') && !str_contains($detailHtml, 'Conhecido como </p>'), 'Perfil exibiu ação ou campo vazio indevido.');
 
+    $migrationStepKeys = ['migration_data', 'prepare_document', 'send_acceptance', 'confirm_acceptance', 'technical_execution', 'confirm_equipment', 'change_plan', 'validate_connection', 'open_financial_ticket', 'follow_financial_ticket', 'complete_migration'];
+    $migrationSteps = [];
+    foreach ($migrationStepKeys as $position => $key) {
+        $migrationSteps[] = ['id' => $position + 1, 'step_key' => $key, 'step_order' => $position + 1, 'label' => ucwords(str_replace('_', ' ', $key)), 'status' => 'not_started', 'status_label' => 'Não iniciada', 'status_class' => 'muted', 'url' => '/processos/migracao?id=9&step=' . $key];
+    }
+    $activeMigrationStep = $migrationSteps[3];
     $migrationHtml = $view->render('processes/migration', [
         'pageTitle' => 'Migração', 'currentPath' => '/processos/migracao', 'basePath' => '', 'appName' => 'Teste', 'user' => ['name' => 'Teste'], 'flash' => null,
-        'process' => ['id' => 9, 'client_name' => 'Cliente', 'mkauth_login' => 'cliente', 'metadata' => ['migration' => ['current_plan_name' => 'R10', 'new_plan_name' => 'F100', 'current_monthly_value' => 80, 'new_monthly_value' => 100], 'client' => ['email' => 'a@example.test']], 'steps' => []],
-        'screen' => 2, 'contract' => ['id' => 1, 'nome_cliente' => 'Cliente'], 'acceptance' => ['id' => 2, 'status' => 'criado', 'token_hash' => str_repeat('a', 64), 'telefone_enviado' => '5531999991111'], 'financialTask' => [], 'connection' => [], 'dryRun' => null, 'csrfToken' => 'csrf', 'canOverride' => true,
+        'process' => ['id' => 9, 'status' => 'waiting_client', 'client_name' => 'Cliente', 'mkauth_login' => 'cliente', 'progress_completed' => 3, 'progress_total' => 11, 'progress_percent' => 27, 'metadata' => ['migration' => ['operation_type' => 'migration', 'current_plan_name' => 'R10', 'new_plan_name' => 'F100', 'current_monthly_value' => 80, 'new_monthly_value' => 100], 'client' => ['email' => 'a@example.test']], 'steps' => $migrationSteps],
+        'activeStep' => $activeMigrationStep, 'previousStep' => $migrationSteps[2], 'nextStep' => $migrationSteps[4], 'contract' => ['id' => 1, 'nome_cliente' => 'Cliente'], 'acceptance' => ['id' => 2, 'status' => 'criado', 'token_hash' => str_repeat('a', 64), 'telefone_enviado' => '5531999991111'], 'financialTask' => [], 'connection' => [], 'dryRun' => null, 'csrfToken' => 'csrf', 'canOverride' => true,
     ]);
-    foreach (['Nova condição', 'Conferência, assinatura e envio', 'Execução técnica e conexão', 'Plano, financeiro e conclusão'] as $title) $assert(str_contains($migrationHtml, $title), 'Tela agrupada ausente: ' . $title);
+    foreach (['Condição', 'Aceite', 'Execução', 'Plano e financeiro'] as $title) $assert(str_contains($migrationHtml, $title), 'Fase compacta ausente: ' . $title);
+    $assert(str_contains($migrationHtml, 'data-migration-workspace') && str_contains($migrationHtml, '11 etapas'), 'Área operacional única não foi renderizada.');
     $assert(str_contains($migrationHtml, 'data-signature-canvas') && str_contains($migrationHtml, 'channel_whatsapp') && str_contains($migrationHtml, 'channel_email'), 'Assinatura local e canais não foram agrupados.');
     $assert(!str_contains($migrationHtml, 'Copiar link') && !str_contains($migrationHtml, 'Copiar mensagem'), 'Envio manual por cópia foi exposto.');
 

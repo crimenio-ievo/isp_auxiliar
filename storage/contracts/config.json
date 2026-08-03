@@ -8,7 +8,8 @@
         "validade_link_aceite_horas": 48,
         "exigir_validacao_cpf_aceite": true,
         "quantidade_digitos_validacao_cpf": 3,
-        "multa_padrao": 0
+        "multa_padrao": 0,
+        "modo_isencao_adesao_migracao_radio_fibra": "automatic"
     },
     "saved_at": "2026-05-12 14:40:40",
     "saved_by": "crimenio",
