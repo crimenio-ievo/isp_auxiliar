@@ -117,6 +117,23 @@ $typeLabel = static function (string $value): string {
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
 $shortHash = static fn (string $value): string => $value !== '' ? substr($value, 0, 16) . '…' : '-';
+$auditLabel = static fn (string $action): string => match ($action) {
+    'contract.acceptance.accepted', 'contract.acceptance.confirmed' => 'Cliente confirmou o aceite.',
+    'contract.acceptance.created' => 'Aceite preparado.',
+    'contract.upgrade.operational_task.created' => 'Pendência operacional criada.',
+    'contract.financial_task.created' => 'Pendência financeira criada.',
+    'contract.financial_task.completed' => 'Pendência financeira concluída.',
+    'contract.financial_task.canceled' => 'Pendência financeira cancelada.',
+    'contract.financial.closed', 'financial_task.mkauth_ticket.closed' => 'Chamado financeiro encerrado.',
+    'contract.upgrade.created' => 'Nova condição de migração preparada.',
+    'contract.upgrade.pending_condition_revised' => 'Condição pendente corrigida.',
+    'contract.upgrade.correction_started' => 'Substituição da condição iniciada.',
+    'contract.upgrade.superseded' => 'Condição anterior substituída.',
+    'contract.upgrade.cancelled', 'operational_process.cancelled' => 'Migração cancelada.',
+    'operational_process.completed' => 'Migração concluída.',
+    'operational_process.migration.revised' => 'Condição da migração revisada.',
+    default => str_starts_with($action, 'operational_process.step.') ? 'Etapa operacional atualizada.' : 'Registro operacional atualizado.',
+};
 $summarizeProviderResponse = static function (mixed $value): string {
     if (is_array($value)) {
         $parts = [];
@@ -204,7 +221,7 @@ ob_start();
 
 <section class="card">
     <div class="section-heading">
-        <p class="section-heading__eyebrow">Resumo</p>
+        <p class="section-heading__eyebrow">Condição comercial</p>
         <h2><?= htmlspecialchars((string) ($contract['nome_cliente'] ?? 'Contrato'), ENT_QUOTES, 'UTF-8'); ?></h2>
     </div>
 
@@ -278,10 +295,7 @@ ob_start();
 
     <div class="hero-actions" style="margin-top: 18px;">
         <a class="button button--ghost" href="#financeiro">Ver pendência financeira</a>
-        <a class="button button--ghost" href="#logs">Ver logs relacionados</a>
-        <?php if ($canManageSettings): ?>
-            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=contratos'), ENT_QUOTES, 'UTF-8'); ?>">Abrir configurações</a>
-        <?php endif; ?>
+        <a class="button button--ghost" href="#logs">Ver eventos</a>
         <?php if ($canCorrectUpgradeAction): ?>
             <button class="button button--ghost" type="button" data-upgrade-action-open="contract-upgrade-correct-modal"><?= $technicalCompleted ? 'Abrir processo corretivo' : 'Corrigir e reenviar'; ?></button>
         <?php endif; ?>
@@ -412,8 +426,8 @@ ob_start();
 
 <section class="card" style="margin-top: 20px;">
     <div class="section-heading">
-        <p class="section-heading__eyebrow">Integrações</p>
-        <h2>Histórico de integrações</h2>
+        <p class="section-heading__eyebrow">Aceite e documento</p>
+        <h2>Envios e integrações do documento</h2>
         <p class="page-description">Aqui você acompanha se a ação foi apenas simulada ou realmente disparada.</p>
     </div>
 
@@ -602,8 +616,8 @@ ob_start();
 
     <article class="card" id="logs">
             <div class="section-heading">
-                <p class="section-heading__eyebrow">Logs</p>
-                <h2>Notificações e auditoria</h2>
+                <p class="section-heading__eyebrow">Eventos</p>
+                <h2>Notificações e histórico</h2>
             </div>
 
             <div class="summary-grid" style="margin-bottom: 18px;">
@@ -658,12 +672,10 @@ ob_start();
                         $contextText = is_array($context) ? json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : (string) ($log['context_json'] ?? '');
                     ?>
                     <article class="log-list__item">
-                        <strong><?= htmlspecialchars((string) ($log['action'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <strong><?= htmlspecialchars($auditLabel((string) ($log['action'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></strong>
                         <p><?= htmlspecialchars((string) ($log['entity_type'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> #<?= htmlspecialchars((string) ($log['entity_id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['actor_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
                         <p><?= htmlspecialchars((string) ($log['ip_address'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
-                        <?php if ($contextText !== ''): ?>
-                            <p><?= htmlspecialchars($contextText, ENT_QUOTES, 'UTF-8'); ?></p>
-                        <?php endif; ?>
+                        <?php if ($contextText !== ''): ?><details><summary>Detalhes administrativos</summary><p><?= htmlspecialchars($contextText, ENT_QUOTES, 'UTF-8'); ?></p><small><?= htmlspecialchars((string) ($log['action'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></small></details><?php endif; ?>
                     </article>
                 <?php endforeach; ?>
             <?php else: ?>
