@@ -25,6 +25,11 @@ foreach ($processes as $processCandidate) {
 $login = (string) ($detail['login'] ?? '');
 $h = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 $present = static fn (mixed $value): bool => trim((string) $value) !== '';
+$formatEventTime = static function (mixed $value): string {
+    $value = trim((string) $value);
+    if ($value === '') { return ''; }
+    try { return (new DateTimeImmutable($value))->format('d/m H:i'); } catch (Throwable) { return $value; }
+};
 $formatDocument = static function (string $document): string {
     $digits = preg_replace('/\D+/', '', $document) ?? '';
     if (strlen($digits) === 11) {
@@ -63,11 +68,7 @@ ob_start();
                 <?php if ($present($profile['document'] ?? '')): ?><span><?= $h($formatDocument((string) $profile['document'])); ?></span><?php endif; ?>
             </div>
         </div>
-        <?php if (!empty($canRequestUpgrade)): ?>
-            <a class="button migration-action migration-action--<?= $h($migrationAction['tone'] ?? 'start'); ?>" href="<?= $h(Url::to((string) ($migrationAction['url'] ?? '/clientes/upgrade?login=' . rawurlencode($login)))); ?>">
-                <?= $h($migrationAction['label'] ?? 'Iniciar Upgrade / Migração'); ?>
-            </a>
-        <?php endif; ?>
+        <?php if (!empty($canRequestUpgrade) && !is_array($activeProcess)): ?><a class="button" href="<?= $h(Url::to('/clientes/upgrade?login=' . rawurlencode($login))); ?>">Iniciar Upgrade / Migração</a><?php endif; ?>
     </section>
 
     <?php if (!empty($flash)): ?>
@@ -76,9 +77,12 @@ ob_start();
 
     <?php if (is_array($activeProcess)): ?>
         <?php $active = $activeProcess; ?>
-        <section class="client-alert-strip client-alert-strip--<?= $h(($active['status'] ?? '') === 'attention' ? 'danger' : 'info'); ?>">
-            <div><strong><?= $h($active['type_label'] ?? 'Processo em andamento'); ?></strong><span><?= $h($active['next_pending_label'] ?? 'Revisar processo'); ?></span></div>
-            <a href="<?= $h(Url::to((string) ($active['resume_url'] ?? '/processos/detalhe?id=' . (int) ($active['id'] ?? 0)))); ?>">Abrir pendência</a>
+        <?php $tone = ($active['status'] ?? '') === 'attention' ? 'danger' : (str_starts_with((string) ($active['status'] ?? ''), 'waiting_') ? 'warning' : 'info'); ?>
+        <section class="client-process-panel client-process-panel--<?= $h($tone); ?>" id="upgrade-process">
+            <div class="client-process-panel__identity"><span><?= $h($active['type_label'] ?? 'Processo'); ?> #<?= (int) ($active['id'] ?? 0); ?></span><strong><?= (int) ($active['progress_completed'] ?? 0); ?> de <?= (int) ($active['progress_total'] ?? 0); ?> etapas concluídas</strong></div>
+            <div><span>Situação</span><strong><?= $h($active['status_label'] ?? 'Em andamento'); ?></strong></div>
+            <div><span>Próxima ação</span><strong><?= $h($active['next_pending_label'] ?? 'Revisar processo'); ?></strong></div>
+            <a class="button button--small" href="<?= $h(Url::to((string) ($active['resume_url'] ?? '/processos/migracao?id=' . (int) ($active['id'] ?? 0)))); ?>">Continuar processo</a>
         </section>
     <?php endif; ?>
 
@@ -158,7 +162,7 @@ ob_start();
         <div class="section-heading"><p class="section-heading__eyebrow">Linha do tempo</p><h2>Eventos recentes</h2></div>
         <?php if ($timeline === []): ?><p class="page-description">Nenhum evento local encontrado.</p><?php endif; ?>
         <?php foreach (array_slice($timeline, 0, 12) as $event): ?>
-            <article><time><?= $h($event['time'] ?? ''); ?></time><div><strong><?= $h($event['label'] ?? 'Evento'); ?></strong><?php if ($present($event['description'] ?? '')): ?><p><?= $h($event['description']); ?></p><?php endif; ?></div></article>
+            <article><time><?= $h($formatEventTime($event['time'] ?? '')); ?></time><div><strong><?= $h($event['label'] ?? 'Evento'); ?></strong><?php if ($present($event['description'] ?? '')): ?><p><?= $h($event['description']); ?></p><?php endif; ?></div></article>
         <?php endforeach; ?>
         <?php if ($processes !== []): ?><a class="button button--ghost button--small" href="<?= $h(Url::to('/processos/detalhe?id=' . (int) ($processes[0]['id'] ?? 0))); ?>">Ver checklist técnico completo</a><?php endif; ?>
     </section>
@@ -174,7 +178,10 @@ ob_start();
                             <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
                         <?php endforeach; ?>
                     </dl>
-                    <?php foreach ((array) ($profile['phones'] ?? []) as $phone): ?><div class="contact-row"><strong><?= $h($phone); ?></strong><button type="button" data-copy-value="<?= $h($phone); ?>">Copiar</button></div><?php endforeach; ?>
+                    <?php foreach ((array) ($profile['phone_contacts'] ?? []) as $contact): ?>
+                        <?php $phone = (string) ($contact['value'] ?? ''); $digits = preg_replace('/\D+/', '', $phone) ?? ''; $validPhone = strlen($digits) >= 10 && strlen($digits) <= 13; $international = str_starts_with($digits, '55') ? $digits : '55' . $digits; ?>
+                        <div class="contact-row"><span><small><?= $h($contact['label'] ?? 'Telefone'); ?></small><strong><?= $h($phone); ?></strong></span><span><?php if ($validPhone): ?><a href="tel:+<?= $h($international); ?>">Ligar</a><a href="https://wa.me/<?= $h($international); ?>" target="_blank" rel="noopener noreferrer">WhatsApp</a><?php endif; ?><button type="button" data-copy-value="<?= $h($phone); ?>">Copiar</button></span></div>
+                    <?php endforeach; ?>
                     <?php foreach ((array) ($profile['emails'] ?? []) as $email): ?><div class="contact-row"><strong><?= $h($email); ?></strong><button type="button" data-copy-value="<?= $h($email); ?>">Copiar</button></div><?php endforeach; ?>
                 <?php elseif ($panelKey === 'connection'): ?>
                     <div data-lazy-client-detail="connection" data-url="<?= $h(Url::to('/clientes/detalhe/conexao?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes de conexão…</p></div>
