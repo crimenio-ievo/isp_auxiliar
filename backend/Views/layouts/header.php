@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Core\Csrf;
+use App\Core\Url;
+
 $layoutMode = $layoutMode ?? 'app';
 $user = $user ?? ['name' => 'Convidado', 'role' => 'Sem sessao'];
 $role = strtolower((string) ($user['role'] ?? ''));
@@ -11,6 +14,13 @@ $roleLabel = match ($role) {
     'technician' => 'Tecnico',
     default => (string) ($user['role'] ?? 'Sem sessao'),
 };
+$releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
+$releaseChannel = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
+$releasePreference = (string) ($_SESSION['release_channel_preference'] ?? $releaseChannel);
+$releasePreference = in_array($releasePreference, ['stable', 'beta'], true) ? $releasePreference : 'stable';
+$access = is_array($user['access'] ?? null) ? $user['access'] : [];
+$canUseBeta = !empty($access['can_use_beta'])
+    || in_array($role, ['manager', 'gestor', 'admin', 'platform_admin', 'administrador'], true);
 ?>
 <header class="topbar<?= $layoutMode === 'guest' ? ' topbar--guest' : ''; ?>">
     <?php if ($layoutMode !== 'guest'): ?>
@@ -28,6 +38,17 @@ $roleLabel = match ($role) {
 
     <div class="topbar__actions">
         <?php if ($layoutMode !== 'guest'): ?>
+            <form class="release-channel-selector" method="post" action="<?= htmlspecialchars(Url::to('/canal-versao'), ENT_QUOTES, 'UTF-8'); ?>">
+                <?= Csrf::field('release_channel'); ?>
+                <label for="release-channel">Canal</label>
+                <select id="release-channel" name="release_channel" aria-label="Canal de versão">
+                    <option value="stable"<?= $releasePreference === 'stable' ? ' selected' : ''; ?>>Stable</option>
+                    <?php if ($canUseBeta): ?>
+                        <option value="beta"<?= $releasePreference === 'beta' ? ' selected' : ''; ?>>Beta</option>
+                    <?php endif; ?>
+                </select>
+                <button class="button button--ghost button--small" type="submit">Alternar</button>
+            </form>
             <div class="topbar__user">
                 <span class="avatar"><?= htmlspecialchars(substr((string) $user['name'], 0, 1), ENT_QUOTES, 'UTF-8'); ?></span>
                 <div>

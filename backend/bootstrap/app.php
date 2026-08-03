@@ -32,6 +32,7 @@ use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\MkAuth\MkAuthPlanChangeService;
 use App\Services\Processes\OperationalProcessService;
+use App\Services\Releases\ReleaseChannelService;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -67,6 +68,10 @@ function bootstrapApplication(): Application
         'evotrix' => require __DIR__ . '/../config/evotrix.php',
         'email' => require __DIR__ . '/../config/email.php',
     ]);
+
+    if (!defined('APP_RELEASE_INFO')) {
+        define('APP_RELEASE_INFO', (array) $config->get('app.release', []));
+    }
 
     date_default_timezone_set((string) $config->get('app.timezone', 'UTC'));
 
@@ -194,6 +199,7 @@ function bootstrapApplication(): Application
         $container->get(FinancialTaskRepository::class),
         $localRepository
     ));
+    $container->set(ReleaseChannelService::class, new ReleaseChannelService($config, $localRepository));
 
     $router = new Router();
     $registerRoutes = require __DIR__ . '/../routes.php';

@@ -11,6 +11,8 @@ $hideFooter = !empty($hideFooter);
 $hideHeader = !empty($hideHeader);
 $bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
 $basePath = Url::basePath();
+$releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
+$isBetaRelease = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta';
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -21,9 +23,15 @@ $basePath = Url::basePath();
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=20260612a'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=20260803a'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if ($isBetaRelease): ?>
+        <aside class="beta-environment-banner" role="status" aria-label="Ambiente Beta">
+            <strong>AMBIENTE BETA</strong>
+            <span>Recursos em homologação. Verifique os dados antes de concluir operações.</span>
+        </aside>
+    <?php endif; ?>
     <?php if (!$hideHeader): ?>
         <?php require __DIR__ . '/header.php'; ?>
     <?php endif; ?>
@@ -41,6 +49,6 @@ $basePath = Url::basePath();
         </main>
     </div>
 
-    <script src="<?= htmlspecialchars(Url::asset('js/app.js?v=20260429a'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
+    <script src="<?= htmlspecialchars(Url::asset('js/app.js?v=20260803a'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 </body>
 </html>
