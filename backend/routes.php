@@ -59,6 +59,11 @@ return static function (Router $router): void {
     $router->post('/processos/etapa', [OperationalProcessController::class, 'updateStep'], 'processes.step.update');
     $router->post('/processos/concluir', [OperationalProcessController::class, 'complete'], 'processes.complete');
     $router->post('/processos/cancelar', [OperationalProcessController::class, 'cancel'], 'processes.cancel');
+    $router->post('/processos/migracao/execucao', [OperationalProcessController::class, 'completeTechnicalExecution'], 'processes.migration.technical');
+    $router->post('/processos/migracao/finalizar-tecnico', [OperationalProcessController::class, 'finalizeTechnicalService'], 'processes.migration.finalize');
+    $router->post('/processos/migracao/corrigir-contato', [OperationalProcessController::class, 'correctMigrationContact'], 'processes.migration.contact.correct');
+    $router->get('/processos/migracao/evidencia', [OperationalProcessController::class, 'evidenceFile'], 'processes.migration.evidence');
+    $router->post('/processos/migracao/evidencia/remover', [OperationalProcessController::class, 'removeEvidence'], 'processes.migration.evidence.remove');
     $router->get('/clientes/upgrade', [ClientController::class, 'upgrade'], 'clients.upgrade');
     $router->post('/clientes/upgrade', [ClientController::class, 'storeUpgrade'], 'clients.upgrade.store');
     $router->post('/clientes/migracao/aceite-preparar', [ClientController::class, 'prepareMigrationAcceptance'], 'clients.migration.acceptance.prepare');
@@ -88,4 +93,5 @@ return static function (Router $router): void {
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');
     $router->get('/api/health', [SystemController::class, 'health'], 'api.health');
+    $router->get('/api/release', [SystemController::class, 'release'], 'api.release');
 };

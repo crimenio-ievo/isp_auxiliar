@@ -3498,6 +3498,18 @@ document.querySelectorAll('[data-copy-value]').forEach((button) => {
     });
 });
 
+const migrationCancelDialog = document.querySelector('[data-migration-cancel-dialog]');
+if (migrationCancelDialog instanceof HTMLDialogElement) {
+    document.querySelector('[data-open-migration-cancel]')?.addEventListener('click', () => {
+        migrationCancelDialog.showModal();
+        migrationCancelDialog.querySelector('textarea[name="reason"]')?.focus();
+    });
+    migrationCancelDialog.querySelector('[data-close-migration-cancel]')?.addEventListener('click', () => migrationCancelDialog.close());
+    migrationCancelDialog.addEventListener('click', (event) => {
+        if (event.target === migrationCancelDialog) migrationCancelDialog.close();
+    });
+}
+
 const clientHub = document.querySelector('[data-client-hub]');
 if (clientHub instanceof HTMLElement) {
     const modal = clientHub.querySelector('[data-client-modal]');
@@ -3864,6 +3876,7 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
     const adhesionBenefit = simpleUpgradeForm.querySelector('[data-adhesion-benefit]');
     const manualWaiver = simpleUpgradeForm.querySelector('[data-manual-waiver]');
     const benefitInput = simpleUpgradeForm.querySelector('input[name="valor_beneficio"]');
+    const retentionInput = simpleUpgradeForm.querySelector('input[name="retention_condition"]');
 
     const parseSpeed = (raw) => {
         const match = String(raw || '').toLowerCase().match(/([0-9]+(?:[.,][0-9]+)?)\s*([kmg])?/);
@@ -3928,6 +3941,14 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
             }
         }
         operationOutput.textContent = operation || 'Sem mudança efetiva — escolha outro plano';
+        if (retentionInput instanceof HTMLInputElement && retentionInput.dataset.manualTouched !== '1') {
+            retentionInput.checked = operation === 'Downgrade' && simpleUpgradeForm.dataset.suggestRetentionDowngrade === '1';
+        }
+        if (fidelityToggle instanceof HTMLInputElement && fidelityToggle.dataset.manualTouched !== '1') {
+            fidelityToggle.checked = (operation === 'Migração' && simpleUpgradeForm.dataset.autoFidelityMigration === '1')
+                || (operation === 'Upgrade' && simpleUpgradeForm.dataset.autoFidelityUpgrade === '1');
+            updateFidelity();
+        }
         updateAdhesion(newFamily);
     };
 
@@ -3952,6 +3973,8 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
 
     planSelect?.addEventListener('change', updateOperation);
     fidelityToggle?.addEventListener('change', updateFidelity);
+    fidelityToggle?.addEventListener('change', () => { fidelityToggle.dataset.manualTouched = '1'; });
+    retentionInput?.addEventListener('change', () => { retentionInput.dataset.manualTouched = '1'; });
     planSearch?.addEventListener('input', filterPlans);
     manualWaiver?.querySelector('input')?.addEventListener('change', updateOperation);
     updateOperation();

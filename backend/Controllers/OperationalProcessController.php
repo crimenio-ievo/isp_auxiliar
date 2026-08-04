@@ -17,6 +17,9 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Services\MkAuth\MkAuthPlanChangeService;
 use App\Services\Processes\OperationalProcessService;
+use App\Services\Processes\MigrationJourneyService;
+use App\Services\Processes\MigrationEvidenceService;
+use App\Services\Processes\MigrationFinalizationService;
 
 final class OperationalProcessController
 {
@@ -29,7 +32,10 @@ final class OperationalProcessController
         private ContractRepository $contractRepository,
         private ContractAcceptanceRepository $acceptanceRepository,
         private FinancialTaskRepository $financialTaskRepository,
-        private MkAuthDatabase $mkauthDatabase
+        private MkAuthDatabase $mkauthDatabase,
+        private ?MigrationJourneyService $journeyService = null,
+        private ?MigrationEvidenceService $evidenceService = null,
+        private ?MigrationFinalizationService $finalizationService = null
     ) {
     }
 
@@ -120,6 +126,11 @@ final class OperationalProcessController
         $stepKey = trim((string) $request->query('step', ''));
         if ($stepKey === '') {
             $stepKey = (string) ($process['next_pending_key'] ?? $process['current_step_key'] ?? 'migration_data');
+        } elseif (in_array($stepKey, ['prepare_document', 'send_acceptance', 'confirm_acceptance'], true)
+            && (string) ($process['next_pending_key'] ?? '') === 'technical_execution'
+        ) {
+            // O aceite confirmado avança no mesmo workspace, sem uma segunda tela redundante.
+            $stepKey = 'technical_execution';
         }
         $steps = array_values((array) ($process['steps'] ?? []));
         $activeStep = null;
@@ -180,6 +191,12 @@ final class OperationalProcessController
             'dryRun' => $dryRun,
             'csrfToken' => Csrf::token($this->csrfScope((int) $process['id'])),
             'canOverride' => $this->canOverride(),
+            'journey' => ($this->journeyService ?? new MigrationJourneyService())->project($process, $stepKey),
+            'editContact' => (string) $request->query('edit_contact', '') === '1',
+            'notificationDryRun' => [
+                'whatsapp' => (bool) $this->config->get('evotrix.dry_run', true),
+                'email' => (bool) $this->config->get('email.dry_run', true),
+            ],
         ]));
     }
 
@@ -384,6 +401,215 @@ final class OperationalProcessController
         return Response::redirect('/processos/detalhe?id=' . $processId);
     }
 
+    public function completeTechnicalExecution(Request $request): Response
+    {
+        $processId = (int) $request->input('process_id', 0);
+        $process = $this->loadAuthorizedProcess($processId);
+        if ($process instanceof Response) {
+            return $process;
+        }
+        if (!Csrf::verify($request, $this->csrfScope($processId)) || !$this->canUpdateStep($process, 'technical_execution')) {
+            Flash::set('error', 'Sessão expirada ou usuário sem permissão para concluir a execução técnica.');
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+        }
+
+        $serviceExecuted = trim((string) $request->input('service_executed', ''));
+        $equipmentInstalled = trim((string) $request->input('equipment_installed', ''));
+        $equipmentRemoved = trim((string) $request->input('equipment_removed', ''));
+        $equipmentReference = trim((string) $request->input('equipment_reference', ''));
+        $observation = trim((string) $request->input('observation', ''));
+        $pendingReason = trim((string) $request->input('pending_reason', ''));
+        $nextAction = trim((string) $request->input('next_action', ''));
+        $responsibleLogin = trim((string) $request->input('responsible_login', ''));
+        $pendingDueDate = trim((string) $request->input('pending_due_date', ''));
+        if ($serviceExecuted === '' || $equipmentInstalled === '') {
+            Flash::set('error', 'Informe o serviço executado e o equipamento instalado.');
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+        }
+
+        $operator = $this->resolveUser();
+        $evidenceService = $this->evidenceService ?? new MigrationEvidenceService($this->config);
+        $advanceToFinalization = true;
+        try {
+            $files = $evidenceService->store($processId, 'technical_execution', (array) ($_FILES['evidence_files'] ?? []), $operator);
+            $technicalStep = $this->findStep($process, 'technical_execution');
+            $existingEvidence = is_array($technicalStep['evidence'] ?? null) ? $technicalStep['evidence'] : [];
+            $evidence = array_replace($existingEvidence, [
+                'service_executed' => $serviceExecuted,
+                'equipment_installed' => $equipmentInstalled,
+                'equipment_removed' => $equipmentRemoved,
+                'equipment_reference' => $equipmentReference,
+                'pending_due_date' => $pendingDueDate,
+                'files' => array_values(array_merge((array) ($existingEvidence['files'] ?? []), $files)),
+            ]);
+            $this->processService->updateStep($processId, 'technical_execution', 'complete', [
+                'observation' => $observation !== '' ? $observation : $serviceExecuted,
+                'external_reference' => $equipmentReference,
+                'evidence' => $evidence,
+            ], $operator);
+            $this->processService->updateStep($processId, 'confirm_equipment', $pendingReason === '' ? 'complete' : 'defer', [
+                'observation' => 'Equipamento conferido na execução técnica unificada.',
+                'pending_reason' => $pendingReason,
+                'next_action' => $nextAction,
+                'responsible_login' => $responsibleLogin,
+                'external_reference' => $equipmentReference,
+                'evidence' => [
+                    'equipment_installed' => $equipmentInstalled,
+                    'equipment_removed' => $equipmentRemoved,
+                    'equipment_reference' => $equipmentReference,
+                    'source_step' => 'technical_execution',
+                    'pending_due_date' => $pendingDueDate,
+                ],
+            ], $operator);
+
+            try {
+                $connection = $this->mkauthDatabase->radiusConnectionStatus((string) ($process['mkauth_login'] ?? ''));
+            } catch (\Throwable) {
+                $connection = ['available' => false, 'online' => false];
+            }
+            if (!empty($connection['online'])) {
+                $this->processService->updateStep($processId, 'validate_connection', 'complete', [
+                    'observation' => 'PPPoE online confirmado por consulta somente leitura.',
+                    'evidence' => ['online' => true, 'source' => 'radius_readback', 'checked_at' => date('Y-m-d H:i:s')],
+                ], $operator);
+                Flash::set('success', 'Execução técnica e equipamento concluídos. PPPoE online confirmado.');
+            } else {
+                $offlineJustification = trim((string) $request->input('offline_justification', ''));
+                $authorized = (string) $request->input('offline_override', '') === '1' && $this->canOverride();
+                $advanceToFinalization = $authorized && $offlineJustification !== '';
+                $this->processService->updateStep($processId, 'validate_connection', $authorized && $offlineJustification !== '' ? 'complete' : 'attention', [
+                    'observation' => $offlineJustification,
+                    'pending_reason' => 'PPPoE offline ou indisponível após a execução técnica.',
+                    'next_action' => 'Reconectar o equipamento e atualizar a situação.',
+                    'evidence' => [
+                        'online' => false,
+                        'available' => (bool) ($connection['available'] ?? false),
+                        'authorized_exception' => $authorized && $offlineJustification !== '',
+                        'checked_at' => date('Y-m-d H:i:s'),
+                    ],
+                ], $operator);
+                Flash::set('warning', 'Execução técnica salva. O PPPoE continua offline ou indisponível e ficará destacado na Finalização.');
+            }
+        } catch (\Throwable $exception) {
+            Flash::set('error', $exception->getMessage());
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+        }
+
+        if (!$advanceToFinalization) {
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+        }
+
+        return (string) $request->input('continue_to', '') === 'exit'
+            ? Response::redirect('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')))
+            : Response::redirect('/processos/migracao?id=' . $processId . '&step=change_plan');
+    }
+
+    public function finalizeTechnicalService(Request $request): Response
+    {
+        $processId = (int) $request->input('process_id', 0);
+        $process = $this->loadAuthorizedProcess($processId);
+        if ($process instanceof Response) {
+            return $process;
+        }
+        if (!Csrf::verify($request, $this->csrfScope($processId)) || !$this->canCompleteProcess()) {
+            Flash::set('error', 'Sessão expirada ou usuário sem permissão para finalizar o atendimento.');
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=change_plan');
+        }
+        if (!$this->finalizationService instanceof MigrationFinalizationService) {
+            Flash::set('error', 'Orquestração da finalização indisponível.');
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=change_plan');
+        }
+        try {
+            $result = $this->finalizationService->run(
+                $processId,
+                $this->resolveUser(),
+                trim((string) $request->input('request_id', ''))
+            );
+            Flash::set(in_array((string) ($result['status'] ?? ''), ['attention', 'waiting_mkauth'], true) ? 'warning' : 'success', (string) ($result['message'] ?? 'Finalização atualizada.'));
+        } catch (\Throwable $exception) {
+            Flash::set('error', $exception->getMessage());
+        }
+
+        return Response::redirect('/processos/migracao?id=' . $processId . '&step=change_plan');
+    }
+
+    public function correctMigrationContact(Request $request): Response
+    {
+        $processId = (int) $request->input('process_id', 0);
+        $returnTo = '/processos/migracao?id=' . $processId . '&step=confirm_acceptance';
+        $process = $this->loadAuthorizedProcess($processId);
+        if ($process instanceof Response) {
+            return $process;
+        }
+        if (!Csrf::verify($request, $this->csrfScope($processId)) || !$this->canUpdateStep($process, 'confirm_acceptance')) {
+            Flash::set('error', 'Sessão expirada ou usuário sem permissão para corrigir o contato.');
+            return Response::redirect($returnTo);
+        }
+
+        try {
+            $this->processService->updateMigrationContacts(
+                $processId,
+                (string) $request->input('phone', ''),
+                (string) $request->input('email', ''),
+                (string) $request->input('reason', ''),
+                $this->resolveUser()
+            );
+            Flash::set('success', 'Contato corrigido com auditoria. O mesmo processo e aceite foram preservados.');
+        } catch (\Throwable $exception) {
+            Flash::set('error', $exception->getMessage());
+            return Response::redirect($returnTo . '&edit_contact=1');
+        }
+
+        return Response::redirect($returnTo);
+    }
+
+    public function evidenceFile(Request $request): Response
+    {
+        $process = $this->loadAuthorizedProcess((int) $request->query('process_id', 0));
+        if ($process instanceof Response) {
+            return $process;
+        }
+        $step = $this->findStep($process, 'technical_execution');
+        $file = ($this->evidenceService ?? new MigrationEvidenceService($this->config))->resolve(
+            is_array($step['evidence'] ?? null) ? $step['evidence'] : [],
+            trim((string) $request->query('evidence_id', ''))
+        );
+        if (!is_array($file)) {
+            return Response::html('Evidência não localizada.', 404);
+        }
+
+        return new Response((string) file_get_contents((string) $file['absolute_path']), 200, [
+            'Content-Type' => (string) $file['mime_type'],
+            'Content-Disposition' => 'inline; filename="' . addslashes((string) $file['original_name']) . '"',
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "sandbox; default-src 'none'",
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
+
+    public function removeEvidence(Request $request): Response
+    {
+        $processId = (int) $request->input('process_id', 0);
+        $process = $this->loadAuthorizedProcess($processId);
+        if ($process instanceof Response) {
+            return $process;
+        }
+        if (!Csrf::verify($request, $this->csrfScope($processId)) || !$this->canUpdateStep($process, 'technical_execution')) {
+            Flash::set('error', 'Não foi possível autorizar a remoção da evidência.');
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+        }
+        $step = $this->findStep($process, 'technical_execution');
+        $evidence = is_array($step['evidence'] ?? null) ? $step['evidence'] : [];
+        $updated = ($this->evidenceService ?? new MigrationEvidenceService($this->config))->remove(
+            $evidence,
+            trim((string) $request->input('evidence_id', ''))
+        );
+        $this->processService->replaceStepEvidence($processId, 'technical_execution', $updated, $this->resolveUser());
+        Flash::set('success', 'Evidência removida antes da conclusão.');
+
+        return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+    }
+
     public function cancel(Request $request): Response
     {
         $processId = (int) $request->input('process_id', 0);
@@ -400,18 +626,48 @@ final class OperationalProcessController
             return Response::redirect('/processos/detalhe?id=' . $processId);
         }
 
+        $cancelled = false;
         try {
+            $acceptance = (int) ($process['acceptance_id'] ?? 0) > 0
+                ? $this->acceptanceRepository->findById((int) $process['acceptance_id'])
+                : null;
+            $accepted = is_array($acceptance)
+                && (string) ($acceptance['status'] ?? '') === 'aceito'
+                && trim((string) ($acceptance['revoked_at'] ?? '')) === '';
+            $externalActions = ($this->journeyService ?? new MigrationJourneyService())->hasExternalActions($process);
+            if ($accepted && (string) $request->input('confirm_accepted', '') !== '1') {
+                throw new \RuntimeException('Confirme que o documento aceito será preservado como cancelado ou substituído.');
+            }
+            if ($externalActions) {
+                if (!$this->canOverride() || (string) $request->input('confirm_external', '') !== '1') {
+                    throw new \RuntimeException('Ações externas já executadas exigem confirmação e permissão gerencial.');
+                }
+                if (trim((string) $request->input('reversal_justification', '')) === '') {
+                    throw new \RuntimeException('Informe a pendência de correção ou reversão das ações externas.');
+                }
+            }
             $this->processService->cancelProcess(
                 $processId,
                 $this->resolveUser(),
                 trim((string) $request->input('reason', ''))
+                    . ($externalActions ? ' Pendência de correção/reversão: ' . trim((string) $request->input('reversal_justification', '')) : '')
             );
+            $cancelled = true;
             Flash::set('success', 'Processo cancelado. O histórico foi preservado.');
         } catch (\Throwable $exception) {
             Flash::set('error', $exception->getMessage());
         }
 
-        return Response::redirect('/processos/detalhe?id=' . $processId);
+        if ($cancelled && (string) $request->input('after_cancel', 'client') === 'restart'
+            && (string) ($process['process_type'] ?? '') === OperationalProcessService::TYPE_MIGRATION
+            && (string) ($process['status'] ?? '') !== 'completed'
+        ) {
+            return Response::redirect('/clientes/upgrade?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')) . '&new_after_cancel=1');
+        }
+
+        return (string) ($process['mkauth_login'] ?? '') !== ''
+            ? Response::redirect('/clientes/detalhe?login=' . rawurlencode((string) $process['mkauth_login']))
+            : Response::redirect('/processos/detalhe?id=' . $processId);
     }
 
     private function loadAuthorizedProcess(int $processId): array|Response
@@ -437,6 +693,17 @@ final class OperationalProcessController
 
         return !empty($access['can_search_clients'])
             && (!empty($access['can_view_contracts']) || !empty($access['can_upgrade_request']));
+    }
+
+    private function findStep(array $process, string $stepKey): array
+    {
+        foreach ((array) ($process['steps'] ?? []) as $step) {
+            if (is_array($step) && (string) ($step['step_key'] ?? '') === $stepKey) {
+                return $step;
+            }
+        }
+
+        return [];
     }
 
     private function canOverride(): bool

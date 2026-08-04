@@ -33,6 +33,9 @@ use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\MkAuth\MkAuthPlanChangeService;
 use App\Services\Processes\OperationalProcessService;
+use App\Services\Processes\MigrationJourneyService;
+use App\Services\Processes\MigrationEvidenceService;
+use App\Services\Processes\MigrationFinalizationService;
 use App\Services\Releases\ReleaseChannelService;
 
 /**
@@ -205,6 +208,16 @@ function bootstrapApplication(): Application
         $container->get(ContractAcceptanceRepository::class),
         $container->get(FinancialTaskRepository::class),
         $localRepository
+    ));
+    $container->set(MigrationJourneyService::class, new MigrationJourneyService());
+    $container->set(MigrationEvidenceService::class, new MigrationEvidenceService($config));
+    $container->set(MigrationFinalizationService::class, new MigrationFinalizationService(
+        $container->get(OperationalProcessService::class),
+        $container->get(MkAuthPlanChangeService::class),
+        $container->get(ClientPlanConfirmationService::class),
+        $container->get(MkAuthDatabase::class),
+        $container->get(MkAuthTicketService::class),
+        $container->get(FinancialTaskRepository::class)
     ));
     $container->set(ReleaseChannelService::class, new ReleaseChannelService($config, $localRepository));
 
