@@ -21,8 +21,8 @@ Nenhum comando desta página foi executado contra Stable/Beta real. Use primeiro
 scripts/releases/install_beta.sh --repository REPO --commit HASH --dry-run
 scripts/releases/update_beta.sh --dir /var/www/html/isp_auxiliar_beta --commit HASH --dry-run
 scripts/releases/rollback_beta.sh --dir /var/www/html/isp_auxiliar_beta --commit HASH_ANTERIOR --dry-run
-scripts/releases/promote_beta_to_stable.sh --dir /var/www/html/isp_auxiliar --commit HASH_HOMOLOGADO --dry-run
-scripts/releases/rollback_stable.sh --dir /var/www/html/isp_auxiliar --commit HASH_ANTERIOR --dry-run
+scripts/releases/promote_beta_to_stable.sh --dir CAMINHO_STABLE_CONFIRMADO --commit HASH_HOMOLOGADO --dry-run
+scripts/releases/rollback_stable.sh --dir CAMINHO_STABLE_CONFIRMADO --commit HASH_ANTERIOR --dry-run
 scripts/releases/health_check.sh --url https://URL --cookie-file COOKIE_ADMIN
 ```
 

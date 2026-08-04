@@ -17,12 +17,17 @@ e conciliação da árvore.
 
 ## Topologia preparada
 
-Primeira instalação recomendada:
+Topologia compatível com os diretórios realmente encontrados:
 
 ```text
-/var/www/html/isp_auxiliar          checkout Stable mantido no caminho vigente
+/var/www/html/isp_auxiliar_producao checkout candidato à Stable, sem renomear
 /var/www/html/isp_auxiliar_beta     clone/check-out Beta independente
+/var/www/html/isp_auxiliar          checkout de desenvolvimento atual; não usar como alvo Stable
 ```
+
+Os scripts de promoção/rollback exigem `--dir` para a Stable exatamente porque o
+caminho encontrado difere da topologia inicialmente sugerida. O vínculo do
+checkout `_producao` ao endpoint público deve ser confirmado antes de executar.
 
 Como o vhost atual expõe a raiz inteira, um vhost/subdomínio Beta separado é mais
 seguro do que ampliar aliases no mesmo host. O template está em
