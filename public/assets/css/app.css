@@ -15,7 +15,7 @@
     --radius-lg: 18px;
     --radius-md: 14px;
     --radius-sm: 10px;
-    --sidebar-expanded: 172px;
+    --sidebar-expanded: 156px;
     --sidebar-compact: 64px;
     --sidebar-width: var(--sidebar-expanded);
     --content-max-width: 1680px;
@@ -27,8 +27,8 @@
     --button-height-mobile: 46px;
     --font-base: 0.875rem;
     --font-small: 0.78rem;
-    --title-page: clamp(1.45rem, 1.8vw, 2rem);
-    --title-section: clamp(1.05rem, 1.2vw, 1.3rem);
+    --title-page: clamp(1.55rem, 1.8vw, 1.75rem);
+    --title-section: clamp(1.06rem, 1.2vw, 1.2rem);
     --modal-radius: 16px;
 }
 
@@ -3295,6 +3295,14 @@ body.client-panel-open {
     gap: 10px;
 }
 
+.checkbox-field > input[type="checkbox"],
+.checkbox-field > input[type="radio"] {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    margin-top: 2px;
+}
+
 .checkbox-field > span {
     display: grid;
     gap: 3px;
@@ -3577,6 +3585,7 @@ body.client-panel-open {
     overflow-x: auto;
 }
 
+.migration-phase-legend a,
 .migration-phase-legend span {
     display: inline-flex;
     align-items: center;
@@ -3614,7 +3623,7 @@ body.client-panel-open {
 .migration-workspace__grid {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(280px, 23vw, 360px);
+    grid-template-columns: minmax(0, 1fr) clamp(270px, 20vw, 300px);
     align-items: start;
     gap: var(--section-gap);
     min-width: 0;
@@ -3744,6 +3753,104 @@ body.client-panel-open {
 
 .migration-checklist__step--warning > span:first-child { background: #fef3c7; color: #92400e; }
 .migration-checklist__step--danger > span:first-child { background: #fee2e2; color: #b91c1c; }
+
+.migration-technical-details {
+    margin-top: 10px;
+    border-top: 1px solid var(--border);
+    padding: 10px 4px 0;
+}
+
+.migration-technical-details summary,
+.commercial-adjustments summary,
+.migration-pending-details summary {
+    cursor: pointer;
+    color: var(--primary);
+    font-weight: 800;
+}
+
+.migration-technical-details ol {
+    display: grid;
+    gap: 5px;
+    margin: 10px 0 0;
+    padding-left: 22px;
+}
+
+.migration-technical-details li {
+    padding-left: 3px;
+}
+
+.migration-technical-details li span,
+.migration-technical-details li small {
+    display: block;
+}
+
+.migration-technical-details li small { color: var(--muted); }
+
+.commercial-adjustments {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+
+.commercial-adjustments > .form-grid { margin-top: 12px; }
+
+.automatic-condition-list {
+    display: grid;
+    gap: 5px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.migration-finalization-progress,
+.migration-evidence-list {
+    display: grid;
+    gap: 8px;
+}
+
+.migration-finalization-progress h3,
+.migration-evidence-list h3 { margin: 0 0 4px; }
+
+.migration-finalization-progress__item,
+.migration-evidence-list article {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: var(--surface-muted);
+}
+
+.migration-evidence-thumb {
+    width: 48px;
+    height: 38px;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.migration-finalization-progress__item small,
+.migration-evidence-list small { color: var(--muted); }
+.migration-finalization-progress__item--completed { color: #166534; background: var(--success-soft); }
+.migration-finalization-progress__item--attention { color: #991b1b; background: var(--danger-soft); }
+.migration-finalization-progress__item--waiting { color: #92400e; background: #fef3c7; }
+
+.migration-cancel-dialog {
+    width: min(620px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    padding: 18px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--modal-radius);
+    color: var(--text);
+    background: #fff;
+    box-shadow: var(--shadow);
+}
+
+.migration-cancel-dialog::backdrop { background: rgb(15 23 42 / 48%); }
+.button--danger { color: #fff; border-color: #b91c1c; background: #b91c1c; }
 
 .acceptance-state-card,
 .connection-status-compact {
@@ -3882,6 +3989,9 @@ body.client-panel-open {
     .card { padding: 13px; }
     .client-catalog-card { min-height: 138px; }
     .migration-checklist { top: 68px; max-height: calc(100vh - 76px); }
+    .migration-workspace__header { gap: 10px; }
+    .migration-phase-legend a { min-height: 28px; padding-block: 3px; }
+    .migration-workspace__actions { padding-top: 8px; }
 }
 
 @page {
