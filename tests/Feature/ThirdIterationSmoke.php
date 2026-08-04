@@ -16,6 +16,7 @@ use App\Services\Contracts\AcceptanceEvidenceService;
 use App\Services\Contracts\ContractScannerService;
 use App\Services\MkAuth\MkAuthPlanChangeService;
 use App\Services\Notifications\NotificationTemplateService;
+use App\Services\Processes\MigrationJourneyService;
 
 require dirname(__DIR__, 2) . '/backend/bootstrap/app.php';
 
@@ -127,9 +128,10 @@ try {
         'pageTitle' => 'Migração', 'currentPath' => '/processos/migracao', 'basePath' => '', 'appName' => 'Teste', 'user' => ['name' => 'Teste'], 'flash' => null,
         'process' => ['id' => 9, 'status' => 'waiting_client', 'client_name' => 'Cliente', 'mkauth_login' => 'cliente', 'progress_completed' => 3, 'progress_total' => 11, 'progress_percent' => 27, 'metadata' => ['migration' => ['operation_type' => 'migration', 'current_plan_name' => 'R10', 'new_plan_name' => 'F100', 'current_monthly_value' => 80, 'new_monthly_value' => 100], 'client' => ['email' => 'a@example.test']], 'steps' => $migrationSteps],
         'activeStep' => $activeMigrationStep, 'previousStep' => $migrationSteps[2], 'nextStep' => $migrationSteps[4], 'contract' => ['id' => 1, 'nome_cliente' => 'Cliente'], 'acceptance' => ['id' => 2, 'status' => 'criado', 'token_hash' => str_repeat('a', 64), 'telefone_enviado' => '5531999991111'], 'financialTask' => [], 'connection' => [], 'dryRun' => null, 'csrfToken' => 'csrf', 'canOverride' => true,
+        'journey' => (new MigrationJourneyService())->project(['id' => 9, 'status' => 'waiting_client', 'steps' => $migrationSteps], 'confirm_acceptance'),
     ]);
-    foreach (['Condição', 'Aceite', 'Execução', 'Plano e financeiro'] as $title) $assert(str_contains($migrationHtml, $title), 'Fase compacta ausente: ' . $title);
-    $assert(str_contains($migrationHtml, 'data-migration-workspace') && str_contains($migrationHtml, '11 etapas'), 'Área operacional única não foi renderizada.');
+    foreach (['Nova condição', 'Aceite', 'Execução técnica', 'Finalização'] as $title) $assert(str_contains($migrationHtml, $title), 'Etapa compacta ausente: ' . $title);
+    $assert(str_contains($migrationHtml, 'data-migration-workspace') && str_contains($migrationHtml, 'Ver detalhes técnicos do processo'), 'Área operacional única não foi renderizada.');
     $assert(str_contains($migrationHtml, 'data-signature-canvas') && str_contains($migrationHtml, 'channel_whatsapp') && str_contains($migrationHtml, 'channel_email'), 'Assinatura local e canais não foram agrupados.');
     $assert(!str_contains($migrationHtml, 'Copiar link') && !str_contains($migrationHtml, 'Copiar mensagem'), 'Envio manual por cópia foi exposto.');
 

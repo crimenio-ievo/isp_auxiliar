@@ -406,7 +406,11 @@ try {
         ['id' => (int) $migration['id']]
     ));
     $assert((int) $statusProperty->getValue($migrationResponse) === 200, 'Gestor autorizado não abriu a área única.');
-    $assert(str_contains((string) $bodyProperty->getValue($migrationResponse), '11 etapas'), 'Área única não renderizou o checklist compartilhado.');
+    $migrationBody = (string) $bodyProperty->getValue($migrationResponse);
+    $assert(str_contains($migrationBody, 'Nova condição')
+        && str_contains($migrationBody, 'Execução técnica')
+        && str_contains($migrationBody, 'Finalização')
+        && str_contains($migrationBody, 'Ver detalhes técnicos do processo'), 'Workspace não renderizou as quatro etapas e os detalhes compartilhados.');
 
     $_SESSION['user'] = ['login' => 'teste.viewer', 'name' => 'Viewer', 'role' => 'viewer'];
     $deniedResponse = $processController->detail(new Request(
