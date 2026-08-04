@@ -116,6 +116,14 @@ $createAcceptance = static function (int $contractId, string $version = 'test.fo
 };
 
 $baseViewData = static function (string $login, array $operationalProcesses): array {
+    $activeProcess = null;
+    foreach ($operationalProcesses as $candidate) {
+        if (is_array($candidate) && !in_array((string) ($candidate['status'] ?? ''), ['completed', 'cancelled'], true)) {
+            $activeProcess = $candidate;
+            break;
+        }
+    }
+
     return [
         'pageTitle' => 'Cliente',
         'currentPath' => '/clientes/detalhe',
@@ -151,6 +159,8 @@ $baseViewData = static function (string $login, array $operationalProcesses): ar
             'contracts' => [],
             'digitalContract' => [],
             'operationalProcesses' => $operationalProcesses,
+            'activeProcess' => $activeProcess,
+            'activeFinancialTask' => [],
             'migrationAction' => [],
             'timeline' => [['label' => 'Cliente confirmou o aceite.', 'description' => '', 'time' => '2026-07-31 13:38:00']],
             'acceptanceHistory' => [],
@@ -343,13 +353,16 @@ try {
 
     $check(35, str_contains($activeHtml, 'Principal</small>') && str_contains($activeHtml, 'Ligar · Principal'), 'telefone principal é identificado');
     $check(36, str_contains($activeHtml, 'Alternativo 1</small>') && str_contains($activeHtml, 'Ligar · Alternativo 1'), 'telefones alternativos são identificados');
-    $check(37, substr_count($activeHtml, 'class="client-detail-panel__dialog" role="dialog" aria-modal="true"') === 4, 'modal central possui semântica de abertura');
+    $check(37, substr_count($activeHtml, 'class="client-detail-panel__dialog" role="dialog" aria-modal="true"') === 1
+        && substr_count($activeHtml, 'data-client-panel-template=') === 4
+        && str_contains($activeHtml, 'data-client-modal hidden aria-hidden="true" inert'), 'modal central único inicia fechado e possui quatro conteúdos explícitos');
     $appJs = (string) file_get_contents($rootPath . '/public/assets/js/app.js');
-    $check(38, str_contains($appJs, "querySelectorAll('[data-close-client-panel]')")
+    $check(38, str_contains($appJs, "target.closest('[data-close-client-panel]')")
         && str_contains($appJs, "event.key === 'Escape'")
-        && str_contains($appJs, "activePanel.querySelector('.client-detail-panel__dialog')")
+        && str_contains($appJs, "clientHub.querySelector('[data-client-modal]')")
+        && str_contains($appJs, "document.removeEventListener('keydown', handleClientModalKeydown)")
         && str_contains($appJs, 'document.activeElement === dialog'), 'modal fecha por controle/Escape e mantém Tab no diálogo');
-    $check(39, str_contains($appJs, 'activePanelTrigger.focus({ preventScroll: true })'), 'foco retorna ao cartão de origem');
+    $check(39, str_contains($appJs, 'returnFocus.focus({ preventScroll: true })'), 'foco retorna ao cartão de origem');
     $check(40, substr_count($activeHtml, '<section class="client-process-panel ') === 1 && !str_contains($activeHtml, 'alert alert--warning" id="upgrade-process'), 'cliente exibe apenas um alerta de processo');
     $check(41, !str_contains($contractViewSource, 'Abrir configurações') && str_contains($contractViewSource, 'Ver eventos'), 'detalhe do contrato não exibe botão de configurações');
     $translateAudit = new ReflectionMethod(ClientController::class, 'translateAuditEvent');
