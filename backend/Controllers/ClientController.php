@@ -2496,6 +2496,21 @@ final class ClientController
         } catch (\Throwable) {
             $operationalProcesses = [];
         }
+        $activeProcess = $this->resolveActiveClientProcess($operationalProcesses);
+        $activeFinancialTask = [];
+        $activeContractId = is_array($activeProcess) ? (int) ($activeProcess['contract_id'] ?? 0) : 0;
+        if ($activeContractId > 0) {
+            try {
+                $candidateTask = $this->financialTaskRepository->findByContractId($activeContractId);
+            } catch (\Throwable) {
+                $candidateTask = null;
+            }
+            if (is_array($candidateTask)
+                && !in_array(strtolower((string) ($candidateTask['status'] ?? '')), ['concluido', 'cancelado', 'substituido', 'revogado', 'encerrado', 'dispensado'], true)
+            ) {
+                $activeFinancialTask = $candidateTask;
+            }
+        }
 
         $technology = $this->technologyMapper->describe((string) ($clientProfile['plano_tecnologia'] ?? ''));
         $phones = is_array($clientProfile['phones'] ?? null) ? $clientProfile['phones'] : [];
@@ -2550,10 +2565,12 @@ final class ClientController
             'digitalContract' => $digitalContract,
             'upgradeProcess' => $upgradeProcess,
             'operationalProcesses' => $operationalProcesses,
+            'activeProcess' => $activeProcess,
             'migrationAction' => $migrationAction,
             'acceptance' => $acceptance,
             'acceptanceHistory' => is_array($acceptanceRecords) ? $acceptanceRecords : [],
             'financialTask' => $financialTask,
+            'activeFinancialTask' => $activeFinancialTask,
             'registration' => $registration,
             'checkpoints' => $checkpoints,
             'auditLogs' => $auditLogs,
@@ -2563,6 +2580,50 @@ final class ClientController
                 'local' => $registration !== [] || $checkpoints !== [] || $contracts !== [],
             ],
         ];
+    }
+
+    private function resolveActiveClientProcess(array $processes): ?array
+    {
+        $terminalStatuses = ['completed', 'cancelled', 'superseded', 'revoked', 'closed', 'waived', 'concluida', 'cancelada', 'substituida', 'revogada', 'encerrada', 'dispensada'];
+        foreach ($processes as $candidate) {
+            if (!is_array($candidate)
+                || in_array(strtolower(trim((string) ($candidate['status'] ?? ''))), $terminalStatuses, true)
+            ) {
+                continue;
+            }
+
+            $contractId = (int) ($candidate['contract_id'] ?? 0);
+            if ($contractId > 0) {
+                try {
+                    $contract = $this->contractRepository->findById($contractId);
+                } catch (\Throwable) {
+                    $contract = null;
+                }
+                if (is_array($contract)
+                    && in_array(strtolower((string) ($contract['lifecycle_status'] ?? 'active')), ['cancelled', 'superseded'], true)
+                ) {
+                    continue;
+                }
+            }
+
+            $acceptanceId = (int) ($candidate['acceptance_id'] ?? 0);
+            if ($acceptanceId > 0) {
+                try {
+                    $acceptance = $this->contractAcceptanceRepository->findById($acceptanceId);
+                } catch (\Throwable) {
+                    $acceptance = null;
+                }
+                if (is_array($acceptance)
+                    && (trim((string) ($acceptance['revoked_at'] ?? '')) !== '' || (string) ($acceptance['status'] ?? '') === 'cancelado')
+                ) {
+                    continue;
+                }
+            }
+
+            return $candidate;
+        }
+
+        return null;
     }
 
     private function buildClientQuickActions(array $profile, array $clientProfile): array
