@@ -94,7 +94,11 @@ final class OperationalProcessService
     {
         $process = $this->processRepository->findById($processId);
         $step = $this->processRepository->findStep($processId, $stepKey);
-        if (!is_array($process) || !is_array($step) || (string) ($process['status'] ?? '') === 'cancelled') {
+        if (!is_array($process)
+            || !is_array($step)
+            || in_array((string) ($process['status'] ?? ''), ['completed', 'cancelled'], true)
+            || in_array((string) ($step['status'] ?? ''), ['completed', 'not_applicable'], true)
+        ) {
             throw new \RuntimeException('Etapa indisponível para atualizar evidências.');
         }
         $this->processRepository->updateStep((int) $step['id'], [

@@ -599,6 +599,10 @@ final class OperationalProcessController
             return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
         }
         $step = $this->findStep($process, 'technical_execution');
+        if (in_array((string) ($step['status'] ?? ''), ['completed', 'not_applicable'], true)) {
+            Flash::set('error', 'Evidências concluídas ficam preservadas no histórico e não podem ser removidas.');
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+        }
         $evidence = is_array($step['evidence'] ?? null) ? $step['evidence'] : [];
         $updated = ($this->evidenceService ?? new MigrationEvidenceService($this->config))->remove(
             $evidence,

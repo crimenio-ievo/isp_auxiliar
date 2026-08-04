@@ -42,46 +42,55 @@ final class MigrationEvidenceService
         }
 
         $stored = [];
-        foreach ($normalized as $file) {
-            $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
-            if ($error !== UPLOAD_ERR_OK) {
-                throw new \RuntimeException('Uma evidência não pôde ser recebida (código ' . $error . ').');
-            }
-            $temporaryPath = (string) ($file['tmp_name'] ?? '');
-            $size = (int) ($file['size'] ?? 0);
-            if ($size <= 0 || $size > $maxBytes || !is_file($temporaryPath)) {
-                throw new \RuntimeException('Evidência vazia ou acima do limite configurado.');
-            }
-            if (!$this->allowLocalFilesForTesting && !is_uploaded_file($temporaryPath)) {
-                throw new \RuntimeException('Origem do upload de evidência inválida.');
-            }
+        $storedPaths = [];
+        try {
+            foreach ($normalized as $file) {
+                $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+                if ($error !== UPLOAD_ERR_OK) {
+                    throw new \RuntimeException('Uma evidência não pôde ser recebida (código ' . $error . ').');
+                }
+                $temporaryPath = (string) ($file['tmp_name'] ?? '');
+                $size = (int) ($file['size'] ?? 0);
+                if ($size <= 0 || $size > $maxBytes || !is_file($temporaryPath)) {
+                    throw new \RuntimeException('Evidência vazia ou acima do limite configurado.');
+                }
+                if (!$this->allowLocalFilesForTesting && !is_uploaded_file($temporaryPath)) {
+                    throw new \RuntimeException('Origem do upload de evidência inválida.');
+                }
 
-            $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($temporaryPath) ?: '';
-            if (!isset(self::MIME_EXTENSIONS[$mime])) {
-                throw new \RuntimeException('Formato de evidência não permitido. Use JPG, PNG, WebP ou PDF.');
+                $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($temporaryPath) ?: '';
+                if (!isset(self::MIME_EXTENSIONS[$mime])) {
+                    throw new \RuntimeException('Formato de evidência não permitido. Use JPG, PNG, WebP ou PDF.');
+                }
+                $id = bin2hex(random_bytes(12));
+                $filename = $id . '.' . self::MIME_EXTENSIONS[$mime];
+                $destination = $directory . '/' . $filename;
+                $moved = $this->allowLocalFilesForTesting
+                    ? rename($temporaryPath, $destination)
+                    : move_uploaded_file($temporaryPath, $destination);
+                if (!$moved) {
+                    throw new \RuntimeException('Não foi possível armazenar a evidência.');
+                }
+                $storedPaths[] = $destination;
+                @chmod($destination, 0660);
+                $stored[] = [
+                    'id' => $id,
+                    'original_name' => $this->safeOriginalName((string) ($file['name'] ?? 'evidencia')),
+                    'storage_path' => 'storage/uploads/processes/' . $processId . '/' . $stepKey . '/' . $filename,
+                    'mime_type' => $mime,
+                    'size_bytes' => $size,
+                    'sha256' => hash_file('sha256', $destination) ?: '',
+                    'process_id' => $processId,
+                    'step_key' => $stepKey,
+                    'created_by' => (string) ($operator['login'] ?? ''),
+                    'created_at' => date('Y-m-d H:i:s'),
+                ];
             }
-            $id = bin2hex(random_bytes(12));
-            $filename = $id . '.' . self::MIME_EXTENSIONS[$mime];
-            $destination = $directory . '/' . $filename;
-            $moved = $this->allowLocalFilesForTesting
-                ? rename($temporaryPath, $destination)
-                : move_uploaded_file($temporaryPath, $destination);
-            if (!$moved) {
-                throw new \RuntimeException('Não foi possível armazenar a evidência.');
+        } catch (\Throwable $exception) {
+            foreach ($storedPaths as $storedPath) {
+                @unlink($storedPath);
             }
-            @chmod($destination, 0660);
-            $stored[] = [
-                'id' => $id,
-                'original_name' => $this->safeOriginalName((string) ($file['name'] ?? 'evidencia')),
-                'storage_path' => 'storage/uploads/processes/' . $processId . '/' . $stepKey . '/' . $filename,
-                'mime_type' => $mime,
-                'size_bytes' => $size,
-                'sha256' => hash_file('sha256', $destination) ?: '',
-                'process_id' => $processId,
-                'step_key' => $stepKey,
-                'created_by' => (string) ($operator['login'] ?? ''),
-                'created_at' => date('Y-m-d H:i:s'),
-            ];
+            throw $exception;
         }
 
         return $stored;
