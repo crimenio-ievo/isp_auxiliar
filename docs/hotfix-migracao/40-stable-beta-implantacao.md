@@ -8,8 +8,13 @@
   `feature/migracao-operacional-beta`, base `94db2346528434a17aa38faccd4127a9953d2e97`;
 - o Apache deste host anuncia `teste.ievo.com.br` com `DocumentRoot /var/www/html`;
 - a URL pública observada da instalação candidata é `https://ispaux.ievo.com.br`;
-- a ligação entre esse endpoint público e o checkout local não é demonstrável
-  criptograficamente pela configuração Apache disponível neste host.
+- a raiz pública responde com redirecionamento para login e `/api/release`
+  responde 404;
+- os hashes públicos de CSS/JS correspondem tanto ao commit `73a95b2e6adae4435d23f94cb9b4304c3317e017`
+  quanto ao equivalente `e40f04e2789a38fd56d149bef4884ffc320bb722`,
+  mas não ao checkout candidato em `58a08d0`; como esses commits pertencem a
+  históricos distintos, a ligação entre endpoint e commit exato não é
+  demonstrável pela configuração Apache disponível neste host.
 
 A Stable candidata possui alterações operacionais locais preexistentes. Ela foi
 somente inspecionada e não deve ser usada como alvo de automação antes de backup

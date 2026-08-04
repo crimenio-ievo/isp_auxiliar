@@ -18,7 +18,7 @@ primeira alteração.
 
 ## Hotfix Stable isolado
 
-- Stable operacional identificada: `58a08d0fc50681944104aa18cf9cc49f924f974f`;
+- base do checkout candidato à Stable: `58a08d0fc50681944104aa18cf9cc49f924f974f`;
 - worktree: `/var/www/html/isp_auxiliar_stable_hotfix`;
 - branch: `hotfix/stable-validacao-plano-novo-cliente`;
 - código: `cb86f46e2066a9e5bdd863b77c800f774caa3d9c`;
@@ -28,6 +28,12 @@ O provisionamento resolve UUID/nome oficial, cria o cliente, relê o estado dire
 do MkAuth e compara o plano. Se divergir, aplica correção por UUID e relê. Timeout
 após criação é recuperado por leitura; retry com UUID/request ID não repete POST.
 Falha parcial preserva o identificador e jamais mostra sucesso total.
+
+O commit efetivamente servido no endpoint público não pôde ser provado: esse
+endpoint não expõe release info e os hashes de CSS/JS observados correspondem a
+dois commits equivalentes de históricos distintos, não ao checkout candidato.
+Assim, a aplicação futura deve confirmar primeiro o checkout/commit da Stable e
+então usar estes commits cherry-pickáveis sobre a base confirmada.
 
 Aplicação futura, somente após autorização:
 
