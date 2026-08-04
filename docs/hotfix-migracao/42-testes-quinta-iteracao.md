@@ -11,6 +11,8 @@
 - `ThirdIterationSmoke`: 40 verificações;
 - `UpgradeCorrectionSmoke`: 40 verificações e rollback;
 - `ClientModalPendingSmoke`: 28 verificações.
+- `ReleaseIsolationSmoke`: 18 verificações de autorização, metadados sem
+  credenciais, destinos fechados, sessão e flags Beta.
 
 Todas as suítes usam escrita MkAuth bloqueada. Os testes que exercitam banco
 revertem as transações. O teste de evidência remove arquivo e diretórios temporários.
