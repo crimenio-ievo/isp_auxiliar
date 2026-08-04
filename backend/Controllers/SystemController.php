@@ -9,6 +9,7 @@ use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
+use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 
@@ -21,7 +22,8 @@ final class SystemController
         private View $view,
         private Config $config,
         private MkAuthDatabase $mkauthDatabase,
-        private LocalRepository $localRepository
+        private LocalRepository $localRepository,
+        private Database $database
     ) {
     }
 
@@ -193,6 +195,41 @@ final class SystemController
             'path' => $request->path(),
             'logged_in' => !empty($_SESSION['user']),
             'timestamp' => gmdate('c'),
+        ]);
+    }
+
+    public function release(Request $request): Response
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+        if (empty($access['is_admin'])) {
+            return Response::json(['status' => 'forbidden'], 403);
+        }
+
+        $schemaVersion = 'unavailable';
+        try {
+            $row = $this->database->fetchOne(
+                'SELECT version FROM schema_migrations ORDER BY executed_at DESC, version DESC LIMIT 1'
+            );
+            $schemaVersion = trim((string) ($row['version'] ?? 'none')) ?: 'none';
+        } catch (\Throwable) {
+            // O endpoint continua útil durante instalação ou indisponibilidade do banco.
+        }
+
+        $version = defined('APP_VERSION_INFO') && is_array(APP_VERSION_INFO) ? APP_VERSION_INFO : [];
+
+        return Response::json([
+            'status' => 'ok',
+            'channel' => $this->config->get('app.release.channel', 'stable'),
+            'release_id' => $this->config->get('app.release.id', ''),
+            'commit' => $this->config->get('app.release.commit', ''),
+            'build_date' => (string) ($version['build_date'] ?? ''),
+            'database_schema_version' => $schemaVersion,
+            'external_writes_enabled' => (bool) $this->config->get('app.mkauth.write_enabled', false),
+            'notifications_dry_run' => [
+                'email' => (bool) $this->config->get('email.dry_run', true),
+                'evotrix' => (bool) $this->config->get('evotrix.dry_run', true),
+            ],
+            'ticket_dry_run' => (bool) $this->config->get('contracts.mkauth_ticket.dry_run', true),
         ]);
     }
 

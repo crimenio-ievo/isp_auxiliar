@@ -1,0 +1,18 @@
+<VirtualHost *:443>
+    ServerName beta.sistema.ievo.com.br
+    DocumentRoot /var/www/html/isp_auxiliar_beta/public
+
+    <Directory /var/www/html/isp_auxiliar_beta/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/isp_auxiliar_beta_error.log
+    CustomLog ${APACHE_LOG_DIR}/isp_auxiliar_beta_access.log combined
+
+    # Configure o certificado da infraestrutura antes de habilitar o vhost.
+    SSLEngine on
+    SSLCertificateFile /CAMINHO/DO/CERTIFICADO/fullchain.pem
+    SSLCertificateKeyFile /CAMINHO/DA/CHAVE/privkey.pem
+</VirtualHost>

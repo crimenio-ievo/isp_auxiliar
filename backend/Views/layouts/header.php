@@ -25,6 +25,9 @@ $stableDestination = rtrim(trim((string) ($releaseInfo['stable_base_url'] ?? '')
 $betaDestination = rtrim(trim((string) ($releaseInfo['beta_base_url'] ?? '')), '/');
 $separateReleaseTargets = $stableDestination !== '' && $betaDestination !== '' && $stableDestination !== $betaDestination;
 $selectedReleaseLabel = $releasePreference === 'beta' ? 'Beta' : 'Stable';
+$releaseId = trim((string) ($releaseInfo['id'] ?? ''));
+$releaseCommit = trim((string) ($releaseInfo['commit'] ?? ''));
+$releaseBuildLabel = $releaseId !== '' ? $releaseId : ($releaseCommit !== '' ? substr($releaseCommit, 0, 12) : 'não informado');
 ?>
 <header class="topbar<?= $layoutMode === 'guest' ? ' topbar--guest' : ''; ?>">
     <?php if ($layoutMode !== 'guest'): ?>
@@ -56,6 +59,7 @@ $selectedReleaseLabel = $releasePreference === 'beta' ? 'Beta' : 'Stable';
                 </form>
                 <small class="release-channel-state" data-release-build-state data-shared-build="<?= $separateReleaseTargets ? '0' : '1'; ?>">
                     Canal selecionado: <?= htmlspecialchars($selectedReleaseLabel, ENT_QUOTES, 'UTF-8'); ?>.
+                    Build: <?= htmlspecialchars($releaseBuildLabel, ENT_QUOTES, 'UTF-8'); ?>.
                     <?= $separateReleaseTargets ? 'A troca usa o destino configurado para cada canal.' : 'Beta ainda utiliza a mesma build da Stable neste ambiente.'; ?>
                 </small>
             </div>

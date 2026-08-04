@@ -1,0 +1,35 @@
+{
+  "commercial": {
+    "valor_adesao_padrao": 0,
+    "valor_adesao_promocional": 0,
+    "percentual_desconto_promocional": 0,
+    "parcelas_maximas_adesao": 3,
+    "fidelidade_meses_padrao": 12,
+    "multa_padrao": 0,
+    "modo_isencao_adesao_migracao_radio_fibra": "disabled",
+    "fidelidade_automatica_migracao": true,
+    "fidelidade_automatica_upgrade": false,
+    "sugerir_retencao_downgrade": true
+  },
+  "mkauth_ticket": {
+    "enabled": false,
+    "dry_run": true,
+    "auto_create": false,
+    "endpoint": "/api/chamado/inserir",
+    "subject": "Financeiro - Boleto / Carne",
+    "priority": "normal"
+  },
+  "email": {
+    "enabled": false,
+    "dry_run": true,
+    "smtp_host": "",
+    "smtp_username": "",
+    "smtp_password": ""
+  },
+  "evotrix": {
+    "enabled": false,
+    "dry_run": true,
+    "base_url": "",
+    "token": ""
+  }
+}
