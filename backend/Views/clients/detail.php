@@ -13,16 +13,11 @@ $processes = is_array($detail['operationalProcesses'] ?? null) ? $detail['operat
 $migrationAction = is_array($detail['migrationAction'] ?? null) ? $detail['migrationAction'] : [];
 $timeline = is_array($detail['timeline'] ?? null) ? $detail['timeline'] : [];
 $acceptances = is_array($detail['acceptanceHistory'] ?? null) ? $detail['acceptanceHistory'] : [];
-$financialTask = is_array($detail['financialTask'] ?? null) ? $detail['financialTask'] : [];
+$financialTask = is_array($detail['activeFinancialTask'] ?? null) ? $detail['activeFinancialTask'] : [];
 $scannedDocuments = is_array($detail['scannedDocuments'] ?? null) ? $detail['scannedDocuments'] : [];
-$activeProcess = null;
-foreach ($processes as $processCandidate) {
-    if (is_array($processCandidate) && !in_array((string) ($processCandidate['status'] ?? ''), ['completed', 'cancelled'], true)) {
-        $activeProcess = $processCandidate;
-        break;
-    }
-}
+$activeProcess = is_array($detail['activeProcess'] ?? null) ? $detail['activeProcess'] : null;
 $login = (string) ($detail['login'] ?? '');
+$clientDetailTimeoutMs = max(8000, min(12000, (int) ($clientDetailTimeoutMs ?? 10000)));
 $h = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 $present = static fn (mixed $value): bool => trim((string) $value) !== '';
 $formatEventTime = static function (mixed $value): string {
@@ -53,7 +48,7 @@ $cards = [
 
 ob_start();
 ?>
-<main class="client-hub" data-client-hub data-client-login="<?= $h($login); ?>">
+<main class="client-hub" data-client-hub data-client-login="<?= $h($login); ?>" data-client-detail-timeout-ms="<?= $clientDetailTimeoutMs; ?>">
     <section class="client-hub__header">
         <div>
             <a class="client-hub__back" href="<?= $h(Url::to('/clientes')); ?>">← Voltar para clientes</a>
@@ -101,7 +96,7 @@ ob_start();
 
     <section class="client-card-rail" aria-label="Resumo do cliente">
         <?php foreach ($cards as $card): ?>
-            <button class="client-catalog-card client-catalog-card--<?= $h($card['key']); ?>" type="button" data-open-client-panel="<?= $h($card['key']); ?>" aria-haspopup="dialog">
+            <button class="client-catalog-card client-catalog-card--<?= $h($card['key']); ?>" type="button" data-open-client-panel="<?= $h($card['key']); ?>" aria-haspopup="dialog" aria-expanded="false">
                 <span><?= $h($card['eyebrow']); ?></span>
                 <strong><?= $h($card['title']); ?></strong>
                 <?php if ($present($card['summary'])): ?><small><?= $h($card['summary']); ?></small><?php endif; ?>
@@ -168,38 +163,53 @@ ob_start();
     </section>
 
     <?php foreach (['client', 'connection', 'address', 'financial'] as $panelKey): ?>
-        <div class="client-detail-panel" data-client-panel="<?= $h($panelKey); ?>" hidden>
-            <button class="client-detail-panel__backdrop" type="button" data-close-client-panel aria-label="Fechar painel"></button>
-            <section class="client-detail-panel__dialog" role="dialog" aria-modal="true" aria-labelledby="client-panel-title-<?= $h($panelKey); ?>" tabindex="-1">
-                <header><p class="section-heading__eyebrow">Detalhes</p><h2 id="client-panel-title-<?= $h($panelKey); ?>"><?= $h(ucfirst($panelKey === 'address' ? 'endereço' : ($panelKey === 'financial' ? 'financeiro' : ($panelKey === 'connection' ? 'conexão' : 'cliente')))); ?></h2><button type="button" data-close-client-panel aria-label="Fechar">×</button></header>
-                <?php if ($panelKey === 'client'): ?>
-                    <dl class="detail-list">
-                        <?php foreach (['Nome completo' => $mainName, 'Nome resumido' => $shortName, 'CPF/CNPJ' => $formatDocument((string) ($profile['document'] ?? '')), 'Responsável' => $client['responsavel'] ?? '', 'Nascimento' => $client['nascimento'] ?? '', 'RG' => $client['rg'] ?? '', 'Fonte' => $client['source'] ?? 'MkAuth', 'Última atualização' => $profile['last_update'] ?? ''] as $label => $value): ?>
-                            <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
-                        <?php endforeach; ?>
-                    </dl>
-                    <?php foreach ((array) ($profile['phone_contacts'] ?? []) as $contact): ?>
-                        <?php $phone = (string) ($contact['value'] ?? ''); $digits = preg_replace('/\D+/', '', $phone) ?? ''; $validPhone = strlen($digits) >= 10 && strlen($digits) <= 13; $international = str_starts_with($digits, '55') ? $digits : '55' . $digits; ?>
-                        <div class="contact-row"><span><small><?= $h($contact['label'] ?? 'Telefone'); ?></small><strong><?= $h($phone); ?></strong></span><span><?php if ($validPhone): ?><a href="tel:+<?= $h($international); ?>">Ligar</a><a href="https://wa.me/<?= $h($international); ?>" target="_blank" rel="noopener noreferrer">WhatsApp</a><?php endif; ?><button type="button" data-copy-value="<?= $h($phone); ?>">Copiar</button></span></div>
+        <?php $panelTitle = match ($panelKey) { 'address' => 'Endereço', 'financial' => 'Financeiro', 'connection' => 'Conexão', default => 'Cliente' }; ?>
+        <template data-client-panel-template="<?= $h($panelKey); ?>" data-client-panel-title="<?= $h($panelTitle); ?>">
+            <?php if ($panelKey === 'client'): ?>
+                <dl class="detail-list">
+                    <?php foreach (['Nome completo' => $mainName, 'Nome resumido' => $shortName, 'CPF/CNPJ' => $formatDocument((string) ($profile['document'] ?? '')), 'Responsável' => $client['responsavel'] ?? '', 'Nascimento' => $client['nascimento'] ?? '', 'RG' => $client['rg'] ?? '', 'Fonte' => $client['source'] ?? 'MkAuth', 'Última atualização' => $profile['last_update'] ?? ''] as $label => $value): ?>
+                        <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
                     <?php endforeach; ?>
-                    <?php foreach ((array) ($profile['emails'] ?? []) as $email): ?><div class="contact-row"><strong><?= $h($email); ?></strong><button type="button" data-copy-value="<?= $h($email); ?>">Copiar</button></div><?php endforeach; ?>
-                <?php elseif ($panelKey === 'connection'): ?>
-                    <div data-lazy-client-detail="connection" data-url="<?= $h(Url::to('/clientes/detalhe/conexao?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes de conexão…</p></div>
-                    <?php if (!$technology['verified'] && $present($technology['code'] ?? '')): ?><details><summary>Detalhes técnicos</summary><p>Código informado pelo MkAuth: <?= $h($technology['code']); ?></p></details><?php endif; ?>
-                <?php elseif ($panelKey === 'address'): ?>
-                    <dl class="detail-list">
-                        <?php foreach (['CEP' => $client['cep'] ?? '', 'Logradouro' => $client['endereco'] ?? '', 'Número' => $client['numero'] ?? '', 'Bairro' => $client['bairro'] ?? '', 'Complemento' => $client['complemento'] ?? '', 'Cidade' => $client['cidade'] ?? '', 'Estado' => $client['estado'] ?? '', 'Código IBGE' => $client['city_ibge'] ?? '', 'Ponto de referência' => $profile['reference'] ?? '', 'Coordenadas' => $profile['coordinates'] ?? ''] as $label => $value): ?>
-                            <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
-                        <?php endforeach; ?>
-                    </dl>
-                    <?php if ($present($profile['coordinates'] ?? '')): ?><button class="button button--ghost" type="button" data-copy-value="<?= $h($profile['coordinates']); ?>">Copiar coordenadas</button><?php endif; ?>
+                </dl>
+                <?php foreach ((array) ($profile['phone_contacts'] ?? []) as $contact): ?>
+                    <?php $phone = (string) ($contact['value'] ?? ''); $digits = preg_replace('/\D+/', '', $phone) ?? ''; $validPhone = strlen($digits) >= 10 && strlen($digits) <= 13; $international = str_starts_with($digits, '55') ? $digits : '55' . $digits; ?>
+                    <div class="contact-row"><span><small><?= $h($contact['label'] ?? 'Telefone'); ?></small><strong><?= $h($phone); ?></strong></span><span><?php if ($validPhone): ?><a href="tel:+<?= $h($international); ?>">Ligar</a><a href="https://wa.me/<?= $h($international); ?>" target="_blank" rel="noopener noreferrer">WhatsApp</a><?php endif; ?><button type="button" data-copy-value="<?= $h($phone); ?>">Copiar</button></span></div>
+                <?php endforeach; ?>
+                <?php foreach ((array) ($profile['emails'] ?? []) as $email): ?><div class="contact-row"><strong><?= $h($email); ?></strong><button type="button" data-copy-value="<?= $h($email); ?>">Copiar</button></div><?php endforeach; ?>
+            <?php elseif ($panelKey === 'connection'): ?>
+                <div data-lazy-client-detail="connection" data-url="<?= $h(Url::to('/clientes/detalhe/conexao?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes de conexão…</p></div>
+                <?php if (!$technology['verified'] && $present($technology['code'] ?? '')): ?><details><summary>Detalhes técnicos</summary><p>Código informado pelo MkAuth: <?= $h($technology['code']); ?></p></details><?php endif; ?>
+            <?php elseif ($panelKey === 'address'): ?>
+                <dl class="detail-list">
+                    <?php foreach (['CEP' => $client['cep'] ?? '', 'Logradouro' => $client['endereco'] ?? '', 'Número' => $client['numero'] ?? '', 'Bairro' => $client['bairro'] ?? '', 'Complemento' => $client['complemento'] ?? '', 'Cidade' => $client['cidade'] ?? '', 'Estado' => $client['estado'] ?? '', 'Código IBGE' => $client['city_ibge'] ?? '', 'Ponto de referência' => $profile['reference'] ?? '', 'Coordenadas' => $profile['coordinates'] ?? ''] as $label => $value): ?>
+                        <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
+                    <?php endforeach; ?>
+                </dl>
+                <?php if ($present($profile['coordinates'] ?? '')): ?><button class="button button--ghost" type="button" data-copy-value="<?= $h($profile['coordinates']); ?>">Copiar coordenadas</button><?php endif; ?>
+            <?php else: ?>
+                <dl class="detail-list client-financial-local-summary">
+                    <?php foreach (['Mensalidade cadastrada' => $present($profile['monthly_value'] ?? '') ? 'R$ ' . number_format((float) $profile['monthly_value'], 2, ',', '.') : '', 'Dia de vencimento' => $profile['due_day'] ?? '', 'Modalidade de cobrança' => $profile['billing_type'] ?? '', 'Títulos em aberto (resumo)' => $profile['open_titles'] ?? '', 'Títulos vencidos (resumo)' => $profile['overdue_titles'] ?? ''] as $label => $value): ?>
+                        <?php if ($present($value)): ?><div><dt><?= $h($label); ?></dt><dd><?= $h($value); ?></dd></div><?php endif; ?>
+                    <?php endforeach; ?>
+                </dl>
+                <?php if ($financialTask !== []): ?>
+                    <div class="alert alert--warning"><strong>Pendência financeira operacional ativa</strong><br><?= $h($financialTask['titulo'] ?? $financialTask['status'] ?? 'Revisar financeiro'); ?></div>
                 <?php else: ?>
-                    <?php if (!empty($canManageFinancial)): ?><div data-lazy-client-detail="financial" data-url="<?= $h(Url::to('/clientes/detalhe/financeiro?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes financeiros…</p></div><?php else: ?><div class="alert alert--warning">Detalhes financeiros disponíveis apenas para usuários autorizados.</div><?php endif; ?>
-                    <?php if ($financialTask !== []): ?><dl class="detail-list"><div><dt>Pendência ligada ao processo</dt><dd><?= $h($financialTask['status'] ?? 'Pendente'); ?></dd></div><?php if ($present($financialTask['mkauth_ticket_id'] ?? '')): ?><div><dt>Chamado MkAuth</dt><dd><?= $h($financialTask['mkauth_ticket_id']); ?></dd></div><?php endif; ?></dl><?php endif; ?>
+                    <p class="page-description">Sem pendências financeiras operacionais ativas.</p>
                 <?php endif; ?>
-            </section>
-        </div>
+                <?php if (!empty($canManageFinancial)): ?><div data-lazy-client-detail="financial" data-url="<?= $h(Url::to('/clientes/detalhe/financeiro?login=' . rawurlencode($login))); ?>"><p class="page-description">Carregando detalhes financeiros...</p></div><?php else: ?><div class="alert alert--warning">Detalhes financeiros disponíveis apenas para usuários autorizados.</div><?php endif; ?>
+            <?php endif; ?>
+        </template>
     <?php endforeach; ?>
+
+    <div class="client-detail-panel" data-client-modal hidden aria-hidden="true" inert>
+        <button class="client-detail-panel__backdrop" type="button" data-close-client-panel aria-label="Fechar detalhes"></button>
+        <section class="client-detail-panel__dialog" role="dialog" aria-modal="true" aria-labelledby="client-panel-title" tabindex="-1">
+            <header><div><p class="section-heading__eyebrow">Detalhes</p><h2 id="client-panel-title" data-client-modal-title></h2></div><button type="button" data-close-client-panel aria-label="Fechar">×</button></header>
+            <div class="client-detail-panel__body" data-client-modal-body></div>
+            <footer class="client-detail-panel__mobile-actions"><button class="button button--ghost" type="button" data-close-client-panel>Voltar</button></footer>
+        </section>
+    </div>
 </main>
 <?php
 $content = (string) ob_get_clean();

@@ -3500,18 +3500,72 @@ document.querySelectorAll('[data-copy-value]').forEach((button) => {
 
 const clientHub = document.querySelector('[data-client-hub]');
 if (clientHub instanceof HTMLElement) {
-    let activePanel = null;
+    const modal = clientHub.querySelector('[data-client-modal]');
+    const dialog = modal?.querySelector('.client-detail-panel__dialog');
+    const modalTitle = modal?.querySelector('[data-client-modal-title]');
+    const modalBody = modal?.querySelector('[data-client-modal-body]');
     let activePanelTrigger = null;
+    let activeRequestController = null;
+    let activeRequestTimeout = null;
+    const backgroundState = new Map();
+    const requestedTimeout = Number.parseInt(clientHub.dataset.clientDetailTimeoutMs || '10000', 10);
+    const detailTimeoutMs = Math.max(8000, Math.min(12000, Number.isFinite(requestedTimeout) ? requestedTimeout : 10000));
 
-    const closeClientPanel = () => {
-        if (!(activePanel instanceof HTMLElement)) {
-            return;
+    const abortActiveRequest = () => {
+        if (activeRequestTimeout !== null) {
+            window.clearTimeout(activeRequestTimeout);
+            activeRequestTimeout = null;
         }
-        activePanel.hidden = true;
-        activePanel = null;
+        if (activeRequestController instanceof AbortController) {
+            activeRequestController.abort();
+            activeRequestController = null;
+        }
+    };
+
+    const hideClientHubBackground = () => {
+        Array.from(clientHub.children).forEach((element) => {
+            if (!(element instanceof HTMLElement) || element === modal || element instanceof HTMLTemplateElement) {
+                return;
+            }
+            backgroundState.set(element, {
+                ariaHidden: element.getAttribute('aria-hidden'),
+                inert: element.hasAttribute('inert'),
+            });
+            element.setAttribute('aria-hidden', 'true');
+            element.setAttribute('inert', '');
+        });
+    };
+
+    const restoreClientHubBackground = () => {
+        backgroundState.forEach((state, element) => {
+            if (state.ariaHidden === null) {
+                element.removeAttribute('aria-hidden');
+            } else {
+                element.setAttribute('aria-hidden', state.ariaHidden);
+            }
+            if (!state.inert) {
+                element.removeAttribute('inert');
+            }
+        });
+        backgroundState.clear();
+    };
+
+    const closeClientPanel = (restoreFocus = true) => {
+        abortActiveRequest();
+        document.removeEventListener('keydown', handleClientModalKeydown);
+        if (modal instanceof HTMLElement) {
+            modal.hidden = true;
+            modal.setAttribute('aria-hidden', 'true');
+            modal.setAttribute('inert', '');
+        }
+        if (modalBody instanceof HTMLElement) modalBody.replaceChildren();
+        if (modalTitle instanceof HTMLElement) modalTitle.textContent = '';
         document.body.classList.remove('client-panel-open');
-        if (activePanelTrigger instanceof HTMLElement) activePanelTrigger.focus({ preventScroll: true });
+        restoreClientHubBackground();
+        const returnFocus = activePanelTrigger;
         activePanelTrigger = null;
+        if (returnFocus instanceof HTMLElement) returnFocus.setAttribute('aria-expanded', 'false');
+        if (restoreFocus && returnFocus instanceof HTMLElement) returnFocus.focus({ preventScroll: true });
     };
 
     const addDetail = (list, label, value) => {
@@ -3560,17 +3614,94 @@ if (clientHub instanceof HTMLElement) {
         target.replaceChildren(list);
     };
 
-    const loadLazyDetail = async (panel) => {
-        const target = panel.querySelector('[data-lazy-client-detail]');
-        if (!(target instanceof HTMLElement) || target.dataset.loaded === '1') {
+    const detailError = (message, retryable = true, sessionExpired = false) => {
+        const error = new Error(message);
+        error.retryable = retryable;
+        error.sessionExpired = sessionExpired;
+        return error;
+    };
+
+    const renderLazyError = (target, error) => {
+        const alert = document.createElement('div');
+        alert.className = 'alert alert--warning client-detail-load-error';
+        const message = document.createElement('p');
+        message.textContent = error instanceof Error ? error.message : 'Os detalhes não puderam ser carregados.';
+        const actions = document.createElement('div');
+        actions.className = 'client-detail-load-actions';
+        if (error?.retryable !== false) {
+            const retry = document.createElement('button');
+            retry.className = 'button button--small';
+            retry.type = 'button';
+            retry.dataset.retryClientDetail = '1';
+            retry.textContent = 'Tentar novamente';
+            actions.appendChild(retry);
+        }
+        if (error?.sessionExpired === true) {
+            const login = document.createElement('a');
+            login.className = 'button button--small';
+            login.href = `${document.body.dataset.basePath || ''}/login`;
+            login.textContent = 'Ir para o login';
+            actions.appendChild(login);
+        }
+        const close = document.createElement('button');
+        close.className = 'button button--ghost button--small';
+        close.type = 'button';
+        close.dataset.closeClientPanel = '1';
+        close.textContent = 'Fechar';
+        actions.appendChild(close);
+        alert.append(message, actions);
+        target.replaceChildren(alert);
+    };
+
+    const loadLazyDetail = async () => {
+        if (!(modalBody instanceof HTMLElement) || modal?.hidden) {
             return;
         }
-        target.dataset.loaded = '1';
+        const target = modalBody.querySelector('[data-lazy-client-detail]');
+        if (!(target instanceof HTMLElement)) return;
+
+        abortActiveRequest();
+        const controller = new AbortController();
+        let timedOut = false;
+        activeRequestController = controller;
+        target.replaceChildren(Object.assign(document.createElement('p'), {
+            className: 'page-description',
+            textContent: target.dataset.lazyClientDetail === 'financial'
+                ? 'Carregando detalhes financeiros...'
+                : 'Carregando detalhes de conexão...',
+        }));
+        activeRequestTimeout = window.setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, detailTimeoutMs);
+
         try {
-            const response = await fetch(target.dataset.url || '', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-            const payload = await response.json();
-            if (!response.ok || payload.status !== 'success') {
-                throw new Error(payload.message || 'Não foi possível carregar os detalhes.');
+            const response = await fetch(target.dataset.url || '', {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal: controller.signal,
+            });
+            const responseUrl = new URL(response.url || window.location.href, window.location.href);
+            if (response.redirected || /\/login\/?$/.test(responseUrl.pathname)) {
+                throw detailError('Sua sessão expirou. Entre novamente para consultar os detalhes.', false, true);
+            }
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            if (!contentType.includes('application/json')) {
+                throw detailError('Os detalhes não puderam ser carregados porque o servidor retornou uma resposta inesperada.');
+            }
+            const body = await response.text();
+            if (body.trim() === '') {
+                throw detailError('Os detalhes não puderam ser carregados porque o servidor retornou uma resposta vazia.');
+            }
+            let payload;
+            try {
+                payload = JSON.parse(body);
+            } catch (error) {
+                throw detailError('Os detalhes não puderam ser carregados porque a resposta recebida é inválida.');
+            }
+            const successful = payload?.ok === true || payload?.status === 'success';
+            if (!response.ok || !successful) {
+                throw detailError(payload?.message || 'Os detalhes não puderam ser carregados.', payload?.retryable !== false);
             }
             if (target.dataset.lazyClientDetail === 'connection') {
                 renderConnection(target, payload.data || {});
@@ -3578,12 +3709,72 @@ if (clientHub instanceof HTMLElement) {
                 renderFinancial(target, payload.data || {});
             }
         } catch (error) {
-            target.dataset.loaded = '0';
-            const alert = document.createElement('div');
-            alert.className = 'alert alert--warning';
-            alert.textContent = error instanceof Error ? error.message : 'Consulta indisponível.';
-            target.replaceChildren(alert);
+            if (controller.signal.aborted && !timedOut) return;
+            if (modal?.hidden || controller !== activeRequestController) return;
+            if (timedOut) {
+                renderLazyError(target, detailError(target.dataset.lazyClientDetail === 'financial'
+                    ? 'Não foi possível carregar os dados financeiros no tempo esperado.'
+                    : 'Não foi possível carregar os dados de conexão no tempo esperado.'));
+            } else {
+                const controlledError = error instanceof Error && typeof error.retryable === 'boolean'
+                    ? error
+                    : detailError(target.dataset.lazyClientDetail === 'financial'
+                        ? 'Os detalhes financeiros não puderam ser carregados.'
+                        : 'Os detalhes de conexão não puderam ser carregados.');
+                renderLazyError(target, controlledError);
+            }
+        } finally {
+            if (controller === activeRequestController) {
+                if (activeRequestTimeout !== null) window.clearTimeout(activeRequestTimeout);
+                activeRequestTimeout = null;
+                activeRequestController = null;
+            }
         }
+    };
+
+    function handleClientModalKeydown(event) {
+        if (!(modal instanceof HTMLElement) || modal.hidden || !(dialog instanceof HTMLElement)) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeClientPanel();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+            .filter((item) => item instanceof HTMLElement && !item.hidden);
+        if (focusable.length === 0) {
+            event.preventDefault();
+            dialog.focus();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
+    const openClientPanel = (key, trigger) => {
+        if (!(modal instanceof HTMLElement) || !(dialog instanceof HTMLElement) || !(modalBody instanceof HTMLElement) || !(modalTitle instanceof HTMLElement)) return;
+        const template = clientHub.querySelector(`template[data-client-panel-template="${CSS.escape(key)}"]`);
+        if (!(template instanceof HTMLTemplateElement)) return;
+        closeClientPanel(false);
+        activePanelTrigger = trigger instanceof HTMLElement ? trigger : null;
+        if (activePanelTrigger instanceof HTMLElement) activePanelTrigger.setAttribute('aria-expanded', 'true');
+        modalTitle.textContent = template.dataset.clientPanelTitle || 'Detalhes';
+        modalBody.replaceChildren(template.content.cloneNode(true));
+        hideClientHubBackground();
+        modal.removeAttribute('inert');
+        modal.setAttribute('aria-hidden', 'false');
+        modal.hidden = false;
+        document.body.classList.add('client-panel-open');
+        document.addEventListener('keydown', handleClientModalKeydown);
+        dialog.focus();
+        loadLazyDetail();
     };
 
     clientHub.querySelectorAll('[data-open-client-panel]').forEach((trigger) => {
@@ -3593,43 +3784,31 @@ if (clientHub instanceof HTMLElement) {
                 document.querySelector('#documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 return;
             }
-            const panel = clientHub.querySelector(`[data-client-panel="${CSS.escape(key)}"]`);
-            if (!(panel instanceof HTMLElement)) {
-                return;
-            }
-            closeClientPanel();
-            activePanelTrigger = trigger instanceof HTMLElement ? trigger : null;
-            activePanel = panel;
-            panel.hidden = false;
-            document.body.classList.add('client-panel-open');
-            panel.querySelector('.client-detail-panel__dialog')?.focus();
-            loadLazyDetail(panel);
+            openClientPanel(key, trigger);
         });
     });
 
-    clientHub.querySelectorAll('[data-close-client-panel]').forEach((button) => button.addEventListener('click', closeClientPanel));
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
+    modal?.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest('[data-close-client-panel]')) {
             closeClientPanel();
             return;
         }
-        if (event.key === 'Tab' && activePanel instanceof HTMLElement) {
-            const dialog = activePanel.querySelector('.client-detail-panel__dialog');
-            const focusable = Array.from(dialog?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])
-                .filter((item) => item instanceof HTMLElement && !item.hidden);
-            if (focusable.length === 0) {
-                event.preventDefault();
-                dialog?.focus();
-                return;
-            }
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-                event.preventDefault();
-                last.focus();
-            } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
-                event.preventDefault();
-                first.focus();
+        if (target.closest('[data-retry-client-detail]')) {
+            loadLazyDetail();
+            return;
+        }
+        const copyButton = target.closest('[data-copy-value]');
+        if (copyButton instanceof HTMLElement) {
+            const value = copyButton.getAttribute('data-copy-value') || '';
+            const original = copyButton.textContent || 'Copiar';
+            try {
+                await copyTextToClipboard(value);
+                copyButton.textContent = 'Copiado';
+                window.setTimeout(() => { copyButton.textContent = original; }, 1400);
+            } catch (error) {
+                window.prompt('Copie o valor:', value);
             }
         }
     });
