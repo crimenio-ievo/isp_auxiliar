@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Controllers\ClientController;
 use App\Core\Config;
+use App\Core\Request;
 use App\Core\Env;
 use App\Core\View;
 use App\Infrastructure\Contracts\ContractAcceptanceRepository;
@@ -218,7 +219,11 @@ try {
     $cancelledHtml = $view->render('clients/detail', $baseViewData($login, [$cancelled]));
     $cancelledAcceptance = $acceptances->findById((int) $acceptance['id']) ?? [];
     $check(3, !str_contains($cancelledHtml, 'Aguardando confirmação do cliente') && !str_contains($cancelledHtml, '<section class="client-process-panel '), 'cancelado não aparece aguardando');
-    $check(4, trim((string) ($cancelledAcceptance['revoked_at'] ?? '')) !== '', 'cancelamento revoga o aceite');
+    $clientControllerSource = (string) file_get_contents($rootPath . '/backend/Controllers/ClientController.php');
+    $contractViewSource = (string) file_get_contents($rootPath . '/backend/Views/contracts/detalhe.php');
+    $check(4, trim((string) ($cancelledAcceptance['revoked_at'] ?? '')) !== ''
+        && str_contains($clientControllerSource, "Csrf::verify(\$request, 'client_upgrade_cancel:' . \$contractId)")
+        && str_contains($contractViewSource, "Csrf::field('client_upgrade_cancel:' . \$contractId)"), 'cancelamento revoga o aceite e exige CSRF');
     $check(5, empty($cancelled['next_pending_key']) && empty($cancelled['next_pending_label']), 'cancelamento remove próxima pendência');
     $check(6, count($processService->listByLogin($login)) === 1, 'histórico do processo cancelado permanece');
 
@@ -247,6 +252,7 @@ try {
     $controllerReflection->getProperty('config')->setValue($controller, $app->config());
     $plans = [
         ['id' => 'UUID-R10', 'name' => 'Rádio 10', 'label' => 'Rádio 10 — 10 Mbps — R$ 80,00', 'technology' => 'D', 'technology_label' => 'Rádio fixo (FWA)', 'install_type' => 'radio', 'speed_down' => '10M', 'value' => '80.00'],
+        ['id' => 'UUID-R20', 'name' => 'Rádio 20', 'label' => 'Rádio 20 — 20 Mbps — R$ 90,00', 'technology' => 'D', 'technology_label' => 'Rádio fixo (FWA)', 'install_type' => 'radio', 'speed_down' => '20M', 'value' => '90.00'],
         ['id' => 'UUID-F100', 'name' => 'Fibra 100', 'label' => 'Fibra 100 — 100 Mbps — R$ 100,00', 'technology' => 'H', 'technology_label' => 'Fibra até o imóvel (FTTH)', 'install_type' => 'fibra', 'speed_down' => '100M', 'value' => '100.00'],
     ];
     $upgradeContext = ['login' => $login, 'clientProfile' => ['nome' => 'Cliente Teste'], 'current_plan' => 'UUID-R10', 'current_technology' => 'Rádio fixo (FWA)', 'current_technology_family' => 'radio', 'current_monthly_value' => 80, 'planOptions' => $plans, 'adhesion_default_value' => 1200, 'adhesion_waiver_mode' => 'automatic'];
@@ -273,9 +279,15 @@ try {
     $benefitDefaultsMethod = new ReflectionMethod(ClientController::class, 'resolveUpgradeBenefitDefaults');
     $benefitDefaults = $benefitDefaultsMethod->invoke($controller, 'Rádio fixo (FWA)', 'Fibra até o imóvel (FTTH)', 'Rádio 10', 'Fibra 100', 80.0, 100.0);
     $check(20, $configuredAdhesion > 0 && str_contains($upgradeHtml, 'data-adhesion-default="' . $configuredAdhesion . '"'), 'adesão vem da configuração');
-    $check(21, !empty($benefitDefaults['flags']['radio_to_fiber']) && !empty($benefitDefaults['flags']['adhesion_waiver']), 'rádio para fibra aplica isenção configurada');
+    $collectUpgrade = new ReflectionMethod(ClientController::class, 'collectUpgradeFormData');
+    $tamperedBenefitData = $collectUpgrade->invoke($controller, new Request('POST', '/clientes/upgrade', '', [], [
+        'novo_plano' => 'UUID-R20',
+        'benefit_flags' => json_encode(['radio_to_fiber' => true, 'adhesion_waiver' => true]),
+    ]), $upgradeContext);
+    $check(21, !empty($benefitDefaults['flags']['radio_to_fiber']) && !empty($benefitDefaults['flags']['adhesion_waiver'])
+        && empty($tamperedBenefitData['benefit_flags']['radio_to_fiber'])
+        && empty($tamperedBenefitData['benefit_flags']['adhesion_waiver']), 'rádio para fibra aplica isenção configurada sem confiar em metadados enviados pelo formulário');
     $check(22, abs((float) ($benefitDefaults['value'] ?? 0) - $configuredAdhesion) < 0.01, 'benefício corresponde à adesão');
-    $clientControllerSource = (string) file_get_contents($rootPath . '/backend/Controllers/ClientController.php');
     $check(23, !preg_match('/valor_adesao[^\n]*1200|1200[^\n]*valor_adesao/i', $clientControllerSource), 'não há valor de adesão 1200 hardcoded no controller');
     $disabledConfig = new Config(['contracts' => ['commercial' => ['modo_isencao_adesao_migracao_radio_fibra' => 'disabled', 'valor_adesao_padrao' => $configuredAdhesion]]]);
     $controllerReflection->getProperty('config')->setValue($controller, $disabledConfig);
@@ -289,7 +301,17 @@ try {
     $fidelityErrors = $validateUpgrade->invoke($controller, array_replace($upgradeData, ['apply_fidelity' => true, 'valor_beneficio' => 0, 'fidelity_benefit_description' => '', 'fidelidade_meses' => 12]), $upgradeContext);
     $check(27, isset($fidelityErrors['valor_beneficio'], $fidelityErrors['fidelity_benefit_description']), 'fidelidade exige benefício real');
     $rangeErrors = $validateUpgrade->invoke($controller, array_replace($upgradeData, ['apply_fidelity' => true, 'valor_beneficio' => 100, 'fidelity_benefit_description' => 'Benefício real', 'fidelidade_meses' => 13]), $upgradeContext);
-    $check(28, isset($rangeErrors['fidelidade_meses']), 'prazo de fidelidade fica entre 1 e 12');
+    $collectedOutOfRange = $collectUpgrade->invoke($controller, new Request('POST', '/clientes/upgrade', '', [], [
+        'novo_plano' => 'UUID-F100',
+        'apply_fidelity' => '1',
+        'valor_beneficio' => '100',
+        'fidelity_benefit_description' => 'Benefício real',
+        'fidelidade_meses' => '13',
+    ]), $upgradeContext);
+    $collectedRangeErrors = $validateUpgrade->invoke($controller, $collectedOutOfRange, $upgradeContext);
+    $check(28, isset($rangeErrors['fidelidade_meses'])
+        && (int) ($collectedOutOfRange['fidelidade_meses'] ?? 0) === 13
+        && isset($collectedRangeErrors['fidelidade_meses']), 'prazo inválido é preservado e rejeitado entre a coleta e a validação');
     $check(29, str_contains($upgradeHtml, 'for="apply-fidelity"') && str_contains($upgradeHtml, 'for="fidelity-description"') && str_contains($upgradeHtml, 'for="fidelity-months"'), 'campos de fidelidade possuem labels associados');
 
     $revisionLogin = $login . '_revision';
@@ -309,7 +331,10 @@ try {
     $oldRevisionAcceptance = $acceptances->findById((int) $oldRevisionAcceptance['id']) ?? [];
     $check(32, trim((string) ($oldRevisionAcceptance['revoked_at'] ?? '')) !== '', 'correção revoga o token anterior');
     $acceptedWorkspace = $renderMigration($view, $acceptedProcess, $acceptedContract, $acceptedAcceptance, 'migration_data');
-    $check(33, str_contains($acceptedWorkspace, 'Esta condição já foi aceita') && str_contains($acceptedWorkspace, 'Substituir condição'), 'aceite confirmado exige substituição');
+    $check(33, str_contains($acceptedWorkspace, 'Esta condição já foi aceita')
+        && str_contains($acceptedWorkspace, 'Substituir condição')
+        && str_contains($acceptedWorkspace, 'name="_csrf"')
+        && str_contains($clientControllerSource, "Csrf::verify(\$request, 'client_upgrade_correct:' . \$contractId)"), 'aceite confirmado exige substituição protegida por CSRF');
     $newContractId = (int) $contracts->create($contractData($login, 'upgrade_migracao', ['revision_number' => 2]));
     $newContract = $contracts->findById($newContractId) ?? [];
     $newAcceptance = $createAcceptance($newContractId, 'test.fourth.after-cancel');
@@ -320,10 +345,12 @@ try {
     $check(36, str_contains($activeHtml, 'Alternativo 1</small>') && str_contains($activeHtml, 'Ligar · Alternativo 1'), 'telefones alternativos são identificados');
     $check(37, substr_count($activeHtml, 'class="client-detail-panel__dialog" role="dialog" aria-modal="true"') === 4, 'modal central possui semântica de abertura');
     $appJs = (string) file_get_contents($rootPath . '/public/assets/js/app.js');
-    $check(38, str_contains($appJs, "querySelectorAll('[data-close-client-panel]')") && str_contains($appJs, "event.key === 'Escape'"), 'modal fecha por controle e Escape');
+    $check(38, str_contains($appJs, "querySelectorAll('[data-close-client-panel]')")
+        && str_contains($appJs, "event.key === 'Escape'")
+        && str_contains($appJs, "activePanel.querySelector('.client-detail-panel__dialog')")
+        && str_contains($appJs, 'document.activeElement === dialog'), 'modal fecha por controle/Escape e mantém Tab no diálogo');
     $check(39, str_contains($appJs, 'activePanelTrigger.focus({ preventScroll: true })'), 'foco retorna ao cartão de origem');
     $check(40, substr_count($activeHtml, '<section class="client-process-panel ') === 1 && !str_contains($activeHtml, 'alert alert--warning" id="upgrade-process'), 'cliente exibe apenas um alerta de processo');
-    $contractViewSource = (string) file_get_contents($rootPath . '/backend/Views/contracts/detalhe.php');
     $check(41, !str_contains($contractViewSource, 'Abrir configurações') && str_contains($contractViewSource, 'Ver eventos'), 'detalhe do contrato não exibe botão de configurações');
     $translateAudit = new ReflectionMethod(ClientController::class, 'translateAuditEvent');
     $translatedEvent = $translateAudit->invoke($controller, 'contract.acceptance.accepted', ['actor_login' => 'vanessa']);

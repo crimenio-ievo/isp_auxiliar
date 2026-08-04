@@ -40,5 +40,11 @@ ativada, exige justificativa em observação e fica registrada no snapshot como
 
 Fidelidade começa desligada. Desligada, descrição e prazo ficam `disabled` e não
 são enviados. Ligada, exige benefício real com valor, descrição e prazo de 1 a
-12 meses. Labels e mensagens de erro são associados aos controles. A regra não
-aplica renovação automática por simples troca de tecnologia.
+12 meses. Valores fora desse intervalo são preservados no retorno HTTP 422 para
+que o operador veja e corrija o erro; não são normalizados silenciosamente.
+Labels e mensagens de erro são associados aos controles. A regra não aplica
+renovação automática por simples troca de tecnologia.
+
+Tecnologia, tipo de operação e isenção são sempre recalculados pelo servidor a
+partir do catálogo e da configuração. Metadados derivados enviados manualmente
+no POST não conseguem conceder isenção.

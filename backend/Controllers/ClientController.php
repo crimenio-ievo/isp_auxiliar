@@ -607,6 +607,10 @@ final class ClientController
             Flash::set('error', 'Upgrade / Migração não localizado.');
             return Response::redirect($login !== '' ? $returnTo : '/clientes');
         }
+        if (!Csrf::verify($request, 'client_upgrade_cancel:' . $contractId)) {
+            Flash::set('error', 'A sessão do cancelamento expirou. Reabra o processo e tente novamente.');
+            return Response::redirect($returnTo . '#upgrade-process');
+        }
         if (!$this->canCancelPendingContract()) {
             Flash::set('error', 'Seu usuário não possui permissão para cancelar esta solicitação.');
             return Response::redirect($returnTo);
@@ -778,6 +782,10 @@ final class ClientController
         if (!is_array($contract) || (string) ($contract['tipo_aceite'] ?? '') !== 'upgrade_migracao') {
             Flash::set('error', 'Upgrade / Migração não localizado.');
             return Response::redirect($login !== '' ? $returnTo : '/clientes');
+        }
+        if (!Csrf::verify($request, 'client_upgrade_correct:' . $contractId)) {
+            Flash::set('error', 'A sessão da correção expirou. Reabra o processo e tente novamente.');
+            return Response::redirect($returnTo . '#upgrade-process');
         }
         if ($reason === '') {
             Flash::set('error', 'Informe o motivo da correção.');
@@ -5432,10 +5440,10 @@ final class ClientController
             (float) ($context['current_monthly_value'] ?? 0),
             $monthlyValue
         );
-        $benefitFlags = $this->normalizeUpgradeBenefitFlags($request->input('benefit_flags', ''));
-        if ($benefitFlags === []) {
-            $benefitFlags = $benefitDefaults['flags'];
-        }
+        // Classificação técnica e isenção são sempre derivadas no servidor.
+        // O formulário só pode acrescentar retenção, benefício livre e a
+        // confirmação manual prevista pela configuração comercial.
+        $benefitFlags = $benefitDefaults['flags'];
         $benefitFlags['retention'] = (string) $request->input('retention_condition', '0') === '1';
         $benefitDescription = trim((string) $request->input('beneficio_concedido', ''));
         if ($benefitDescription === '') {
@@ -5458,7 +5466,7 @@ final class ClientController
             $benefitValue = (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0);
         }
         $applyFidelity = (string) $request->input('apply_fidelity', '0') === '1';
-        $fidelityMonths = $applyFidelity ? max(1, min(12, (int) $request->input('fidelidade_meses', '12'))) : 0;
+        $fidelityMonths = $applyFidelity ? (int) $request->input('fidelidade_meses', '12') : 0;
         $fidelityBenefitDescription = trim((string) $request->input('fidelity_benefit_description', ''));
 
         if (!$this->canUpgradeCommercial()) {

@@ -3614,19 +3614,20 @@ if (clientHub instanceof HTMLElement) {
             return;
         }
         if (event.key === 'Tab' && activePanel instanceof HTMLElement) {
-            const focusable = Array.from(activePanel.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+            const dialog = activePanel.querySelector('.client-detail-panel__dialog');
+            const focusable = Array.from(dialog?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])
                 .filter((item) => item instanceof HTMLElement && !item.hidden);
             if (focusable.length === 0) {
                 event.preventDefault();
-                activePanel.querySelector('.client-detail-panel__dialog')?.focus();
+                dialog?.focus();
                 return;
             }
             const first = focusable[0];
             const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
+            if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
                 event.preventDefault();
                 last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
+            } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
                 event.preventDefault();
                 first.focus();
             }

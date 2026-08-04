@@ -17,7 +17,9 @@ $selectedPlan = trim((string) ($form['new_plan_id'] ?? $form['novo_plano'] ?? $c
 $benefitValue = number_format((float) ($form['valor_beneficio'] ?? $context['benefit_value'] ?? 0), 2, ',', '.');
 $retention = !empty($form) ? !empty($form['retention_condition']) : !empty($context['retention_condition']);
 $applyFidelity = !empty($form) ? !empty($form['apply_fidelity']) : !empty($context['apply_fidelity']);
-$fidelityMonths = max(1, min(12, (int) ($form['fidelidade_meses'] ?? $context['fidelity_months'] ?? 12)));
+$fidelityMonths = $applyFidelity && array_key_exists('fidelidade_meses', $form)
+    ? (int) $form['fidelidade_meses']
+    : max(1, min(12, (int) ($context['fidelity_months'] ?? 12)));
 $fidelityDescription = trim((string) ($form['fidelity_benefit_description'] ?? $context['fidelity_benefit_description'] ?? ''));
 $otherBenefit = trim((string) ($form['beneficio_outro_text'] ?? ''));
 $observation = trim((string) ($form['observacao'] ?? $context['observacao'] ?? ''));

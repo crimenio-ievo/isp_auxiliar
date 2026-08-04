@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Core\Url;
+use App\Core\Csrf;
 
 $process = is_array($process ?? null) ? $process : [];
 $contract = is_array($contract ?? null) ? $contract : [];
@@ -133,6 +134,7 @@ ob_start();
                 <?php elseif ($acceptanceAccepted): ?>
                     <div class="alert alert--warning"><strong>Esta condição já foi aceita.</strong> Para alterá-la, é necessário substituir o documento e solicitar novo aceite.</div>
                     <form method="post" action="<?= $h(Url::to('/clientes/upgrade/corrigir')); ?>" class="form-grid" data-prevent-double-submit>
+                        <?= Csrf::field('client_upgrade_correct:' . (int) ($contract['id'] ?? 0)); ?>
                         <input type="hidden" name="contract_id" value="<?= (int) ($contract['id'] ?? 0); ?>">
                         <input type="hidden" name="process_id" value="<?= $processId; ?>">
                         <label class="field field--span-2"><span>Motivo da substituição</span><textarea name="correction_reason" rows="2" required></textarea></label>

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Core\Url;
+use App\Core\Csrf;
 
 $detail = is_array($detail ?? null) ? $detail : [];
 $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
@@ -380,6 +381,7 @@ ob_start();
             </div>
             <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/corrigir'), ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="contract-send-modal__body">
+                    <?= Csrf::field('client_upgrade_correct:' . $contractId); ?>
                     <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="login" value="<?= htmlspecialchars((string) ($contract['mkauth_login'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="summary-grid">
@@ -405,6 +407,7 @@ ob_start();
             <div class="contract-send-modal__header"><div><p class="section-heading__eyebrow">Confirmação obrigatória</p><h2 id="contract-upgrade-cancel-title">Cancelar solicitação</h2></div><button class="button button--ghost button--small" type="button" data-upgrade-action-close>Cancelar</button></div>
             <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/cancelar'), ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="contract-send-modal__body">
+                    <?= Csrf::field('client_upgrade_cancel:' . $contractId); ?>
                     <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="login" value="<?= htmlspecialchars((string) ($contract['mkauth_login'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="summary-grid">
