@@ -222,7 +222,8 @@ final class SystemController
             'channel' => $this->config->get('app.release.channel', 'stable'),
             'release_id' => $this->config->get('app.release.id', ''),
             'commit' => $this->config->get('app.release.commit', ''),
-            'build_date' => (string) ($version['build_date'] ?? ''),
+            'build_date' => trim((string) $this->config->get('app.release.build_date', ''))
+                ?: (string) ($version['build_date'] ?? ''),
             'database_schema_version' => $schemaVersion,
             'external_writes_enabled' => (bool) $this->config->get('app.mkauth.write_enabled', false),
             'notifications_dry_run' => [

@@ -19,6 +19,7 @@ return [
         'beta_base_url' => Env::get('APP_BETA_BASE_URL', ''),
         'id' => Env::get('APP_RELEASE_ID', ''),
         'commit' => Env::get('APP_RELEASE_COMMIT', ''),
+        'build_date' => Env::get('APP_RELEASE_BUILD_DATE', ''),
     ],
     'mkauth' => [
         'base_url' => Env::get('MKAUTH_BASE_URL', ''),
