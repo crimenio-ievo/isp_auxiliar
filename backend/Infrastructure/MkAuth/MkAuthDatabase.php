@@ -14,7 +14,7 @@ use RuntimeException;
  * Esta camada deve ser usada com um usuario MySQL somente leitura, limitado
  * aos dados que o isp_auxiliar realmente precisa consultar.
  */
-final class MkAuthDatabase
+final class MkAuthDatabase implements ClientPlanReadRepository
 {
     private ?PDO $pdo = null;
 
@@ -356,6 +356,7 @@ final class MkAuthDatabase
             'SELECT
                 c.*,
                 COALESCE(NULLIF(p.nome, ""), NULLIF(c.plano, "")) AS plano_nome,
+                p.uuid_plano AS plano_uuid,
                 p.valor AS plano_valor,
                 p.tecnologia AS plano_tecnologia
              FROM sis_cliente c
@@ -1031,6 +1032,7 @@ final class MkAuthDatabase
             'venc' => trim((string) ($row['venc'] ?? '')),
             'plano' => $planName,
             'plano_nome' => $planName,
+            'plano_uuid' => trim((string) ($row['plano_uuid'] ?? '')),
             'contrato' => trim((string) ($row['contrato'] ?? '')),
             'responsavel' => trim((string) ($row['responsavel'] ?? '')),
             'nome_resumido' => trim((string) ($row['nome_res'] ?? '')),

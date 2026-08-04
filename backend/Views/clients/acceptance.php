@@ -48,6 +48,8 @@ $hasRealEmail = (bool) ($emailContext['has_real_email'] ?? false);
 $acceptanceStamp = (string) ($acceptanceDateTime ?? date('d/m/Y H:i'));
 $checkpointToken = (string) ($checkpointToken ?? '');
 $sendRequestId = bin2hex(random_bytes(16));
+$partialProvision = (string) ($draft['provision_status'] ?? '') === 'plan_not_confirmed';
+$partialObservedPlan = trim((string) ($draft['plan_confirmation']['observed_name'] ?? ''));
 
 ob_start();
 ?>
@@ -130,6 +132,15 @@ ob_start();
         <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($sendRequestId, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="assinatura_cliente" data-signature-input value="">
+
+        <?php if ($partialProvision): ?>
+            <div class="alert alert--error">
+                <strong>Cliente criado, mas o plano não foi confirmado.</strong>
+                <?= $partialObservedPlan !== '' ? 'O MkAuth retornou ' . htmlspecialchars($partialObservedPlan, ENT_QUOTES, 'UTF-8') . '. ' : ''; ?>
+                Use o botão de conclusão para tentar aplicar o plano novamente; o UUID já foi preservado e nenhum novo cliente será criado.
+                <a href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($clientLogin)), ENT_QUOTES, 'UTF-8'); ?>">Abrir o cliente</a>
+            </div>
+        <?php endif; ?>
 
         <div class="section-heading">
             <p class="section-heading__eyebrow">Conferência</p>

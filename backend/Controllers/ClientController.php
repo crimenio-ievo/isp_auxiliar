@@ -20,6 +20,7 @@ use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
+use App\Infrastructure\MkAuth\ClientPlanNotConfirmedException;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 use App\Infrastructure\MkAuth\TechnologyMapper;
@@ -1374,6 +1375,7 @@ final class ClientController
         $sendWhatsapp = $this->normalizeBoolean((string) $request->input('send_whatsapp', '1'));
         $sendEmail = $this->normalizeBoolean((string) $request->input('send_email', '0'));
         $sendRequestId = trim((string) $request->input('send_request_id', ''));
+        $postProvisionWarnings = [];
 
         if ($errors !== []) {
             Flash::set('error', implode(' ', $errors));
@@ -1417,6 +1419,27 @@ final class ClientController
             $response = $provisionResult['response'];
             $payload = $provisionResult['payload'];
             $action = (string) ($provisionResult['action'] ?? 'create');
+            $data['provision_request_id'] = (string) ($provisionResult['request_id'] ?? '');
+            $data['uuid_cliente'] = (string) ($provisionResult['client_uuid'] ?? '');
+            $data['provision_status'] = 'plan_confirmed';
+            $data['plan_confirmation'] = (array) ($provisionResult['plan_confirmation'] ?? []);
+        } catch (ClientPlanNotConfirmedException $exception) {
+            $partial = $exception->provisionResult();
+            $data['provision_request_id'] = (string) ($partial['request_id'] ?? '');
+            $data['uuid_cliente'] = (string) ($partial['client_uuid'] ?? '');
+            $data['provision_status'] = 'plan_not_confirmed';
+            $data['plan_confirmation'] = (array) ($partial['plan_confirmation'] ?? []);
+            $this->saveDraft($data, $draftId, $editingCheckpoint ? $checkpointToken : null);
+            $this->recordAudit('client.plan_not_confirmed', 'client_registration', null, [
+                'login' => (string) ($data['login'] ?? ''),
+                'request_id' => (string) ($partial['request_id'] ?? ''),
+                'client_uuid' => (string) ($partial['client_uuid'] ?? ''),
+                'expected_plan' => (string) ($partial['expected_plan']['name'] ?? ''),
+                'observed_plan' => (string) ($partial['plan_confirmation']['observed_name'] ?? ''),
+            ], $request);
+            Flash::set('error', $exception->getMessage() . ' Tente aplicar o plano novamente nesta tela; o cliente existente será atualizado sem novo cadastro.');
+
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
         } catch (\Throwable $exception) {
             $loginValue = (string) ($data['login'] ?? '');
             $cpfValue = (string) ($data['cpf_cnpj'] ?? '');
@@ -1439,40 +1462,18 @@ final class ClientController
                 $clientAlreadyExists = false;
             }
 
-            if (!$clientAlreadyExists) {
-                $this->recordAudit('client.provision_failed', 'client_registration', null, [
-                    'login' => $loginValue,
-                    'error' => $exception->getMessage(),
-                ], $request);
-                Flash::set(
-                    'error',
-                    'Nao foi possivel concluir o envio ao MkAuth agora: ' . $exception->getMessage() . ' Seus dados foram mantidos para nova tentativa.'
-                );
-
-                return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
-            }
-
-            $data['evidence_ref'] = $data['evidence_ref'] ?? $existingEvidenceRef;
-            $data['evidence_url'] = $data['evidence_url'] ?? ($existingEvidenceRef !== ''
-                ? $this->absoluteUrl($request, '/clientes/evidencias?ref=' . rawurlencode($existingEvidenceRef))
-                : '');
-            $data['cadastro'] = date('Y-m-d');
-            $response = [
-                'status' => 'sucesso',
-                'mensagem' => 'Cliente já localizado no MkAuth. O fluxo local foi retomado após o aviso remoto.',
-            ];
-            $payload = [
+            $this->recordAudit('client.provision_failed', 'client_registration', null, [
                 'login' => $loginValue,
-                'nome' => (string) ($data['nome_completo'] ?? ''),
-                'cpf_cnpj' => $cpfValue,
-                'plano' => (string) ($data['plano'] ?? ''),
-            ];
-            $action = 'create';
-            $postProvisionWarnings[] = 'MkAuth retornou aviso, mas o cliente já existe no remoto e o fluxo foi retomado.';
-            $this->recordAudit('client.provision_recovered', 'client_registration', null, [
-                'login' => $loginValue,
+                'client_already_exists' => $clientAlreadyExists,
                 'error' => $exception->getMessage(),
             ], $request);
+            Flash::set(
+                'error',
+                'Nao foi possivel confirmar o cadastro no MkAuth: ' . $exception->getMessage()
+                . ' Seus dados foram mantidos; tente novamente sem iniciar outro cliente.'
+            );
+
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
         }
 
         $this->deleteDraftMedia($draftId);
@@ -1481,7 +1482,10 @@ final class ClientController
         $_SESSION['clear_client_drafts'] = ['client-create', 'client-create-' . $draftId, 'client-acceptance-' . $draftId];
 
         $message = $response['mensagem'] ?? 'Cliente provisionado com sucesso.';
-        $successLabel = $action === 'update' ? 'Cliente atualizado com sucesso.' : 'Cliente cadastrado com sucesso.';
+        $confirmedPlanName = trim((string) ($provisionResult['plan_confirmation']['expected_name'] ?? $payload['plano'] ?? ''));
+        $successLabel = $action === 'update'
+            ? 'Cliente atualizado e plano ' . $confirmedPlanName . ' confirmado no MkAuth.'
+            : 'Cliente criado e plano ' . $confirmedPlanName . ' confirmado no MkAuth.';
         $connectionToken = $editingCheckpoint ? $checkpointToken : bin2hex(random_bytes(16));
         $this->syncContractArtifacts($data, $payload, null, $request);
         $registrationId = $this->recordClientRegistration($data, $payload, $connectionToken);
@@ -1492,7 +1496,6 @@ final class ClientController
             ? $this->contractAcceptanceRepository->findLatestByContractId((int) $contractRecord['id'])
             : null;
         $integrationResults = [];
-        $postProvisionWarnings = [];
 
         if ($contractRecord !== null && $acceptanceRecord !== null) {
             try {

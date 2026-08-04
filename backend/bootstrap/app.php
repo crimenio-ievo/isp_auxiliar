@@ -22,6 +22,7 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Notifications\EvotrixService;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\MkAuth\ClientPayloadMapper;
+use App\Infrastructure\MkAuth\ClientPlanConfirmationService;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthClient;
@@ -174,9 +175,14 @@ function bootstrapApplication(): Application
         (int) $config->get('app.client_detail.timeout_seconds', 10)
     ));
     $container->set(ClientPayloadMapper::class, new ClientPayloadMapper());
+    $container->set(ClientPlanConfirmationService::class, new ClientPlanConfirmationService(
+        $container->get(MkAuthDatabase::class)
+    ));
     $container->set(ClientProvisioner::class, new ClientProvisioner(
         $container->get(ClientPayloadMapper::class),
-        $container->get(MkAuthClient::class)
+        $container->get(MkAuthClient::class),
+        $container->get(ClientPlanConfirmationService::class),
+        (string) $config->get('paths.logs', $rootPath . '/logs') . '/client-plan-confirmation.log'
     ));
     $container->set(MkAuthTicketService::class, new MkAuthTicketService(
         (array) $config->get('contracts.mkauth_ticket', []),
