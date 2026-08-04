@@ -43,6 +43,21 @@ $commercial = [
         'CONTRACT_MODO_ISENCAO_ADESAO_MIGRACAO_RADIO_FIBRA',
         (filter_var(Env::get('CONTRACT_ISENTAR_ADESAO_MIGRACAO_RADIO_FIBRA', '0'), FILTER_VALIDATE_BOOL) ? 'automatic' : 'disabled')
     ))),
+    'fidelidade_automatica_migracao' => filter_var(
+        Env::get('CONTRACT_FIDELIDADE_AUTOMATICA_MIGRACAO', '1'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? true,
+    'fidelidade_automatica_upgrade' => filter_var(
+        Env::get('CONTRACT_FIDELIDADE_AUTOMATICA_UPGRADE', '0'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? false,
+    'sugerir_retencao_downgrade' => filter_var(
+        Env::get('CONTRACT_SUGERIR_RETENCAO_DOWNGRADE', '1'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? true,
 ];
 
 $commercial = array_replace($commercial, array_intersect_key($commercialOverrides, $commercial));

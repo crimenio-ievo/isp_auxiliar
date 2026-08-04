@@ -41,6 +41,169 @@ final class OperationalProcessService
         return $this->processRepository->isAvailable();
     }
 
+    public function startMigrationDraft(string $login, array $client, array $operator): array
+    {
+        $login = strtolower(trim($login));
+        if ($login === '') {
+            throw new \InvalidArgumentException('Login obrigatório para iniciar a migração.');
+        }
+        foreach ($this->listByLogin($login) as $candidate) {
+            if ((string) ($candidate['process_type'] ?? '') === self::TYPE_MIGRATION
+                && !in_array((string) ($candidate['status'] ?? ''), ['completed', 'cancelled'], true)
+            ) {
+                return $candidate;
+            }
+        }
+
+        $operatorLogin = trim((string) ($operator['login'] ?? ''));
+        $processId = $this->processRepository->create([
+            'process_type' => self::TYPE_MIGRATION,
+            'mkauth_login' => $login,
+            'client_name' => (string) ($client['nome'] ?? $client['name'] ?? $login),
+            'status' => 'draft',
+            'current_step_key' => 'migration_data',
+            'next_pending_key' => 'migration_data',
+            'next_pending_label' => 'Dados da migração',
+            'responsible_user_id' => isset($operator['id']) ? (int) $operator['id'] : null,
+            'responsible_login' => $operatorLogin,
+            'responsible_name' => (string) ($operator['name'] ?? $operatorLogin),
+            'created_by_user_id' => isset($operator['id']) ? (int) $operator['id'] : null,
+            'created_by_login' => $operatorLogin,
+            'metadata' => [
+                'process_type' => self::TYPE_MIGRATION,
+                'draft' => true,
+                'client' => [
+                    'name' => (string) ($client['nome'] ?? $client['name'] ?? ''),
+                    'login' => $login,
+                    'phone' => (string) ($client['celular'] ?? $client['fone'] ?? ''),
+                    'email' => (string) ($client['email'] ?? ''),
+                ],
+            ],
+            'started_at' => date('Y-m-d H:i:s'),
+        ]);
+        $this->processRepository->createSteps($processId, $this->stepDefinitions(self::TYPE_MIGRATION));
+        $this->refreshProgress($processId);
+        $this->recordAudit('operational_process.migration.draft_started', 'operational_process', $processId, [
+            'login' => $login,
+        ], $operator);
+
+        return $this->detail($processId) ?? [];
+    }
+
+    public function replaceStepEvidence(int $processId, string $stepKey, array $evidence, array $operator): array
+    {
+        $process = $this->processRepository->findById($processId);
+        $step = $this->processRepository->findStep($processId, $stepKey);
+        if (!is_array($process) || !is_array($step) || (string) ($process['status'] ?? '') === 'cancelled') {
+            throw new \RuntimeException('Etapa indisponível para atualizar evidências.');
+        }
+        $this->processRepository->updateStep((int) $step['id'], [
+            'evidence' => $evidence,
+            'last_checked_at' => date('Y-m-d H:i:s'),
+        ]);
+        $this->recordAudit('operational_process.step.evidence_updated', 'operational_process_step', (int) $step['id'], [
+            'process_id' => $processId,
+            'step_key' => $stepKey,
+            'file_count' => count((array) ($evidence['files'] ?? [])),
+        ], $operator);
+
+        return $this->detail($processId) ?? [];
+    }
+
+    public function updateMigrationContacts(
+        int $processId,
+        string $phone,
+        string $email,
+        string $reason,
+        array $operator
+    ): array {
+        $process = $this->processRepository->findById($processId);
+        if (!is_array($process)
+            || (string) ($process['process_type'] ?? '') !== self::TYPE_MIGRATION
+            || in_array((string) ($process['status'] ?? ''), ['completed', 'cancelled'], true)
+        ) {
+            throw new \RuntimeException('Processo de migração indisponível para corrigir contatos.');
+        }
+        $contract = $this->contractRepository->findById((int) ($process['contract_id'] ?? 0));
+        $acceptance = $this->acceptanceRepository->findById((int) ($process['acceptance_id'] ?? 0));
+        if (!is_array($contract) || !is_array($acceptance)) {
+            throw new \RuntimeException('Contrato e aceite ativos são obrigatórios para corrigir contatos.');
+        }
+        if ((string) ($acceptance['status'] ?? '') === 'aceito' || trim((string) ($acceptance['revoked_at'] ?? '')) !== '') {
+            throw new \RuntimeException('O contato não pode ser alterado depois do aceite ou da revogação.');
+        }
+
+        $phone = preg_replace('/\D+/', '', $phone) ?? '';
+        if (in_array(strlen($phone), [10, 11], true)) {
+            $phone = '55' . $phone;
+        }
+        $email = strtolower(trim($email));
+        $reason = trim($reason);
+        if (strlen($phone) < 12 || strlen($phone) > 13) {
+            throw new \InvalidArgumentException('Informe um WhatsApp válido com DDD.');
+        }
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new \InvalidArgumentException('Informe um e-mail válido ou deixe o campo vazio.');
+        }
+        if ($reason === '') {
+            throw new \InvalidArgumentException('Informe o motivo da correção do contato.');
+        }
+
+        $metadata = is_array($process['metadata'] ?? null) ? $process['metadata'] : [];
+        $client = is_array($metadata['client'] ?? null) ? $metadata['client'] : [];
+        $before = [
+            'phone' => (string) ($client['phone'] ?? $acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? ''),
+            'email' => (string) ($client['email'] ?? ''),
+        ];
+        $metadata['client'] = array_replace($client, ['phone' => $phone, 'email' => $email]);
+
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+            $contract['telefone_cliente'] = $phone;
+            $this->contractRepository->updateById((int) $contract['id'], $contract);
+            $acceptance['telefone_enviado'] = $phone;
+            if ($this->acceptanceRepository->updateById((int) $acceptance['id'], $acceptance) !== 1) {
+                throw new \RuntimeException('O aceite foi alterado durante a correção do contato.');
+            }
+            $this->processRepository->updateProcess($processId, ['metadata' => $metadata]);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
+
+        $this->recordAudit('operational_process.migration.contact_corrected', 'operational_process', $processId, [
+            'reason' => $reason,
+            'before' => $before,
+            'after' => ['phone' => $phone, 'email' => $email],
+            'contract_id' => (int) $contract['id'],
+            'acceptance_id' => (int) $acceptance['id'],
+        ], $operator);
+
+        return $this->detail($processId) ?? [];
+    }
+
+    public function activeMigrationForLogin(string $login): ?array
+    {
+        foreach ($this->listByLogin(strtolower(trim($login))) as $candidate) {
+            if ((string) ($candidate['process_type'] ?? '') === self::TYPE_MIGRATION
+                && !in_array((string) ($candidate['status'] ?? ''), ['completed', 'cancelled'], true)
+            ) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
     public function ensureForContract(
         string $processType,
         array $contract,
@@ -275,6 +438,8 @@ final class OperationalProcessService
             }
         }
 
+        $this->completeMigrationWhenFinancialClosed($processId);
+
         $this->refreshProgress($processId);
     }
 
@@ -452,6 +617,11 @@ final class OperationalProcessService
                 'observation' => $observation,
                 'pending_reason' => $pendingReason,
                 'next_action' => $nextAction !== '' ? $nextAction : 'Corrigir a inconsistência e tentar novamente.',
+                'evidence' => array_merge($evidence, [
+                    'checked_by' => $operatorLogin,
+                    'checked_at' => $now,
+                    'origin' => 'manual',
+                ]),
                 'last_checked_at' => $now,
             ]);
         } else {
@@ -716,6 +886,52 @@ final class OperationalProcessService
                 'context' => $context,
             ]);
         }
+    }
+
+    private function completeMigrationWhenFinancialClosed(int $processId): void
+    {
+        $process = $this->processRepository->findById($processId);
+        if (!is_array($process)
+            || (string) ($process['process_type'] ?? '') !== self::TYPE_MIGRATION
+            || in_array((string) ($process['status'] ?? ''), ['completed', 'cancelled'], true)
+        ) {
+            return;
+        }
+        $steps = $this->processRepository->steps($processId);
+        foreach ($steps as $step) {
+            if ((string) ($step['step_key'] ?? '') === 'complete_migration') {
+                continue;
+            }
+            if (!empty($step['is_required']) && !in_array((string) ($step['status'] ?? ''), ['completed', 'not_applicable'], true)) {
+                return;
+            }
+        }
+        $finalStep = $this->processRepository->findStep($processId, 'complete_migration');
+        if (!is_array($finalStep) || (string) ($finalStep['status'] ?? '') === 'completed') {
+            return;
+        }
+        $now = date('Y-m-d H:i:s');
+        $this->processRepository->updateStep((int) $finalStep['id'], [
+            'status' => 'completed',
+            'started_at' => (string) ($finalStep['started_at'] ?? '') ?: $now,
+            'completed_at' => $now,
+            'completion_origin' => 'automatic',
+            'observation' => 'Processo concluído após o fechamento financeiro reconciliado.',
+            'evidence' => ['source' => 'financial_reconciliation', 'completed_at' => $now],
+            'pending_reason' => null,
+            'next_action' => null,
+            'last_checked_at' => $now,
+        ]);
+        $this->processRepository->updateProcess($processId, [
+            'status' => 'completed',
+            'completed_at' => $now,
+            'current_step_key' => null,
+            'next_pending_key' => null,
+            'next_pending_label' => null,
+        ]);
+        $this->recordAudit('operational_process.completed_automatically', 'operational_process', $processId, [
+            'source' => 'financial_reconciliation',
+        ], ['login' => 'system']);
     }
 
     private function completeStepAutomatically(int $processId, string $stepKey, array $evidence): void

@@ -373,11 +373,6 @@ final class ClientController
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
-        if ($correctionOf <= 0 && $this->hasOpenUpgradeProcess($login)) {
-            Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. Retome o processo existente.');
-            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
-        }
-
         $context = $this->loadUpgradeContext($login);
         if ($context === null) {
             Flash::set('error', 'Nao foi possivel localizar o cliente para upgrade.');
@@ -386,6 +381,18 @@ final class ClientController
 
         if (is_array($correctionContract)) {
             $context = $this->applyCorrectionContext($context, $correctionContract);
+        }
+
+        if ($correctionOf <= 0) {
+            $activeProcess = $this->operationalProcessService->activeMigrationForLogin($login);
+            if (is_array($activeProcess) && (int) ($activeProcess['contract_id'] ?? 0) > 0) {
+                Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. O processo existente foi retomado.');
+                return Response::redirect((string) ($activeProcess['resume_url'] ?? '/clientes/detalhe?login=' . rawurlencode($login)));
+            }
+            if (!is_array($activeProcess)) {
+                $activeProcess = $this->operationalProcessService->startMigrationDraft($login, (array) ($context['clientProfile'] ?? []), $this->resolveUser());
+            }
+            $processId = (int) ($activeProcess['id'] ?? $processId);
         }
 
         return $this->renderUpgradeForm(
@@ -466,9 +473,12 @@ final class ClientController
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
         }
 
-        if ($correctionOf <= 0 && $this->hasOpenUpgradeProcess($login)) {
-            Flash::set('warning', 'Já existe um Upgrade / Migração em andamento. Retome o processo existente.');
-            return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
+        if ($correctionOf <= 0) {
+            $activeProcess = $this->operationalProcessService->activeMigrationForLogin($login);
+            if (!is_array($activeProcess) || (int) ($activeProcess['id'] ?? 0) !== $processId || (int) ($activeProcess['contract_id'] ?? 0) > 0) {
+                Flash::set('warning', 'O rascunho informado não é o processo ativo deste cliente. Retome o processo existente.');
+                return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login) . '#upgrade-process');
+            }
         }
 
         $context = $this->loadUpgradeContext($login);
@@ -5480,6 +5490,9 @@ final class ClientController
             'planOptions' => $planOptions,
             'adhesion_default_value' => (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0),
             'adhesion_waiver_mode' => $this->radioFiberAdhesionWaiverMode(),
+            'auto_fidelity_migration' => (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true),
+            'auto_fidelity_upgrade' => (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false),
+            'suggest_retention_downgrade' => (bool) $this->config->get('contracts.commercial.sugerir_retencao_downgrade', true),
         ];
     }
 
@@ -5520,6 +5533,8 @@ final class ClientController
             $benefitDescription = $benefitDefaults['description'];
         }
         $benefitValue = $this->normalizeMoney((string) $request->input('valor_beneficio', (string) $benefitDefaults['value']));
+        $benefitOriginalValue = (float) $benefitDefaults['value'];
+        $benefitAdjustmentReason = trim((string) $request->input('benefit_adjustment_reason', ''));
         $benefitOtherText = trim((string) $request->input('beneficio_outro_text', ''));
         $benefitFlags['other_benefit'] = $benefitOtherText !== '';
         $waiverMode = $this->radioFiberAdhesionWaiverMode();
@@ -5535,15 +5550,23 @@ final class ClientController
         if (!empty($benefitFlags['adhesion_waiver'])) {
             $benefitValue = (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0);
         }
-        $applyFidelity = (string) $request->input('apply_fidelity', '0') === '1';
+        $automaticFidelity = (!empty($benefitFlags['radio_to_fiber'])
+                && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true))
+            || (!empty($benefitFlags['plan_upgrade'])
+                && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false));
+        $applyFidelity = (string) $request->input('apply_fidelity', $automaticFidelity ? '1' : '0') === '1';
         $fidelityMonths = $applyFidelity ? (int) $request->input('fidelidade_meses', '12') : 0;
         $fidelityBenefitDescription = trim((string) $request->input('fidelity_benefit_description', ''));
+        if ($applyFidelity && $fidelityBenefitDescription === '') {
+            $fidelityBenefitDescription = (string) $benefitDefaults['description'];
+        }
 
         if (!$this->canUpgradeCommercial()) {
             $benefitFlags = $benefitDefaults['flags'];
             $benefitDescription = $benefitDefaults['description'];
             $benefitValue = (float) $benefitDefaults['value'];
             $benefitOtherText = '';
+            $benefitAdjustmentReason = '';
         }
 
         return [
@@ -5579,6 +5602,9 @@ final class ClientController
             'beneficio_concedido' => $benefitDescription,
             'beneficio_outro_text' => $benefitOtherText,
             'valor_beneficio' => $benefitValue,
+            'benefit_original_value' => $benefitOriginalValue,
+            'benefit_adjusted' => abs($benefitValue - $benefitOriginalValue) > 0.009,
+            'benefit_adjustment_reason' => $benefitAdjustmentReason,
             'novo_valor_mensal' => $this->normalizeMoney((string) $request->input('novo_valor_mensal', (string) $monthlyValue)),
             'retention_condition' => !empty($benefitFlags['retention']),
             'apply_fidelity' => $applyFidelity,
@@ -5649,6 +5675,10 @@ final class ClientController
 
         if (!empty($data['retention_condition']) && trim((string) ($data['observacao'] ?? '')) === '') {
             $errors['observacao'] = 'Justifique a condição comercial de retenção.';
+        }
+
+        if (!empty($data['benefit_adjusted']) && trim((string) ($data['benefit_adjustment_reason'] ?? '')) === '') {
+            $errors['benefit_adjustment_reason'] = 'Justifique a alteração do valor automático do benefício.';
         }
 
         if (!empty($data['apply_fidelity'])) {
@@ -6139,6 +6169,9 @@ final class ClientController
             'benefit_description' => $benefitDescription !== '' ? $benefitDescription : (string) ($data['beneficio_concedido'] ?? $context['benefit_description'] ?? ''),
             'benefit_other_text' => $benefitOtherText,
             'benefit_value' => (float) ($data['valor_beneficio'] ?? $benefitDefaults['value']),
+            'benefit_original_value' => (float) ($data['benefit_original_value'] ?? $benefitDefaults['value']),
+            'benefit_adjusted' => !empty($data['benefit_adjusted']),
+            'benefit_adjustment_reason' => (string) ($data['benefit_adjustment_reason'] ?? ''),
             'adhesion_default_value' => (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0),
             'adhesion_charged_value' => !empty($benefitFlags['adhesion_waiver'])
                 ? 0.0

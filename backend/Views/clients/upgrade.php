@@ -22,6 +22,7 @@ $fidelityMonths = $applyFidelity && array_key_exists('fidelidade_meses', $form)
     : max(1, min(12, (int) ($context['fidelity_months'] ?? 12)));
 $fidelityDescription = trim((string) ($form['fidelity_benefit_description'] ?? $context['fidelity_benefit_description'] ?? ''));
 $otherBenefit = trim((string) ($form['beneficio_outro_text'] ?? ''));
+$benefitAdjustmentReason = trim((string) ($form['benefit_adjustment_reason'] ?? ''));
 $observation = trim((string) ($form['observacao'] ?? $context['observacao'] ?? ''));
 $correctionOf = (int) ($correctionOf ?? 0);
 $correctionReason = trim((string) ($correctionReason ?? ''));
@@ -45,7 +46,7 @@ ob_start();
 ?>
 <section class="page-header">
     <div>
-        <p class="section-heading__eyebrow">Tela 1 de 4</p>
+        <p class="section-heading__eyebrow">Etapa 1 de 4</p>
         <h1>Nova condição</h1>
         <p class="page-description">Escolha o novo plano. Tecnologia, valor e tipo da operação são derivados dos dados oficiais do plano.</p>
     </div>
@@ -90,12 +91,15 @@ ob_start();
     data-current-plan="<?= htmlspecialchars((string) ($currentPlanOption['id'] ?? $currentPlan), ENT_QUOTES, 'UTF-8'); ?>"
     data-current-family="<?= htmlspecialchars((string) ($currentPlanOption['install_type'] ?? $context['current_technology_family'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
     data-current-speed="<?= htmlspecialchars((string) ($currentPlanOption['speed_down'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-    data-current-value="<?= htmlspecialchars((string) ($currentValue ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+    data-current-value="<?= htmlspecialchars((string) ($currentValue ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+    data-auto-fidelity-migration="<?= !empty($context['auto_fidelity_migration']) ? '1' : '0'; ?>"
+    data-auto-fidelity-upgrade="<?= !empty($context['auto_fidelity_upgrade']) ? '1' : '0'; ?>"
+    data-suggest-retention-downgrade="<?= !empty($context['suggest_retention_downgrade']) ? '1' : '0'; ?>">
     <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="login" value="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?>">
+    <input type="hidden" name="process_id" value="<?= $processId; ?>">
     <?php if ($correctionOf > 0): ?>
         <input type="hidden" name="correction_of" value="<?= $correctionOf; ?>">
-        <input type="hidden" name="process_id" value="<?= $processId; ?>">
         <input type="hidden" name="revision_mode" value="<?= htmlspecialchars($revisionMode, ENT_QUOTES, 'UTF-8'); ?>">
     <?php endif; ?>
 
@@ -151,16 +155,17 @@ ob_start();
             <small class="field-help">Troca de tecnologia = migração; condição superior = upgrade; condição inferior = downgrade.</small>
         </div>
 
-        <section class="field field--span-2 adhesion-summary" aria-live="polite"
+        <section class="field field--span-2 adhesion-summary adhesion-summary--compact" aria-live="polite"
             data-adhesion-summary
             data-adhesion-default="<?= htmlspecialchars((string) $adhesionDefault, ENT_QUOTES, 'UTF-8'); ?>"
             data-waiver-mode="<?= htmlspecialchars($waiverMode, ENT_QUOTES, 'UTF-8'); ?>">
-            <span>Adesão</span>
-            <div class="summary-grid">
-                <div class="summary-item"><span>Padrão configurado</span><strong>R$ <?= number_format($adhesionDefault, 2, ',', '.'); ?></strong></div>
-                <div class="summary-item"><span>Valor cobrado</span><strong data-adhesion-charged>Definido após escolher o plano</strong></div>
-                <div class="summary-item"><span>Benefício</span><strong data-adhesion-benefit>Sem isenção automática</strong></div>
-            </div>
+            <strong>Condições aplicadas automaticamente</strong>
+            <ul class="automatic-condition-list">
+                <li data-automatic-operation>✓ Operação calculada pelo plano e tecnologia</li>
+                <li data-adhesion-charged>✓ Adesão definida após escolher o plano</li>
+                <li data-adhesion-benefit>✓ Benefício calculado pela regra comercial</li>
+                <li>✓ Fidelidade conforme configuração do provedor</li>
+            </ul>
             <?php if ($waiverMode === 'manual'): ?>
                 <label class="checkbox-field" data-manual-waiver hidden>
                     <input type="checkbox" name="manual_adhesion_waiver" value="1" <?= !empty($form['manual_adhesion_waiver']) ? 'checked' : ''; ?>>
@@ -169,10 +174,20 @@ ob_start();
             <?php endif; ?>
         </section>
 
+        <details class="field field--span-2 commercial-adjustments" <?= ($retention || $applyFidelity || $otherBenefit !== '' || $benefitAdjustmentReason !== '') ? 'open' : ''; ?>>
+            <summary>Ajustar condições</summary>
+            <div class="form-grid">
         <label class="field" for="benefit-value">
             <span>Valor do benefício</span>
             <input id="benefit-value" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" aria-describedby="benefit-value-error" <?= $firstErrorField === 'valor_beneficio' ? 'data-focus-field' : ''; ?>>
             <?php if ($errorFor('valor_beneficio') !== ''): ?><small id="benefit-value-error" class="field-error"><?= htmlspecialchars($errorFor('valor_beneficio'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+        </label>
+
+        <label class="field" for="benefit-adjustment-reason">
+            <span>Justificativa do ajuste</span>
+            <input id="benefit-adjustment-reason" name="benefit_adjustment_reason" value="<?= htmlspecialchars($benefitAdjustmentReason, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="benefit-adjustment-reason-error">
+            <small class="field-help">Obrigatória somente quando o valor automático for alterado.</small>
+            <?php if ($errorFor('benefit_adjustment_reason') !== ''): ?><small id="benefit-adjustment-reason-error" class="field-error"><?= htmlspecialchars($errorFor('benefit_adjustment_reason'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
         </label>
 
         <label class="field" for="other-benefit">
@@ -204,6 +219,8 @@ ob_start();
                 </label>
             </div>
         </fieldset>
+            </div>
+        </details>
 
         <label class="field field--span-2" for="upgrade-observation">
             <span>Observação</span>
