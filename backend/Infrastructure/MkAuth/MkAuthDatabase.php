@@ -26,9 +26,11 @@ final class MkAuthDatabase
         private string $password,
         private string $charset = 'utf8mb4',
         private string $hashAlgos = 'sha256,sha1',
-        private ?MkAuthWriteGuard $writeGuard = null
+        private ?MkAuthWriteGuard $writeGuard = null,
+        private int $timeoutSeconds = 10
     ) {
         $this->writeGuard ??= new MkAuthWriteGuard('unknown', false);
+        $this->timeoutSeconds = max(1, min(30, $this->timeoutSeconds));
     }
 
     public function isConfigured(): bool
@@ -778,12 +780,18 @@ final class MkAuthDatabase
             $this->charset
         );
 
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+            PDO::ATTR_TIMEOUT => $this->timeoutSeconds,
+        ];
+        if (defined('PDO::MYSQL_ATTR_READ_TIMEOUT')) {
+            $options[(int) constant('PDO::MYSQL_ATTR_READ_TIMEOUT')] = $this->timeoutSeconds;
+        }
+
         try {
-            $this->pdo = new PDO($dsn, $this->username, $this->password, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ]);
+            $this->pdo = new PDO($dsn, $this->username, $this->password, $options);
         } catch (PDOException $exception) {
             throw new RuntimeException('Falha ao conectar no banco MkAuth: ' . $exception->getMessage(), 0, $exception);
         }

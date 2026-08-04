@@ -27,4 +27,7 @@ return [
         'client_id' => Env::get('MKAUTH_CLIENT_ID', ''),
         'client_secret' => Env::get('MKAUTH_CLIENT_SECRET', ''),
     ],
+    'client_detail' => [
+        'timeout_seconds' => max(8, min(12, (int) Env::get('CLIENT_DETAIL_TIMEOUT_SECONDS', '10'))),
+    ],
 ];

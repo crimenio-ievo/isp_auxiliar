@@ -170,7 +170,8 @@ function bootstrapApplication(): Application
         $setting('mkauth_db_password', 'MKAUTH_DB_PASSWORD'),
         $setting('mkauth_db_charset', 'MKAUTH_DB_CHARSET', 'utf8mb4'),
         $setting('mkauth_db_hash_algos', 'MKAUTH_DB_HASH_ALGOS', 'sha256,sha1'),
-        $container->get(MkAuthWriteGuard::class)
+        $container->get(MkAuthWriteGuard::class),
+        (int) $config->get('app.client_detail.timeout_seconds', 10)
     ));
     $container->set(ClientPayloadMapper::class, new ClientPayloadMapper());
     $container->set(ClientProvisioner::class, new ClientProvisioner(

@@ -268,6 +268,7 @@ final class ClientController
             'canCancelPendingContract' => $this->canCancelPendingContract(),
             'canSupersedeContract' => $this->canSupersedeContract(),
             'contractSignatureCsrfToken' => Csrf::token('client_contract_signature:' . $login),
+            'clientDetailTimeoutMs' => (int) $this->config->get('app.client_detail.timeout_seconds', 10) * 1000,
         ]);
 
         return Response::html($html);
@@ -276,19 +277,20 @@ final class ClientController
     public function connectionDetails(Request $request): Response
     {
         if (!$this->canSearchClients()) {
-            return Response::json(['status' => 'error', 'message' => 'Acesso negado.'], 403);
+            return Response::json(['ok' => false, 'status' => 'error', 'data' => [], 'message' => 'Acesso negado.', 'retryable' => false], 403);
         }
 
         $login = $this->sanitizeLogin((string) $request->query('login', ''));
         if ($login === '') {
-            return Response::json(['status' => 'error', 'message' => 'Login inválido.'], 422);
+            return Response::json(['ok' => false, 'status' => 'error', 'data' => [], 'message' => 'Login inválido.', 'retryable' => false], 422);
         }
 
         try {
             $profile = $this->mkauthDatabase->findClientProfile($login) ?? [];
             $connection = $this->mkauthDatabase->radiusConnectionStatus($login);
-        } catch (\Throwable) {
-            return Response::json(['status' => 'error', 'message' => 'Consulta de conexão indisponível.'], 503);
+        } catch (\Throwable $exception) {
+            $this->logClientDetailFailure('connection', $login, $exception);
+            return Response::json(['ok' => false, 'status' => 'error', 'data' => [], 'message' => 'Consulta de conexão indisponível.', 'retryable' => true], 503);
         }
 
         $session = is_array($connection['session'] ?? null) ? $connection['session'] : [];
@@ -296,6 +298,7 @@ final class ClientController
         $canViewIp = $this->canViewClientIp();
 
         return Response::json([
+            'ok' => true,
             'status' => 'success',
             'data' => [
                 'online' => !empty($connection['online']),
@@ -315,27 +318,30 @@ final class ClientController
                 'interface' => trim((string) ($profile['interface'] ?? '')),
                 'source' => 'MkAuth/RADIUS (somente leitura)',
             ],
+            'message' => '',
+            'retryable' => false,
         ]);
     }
 
     public function financialDetails(Request $request): Response
     {
         if (!$this->canManageFinancial()) {
-            return Response::json(['status' => 'error', 'message' => 'Detalhes financeiros restritos.'], 403);
+            return Response::json(['ok' => false, 'status' => 'error', 'data' => [], 'message' => 'Detalhes financeiros restritos.', 'retryable' => false], 403);
         }
 
         $login = $this->sanitizeLogin((string) $request->query('login', ''));
         if ($login === '') {
-            return Response::json(['status' => 'error', 'message' => 'Login inválido.'], 422);
+            return Response::json(['ok' => false, 'status' => 'error', 'data' => [], 'message' => 'Login inválido.', 'retryable' => false], 422);
         }
 
         try {
             $summary = $this->mkauthDatabase->clientFinancialSummary($login);
-        } catch (\Throwable) {
-            return Response::json(['status' => 'error', 'message' => 'Consulta financeira indisponível.'], 503);
+        } catch (\Throwable $exception) {
+            $this->logClientDetailFailure('financial', $login, $exception);
+            return Response::json(['ok' => false, 'status' => 'error', 'data' => [], 'message' => 'Os detalhes financeiros não puderam ser carregados.', 'retryable' => true], 503);
         }
 
-        return Response::json(['status' => 'success', 'data' => $summary]);
+        return Response::json(['ok' => true, 'status' => 'success', 'data' => $summary, 'message' => '', 'retryable' => false]);
     }
 
     public function upgrade(Request $request): Response
@@ -7373,6 +7379,16 @@ final class ClientController
             'quantidade_digitos_validacao_cpf' => max(1, (int) ($commercial['quantidade_digitos_validacao_cpf'] ?? 4)),
             'validade_link_aceite_horas' => max(1, (int) ($commercial['validade_link_aceite_horas'] ?? 48)),
         ];
+    }
+
+    private function logClientDetailFailure(string $area, string $login, \Throwable $exception): void
+    {
+        error_log(sprintf(
+            '[client_detail.%s] read_failed login_hash=%s error=%s',
+            preg_replace('/[^a-z_]+/', '', strtolower($area)) ?: 'unknown',
+            substr(hash('sha256', strtolower(trim($login))), 0, 12),
+            $exception::class
+        ));
     }
 
     private function recordAudit(string $action, string $entityType, ?int $entityId, array $context, Request $request): void
