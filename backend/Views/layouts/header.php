@@ -21,6 +21,10 @@ $releasePreference = in_array($releasePreference, ['stable', 'beta'], true) ? $r
 $access = is_array($user['access'] ?? null) ? $user['access'] : [];
 $canUseBeta = !empty($access['can_use_beta'])
     || in_array($role, ['manager', 'gestor', 'admin', 'platform_admin', 'administrador'], true);
+$stableDestination = rtrim(trim((string) ($releaseInfo['stable_base_url'] ?? '')), '/');
+$betaDestination = rtrim(trim((string) ($releaseInfo['beta_base_url'] ?? '')), '/');
+$separateReleaseTargets = $stableDestination !== '' && $betaDestination !== '' && $stableDestination !== $betaDestination;
+$selectedReleaseLabel = $releasePreference === 'beta' ? 'Beta' : 'Stable';
 ?>
 <header class="topbar<?= $layoutMode === 'guest' ? ' topbar--guest' : ''; ?>">
     <?php if ($layoutMode !== 'guest'): ?>
@@ -38,17 +42,23 @@ $canUseBeta = !empty($access['can_use_beta'])
 
     <div class="topbar__actions">
         <?php if ($layoutMode !== 'guest'): ?>
-            <form class="release-channel-selector" method="post" action="<?= htmlspecialchars(Url::to('/canal-versao'), ENT_QUOTES, 'UTF-8'); ?>">
-                <?= Csrf::field('release_channel'); ?>
-                <label for="release-channel">Canal</label>
-                <select id="release-channel" name="release_channel" aria-label="Canal de versão">
-                    <option value="stable"<?= $releasePreference === 'stable' ? ' selected' : ''; ?>>Stable</option>
-                    <?php if ($canUseBeta): ?>
-                        <option value="beta"<?= $releasePreference === 'beta' ? ' selected' : ''; ?>>Beta</option>
-                    <?php endif; ?>
-                </select>
-                <button class="button button--ghost button--small" type="submit">Alternar</button>
-            </form>
+            <div class="release-channel-control">
+                <form class="release-channel-selector" method="post" action="<?= htmlspecialchars(Url::to('/canal-versao'), ENT_QUOTES, 'UTF-8'); ?>">
+                    <?= Csrf::field('release_channel'); ?>
+                    <label for="release-channel">Canal</label>
+                    <select id="release-channel" name="release_channel" aria-label="Canal de versão">
+                        <option value="stable"<?= $releasePreference === 'stable' ? ' selected' : ''; ?>>Stable</option>
+                        <?php if ($canUseBeta): ?>
+                            <option value="beta"<?= $releasePreference === 'beta' ? ' selected' : ''; ?>>Beta</option>
+                        <?php endif; ?>
+                    </select>
+                    <button class="button button--ghost button--small" type="submit">Alternar</button>
+                </form>
+                <small class="release-channel-state" data-release-build-state data-shared-build="<?= $separateReleaseTargets ? '0' : '1'; ?>">
+                    Canal selecionado: <?= htmlspecialchars($selectedReleaseLabel, ENT_QUOTES, 'UTF-8'); ?>.
+                    <?= $separateReleaseTargets ? 'A troca usa o destino configurado para cada canal.' : 'Beta ainda utiliza a mesma build da Stable neste ambiente.'; ?>
+                </small>
+            </div>
             <div class="topbar__user">
                 <span class="avatar"><?= htmlspecialchars(substr((string) $user['name'], 0, 1), ENT_QUOTES, 'UTF-8'); ?></span>
                 <div>
