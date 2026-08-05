@@ -13,8 +13,8 @@ $bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
 $basePath = Url::basePath();
 $releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
 $isBetaRelease = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta';
-$assetVersion = trim((string) ($releaseInfo['id'] ?? ''));
-if ($assetVersion === '') {
+$assetVersion = $layoutMode === 'guest' ? '' : trim((string) ($releaseInfo['id'] ?? ''));
+if ($assetVersion === '' && $layoutMode !== 'guest') {
     $assetVersion = trim((string) ($releaseInfo['commit'] ?? ''));
 }
 if ($assetVersion === '') {

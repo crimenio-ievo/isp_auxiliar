@@ -81,6 +81,10 @@ $assert($unsafeChannels->destination('stable') === '', 'URL com credencial foi a
 $footerPath = var_export($root . '/backend/Views/layouts/footer.php', true);
 $guestFooter = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg('$layoutMode="guest"; define("APP_RELEASE_INFO", ["channel"=>"beta","id"=>"secret-release","commit"=>"abcdef123"]); ob_start(); require ' . $footerPath . '; echo ob_get_clean();'));
 $assert($guestFooter === '', 'Página pública exibiu identificação de release.');
+$layoutPath = var_export($root . '/backend/Views/layouts/app.php', true);
+$autoloadPath = var_export($root . '/backend/bootstrap/autoload.php', true);
+$guestLayout = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg('require ' . $autoloadPath . '; $layoutMode="guest"; $hideHeader=true; $hideFooter=true; $pageTitle="Pública"; $appName="ISP Auxiliar"; $content="ok"; define("APP_RELEASE_INFO", ["channel"=>"beta","id"=>"secret-release","commit"=>"abcdef123"]); require ' . $layoutPath . ';'));
+$assert(!str_contains($guestLayout, 'secret-release') && !str_contains($guestLayout, 'abcdef123'), 'Página pública expôs release no cache busting dos assets.');
 
 $publicIndex = (string) file_get_contents($root . '/public/index.php');
 $assert(strpos($publicIndex, 'bootstrapApplication()') < strpos($publicIndex, 'session_start()'), 'Sessão abriu antes da configuração da release.');
