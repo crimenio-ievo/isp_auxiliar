@@ -14,4 +14,3 @@ A etapa 4 mostra uma única sequência operacional:
 Conexão e chamado são executados depois da confirmação do plano. Chamado real exige ID e não é repetido. A conclusão técnica mantém o processo geral aguardando revisão financeira; o fechamento reconciliado conclui o processo.
 
 Na Beta atual, escrita MkAuth e chamado real estão bloqueados. O botão registra apenas dry-run e nunca o apresenta como execução real. O estado de processamento é `Finalizando atendimento...`.
-

@@ -17,4 +17,3 @@ Os testes com banco usam transação e rollback. Nenhuma escrita MkAuth, notific
 ## Limites honestos
 
 Não havia navegador automatizado instalado no servidor. A matriz visual em zoom 100% e a jornada autenticada ponta a ponta permanecem como homologação administrativa manual no roteiro 78. O endpoint administrativo `/api/release` também requer uma sessão administrativa real para validação HTTP completa.
-

@@ -31,4 +31,3 @@ scripts/releases/deploy_beta.sh \
 ```
 
 Por padrão, MkAuth, notificações, chamados e IA ficam bloqueados. Operações reais exigem `--enable-real-operations` e a confirmação literal adicional documentada pelo `--help`.
-

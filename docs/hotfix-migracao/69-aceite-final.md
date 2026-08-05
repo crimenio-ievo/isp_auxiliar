@@ -20,4 +20,3 @@ WhatsApp e e-mail aparecem somente para seleção, com valores cadastrados somen
 Atualizar executa apenas a releitura do estado. Reenviar reutiliza o mesmo aceite e token, sem exigir nova assinatura e sem gerar token adicional. Horários de última verificação e confirmação são exibidos.
 
 Na homologação, WhatsApp e e-mail permanecem em dry-run.
-

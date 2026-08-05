@@ -11,4 +11,3 @@ Nenhum arquivo, `.env`, storage, configuração Apache, commit ou worktree da St
 Stable e Beta continuam usando o banco de testes `isp_auxiliar`. Esta rodada não criou nem aplicou migration; portanto, não houve alteração de schema compartilhado. O dump administrativo anterior às mudanças está em `/var/backups/isp_auxiliar_beta_final/20260805T213810Z/` com diretório 700 e arquivos 600.
 
 O health da Stable foi executado antes das mudanças e deve ser repetido ao final. A Stable antiga continua sem seletor por decisão explícita e permanece acessível diretamente.
-

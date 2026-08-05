@@ -16,4 +16,3 @@ Plano, tecnologia, operação, valor mensal, benefício automático e elegibilid
 ## Casos automatizados
 
 `FinalBetaSmoke` cobre Rádio→Fibra, Rádio→Rádio superior, plano sem benefício, retorno à Fibra e downgrade com retenção documentada. O snapshot final não recebe valor anterior silenciosamente.
-

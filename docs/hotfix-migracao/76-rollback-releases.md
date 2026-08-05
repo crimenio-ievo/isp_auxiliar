@@ -14,4 +14,3 @@ Garantias:
 - divergência de canal, manifesto, commit ou caminho aborta a operação.
 
 Se uma reversão de banco for realmente necessária, ela exige plano separado, backup confirmado, análise de compatibilidade e autorização explícita.
-

@@ -35,4 +35,3 @@ Validar 1920×1080, 1440×900, 1366×768, 1024×768, 768×1024, 412×915, 390×8
 ## Encerramento
 
 Reexecutar os smokes, health Beta e Stable, confirmar hashes/worktrees e registrar evidências. Esta entrega pode ser declarada funcionalmente finalizada para homologação, nunca pronta para produção sem aprovação administrativa separada.
-

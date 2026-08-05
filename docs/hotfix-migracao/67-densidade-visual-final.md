@@ -19,4 +19,3 @@ Em até 800 px de altura, cabeçalho, navegação, cartões e espaços verticais
 ## Validação
 
 Há verificações estáticas automatizadas para os tokens de densidade, media query de altura, alvos móveis e ausência de escala global. O servidor não possui Chromium/Playwright instalado; a conferência visual em zoom 100% deve ser feita no roteiro 78 nos oito viewports solicitados.
-

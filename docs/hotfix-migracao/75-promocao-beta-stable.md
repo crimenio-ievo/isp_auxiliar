@@ -15,4 +15,3 @@ Não há rebuild, merge implícito, checkout de outro commit ou migration durant
 3. Uma nova branch Beta nasce da nova Stable.
 4. A nova Beta é implantada no canal e runtime Beta.
 5. A Stable permanece na release já aprovada.
-

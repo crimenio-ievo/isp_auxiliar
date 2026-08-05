@@ -7,4 +7,3 @@ O cancelamento está disponível desde o rascunho da Nova condição e nas etapa
 - Após ação externa real futura: exige gestor, confirmação e justificativa de correção/reversão; não promete rollback automático.
 
 `Cancelar e iniciar nova migração` retorna à etapa 1 com outro processo. Contrato, token, aceite, justificativas comerciais e exceções não são reutilizados. O processo anterior permanece somente no histórico e não pode voltar como ativo ou próxima pendência.
-

@@ -24,4 +24,3 @@ A Stable antiga permanece intocada e, por isso, não contém o seletor. Ela cont
 ## Release administrativa
 
 O cabeçalho e o rodapé administrativo mostram apenas canal, release ID e hash curto. Páginas públicas continuam sem identificação de release. `GET /api/release` exige administrador e retorna apenas metadados não sensíveis e os estados de segurança.
-
