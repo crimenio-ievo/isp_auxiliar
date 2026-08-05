@@ -34,6 +34,17 @@ $errorFor = static fn (string $field): string => trim((string) ($errors[$field] 
 $firstErrorField = $errors !== [] ? (string) array_key_first($errors) : '';
 $operationLabels = ['migration' => 'Migração', 'upgrade' => 'Upgrade', 'downgrade' => 'Downgrade'];
 $operation = (string) ($form['operation_type'] ?? '');
+$operationalTechnology = static function (string $value): string {
+    $normalized = strtolower(trim($value));
+    if (str_contains($normalized, 'radio') || str_contains($normalized, 'rádio') || $normalized === 'd') {
+        return 'Rádio';
+    }
+    if (str_contains($normalized, 'fibra') || str_contains($normalized, 'ftth') || $normalized === 'h') {
+        return 'Fibra';
+    }
+
+    return $value !== '' ? $value : 'Não identificada';
+};
 $currentPlanOption = [];
 foreach ($plans as $plan) {
     if (strcasecmp((string) ($plan['id'] ?? ''), $currentPlan) === 0 || strcasecmp((string) ($plan['name'] ?? ''), $currentPlan) === 0) {
@@ -44,14 +55,29 @@ foreach ($plans as $plan) {
 
 ob_start();
 ?>
-<section class="page-header">
+<main class="migration-workspace migration-workspace--condition" data-migration-workspace>
+<header class="migration-workspace__header">
     <div>
         <p class="section-heading__eyebrow">Etapa 1 de 4</p>
         <h1>Nova condição</h1>
         <p class="page-description">Escolha o novo plano. Tecnologia, valor e tipo da operação são derivados dos dados oficiais do plano.</p>
     </div>
-    <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($login)), ENT_QUOTES, 'UTF-8'); ?>">Voltar ao cliente</a>
-</section>
+    <div class="migration-workspace__progress">
+        <strong>1/4</strong>
+        <div class="process-progress"><span style="width: 25%"></span></div>
+        <button class="button button--ghost button--small" type="button" data-open-process-steps aria-controls="migration-checklist" aria-expanded="false">Ver as 4 etapas</button>
+        <?php if ($processId > 0): ?><button class="button button--ghost button--small" type="button" data-open-migration-cancel>Cancelar processo</button><?php endif; ?>
+    </div>
+</header>
+
+<nav class="migration-phase-legend" aria-label="Etapas da migração">
+    <?php foreach ([1 => 'Nova condição', 2 => 'Aceite', 3 => 'Execução técnica', 4 => 'Finalização'] as $stageNumber => $stageLabel): ?>
+        <span class="<?= $stageNumber === 1 ? 'is-current' : ''; ?>"><b><?= $stageNumber; ?></b><?= htmlspecialchars($stageLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+    <?php endforeach; ?>
+</nav>
+
+<div class="migration-workspace__grid">
+<div class="migration-workspace__condition-column">
 
 <?php if ($correctionOf > 0): ?>
     <section class="alert alert--warning" aria-live="polite">
@@ -83,7 +109,7 @@ ob_start();
         <div class="summary-item"><span>Login</span><strong><?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8'); ?></strong></div>
         <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars($currentPlan !== '' ? $currentPlan : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
         <div class="summary-item"><span>Valor atual</span><strong><?= $currentValue !== null ? 'R$ ' . number_format((float) $currentValue, 2, ',', '.') : '-'; ?></strong></div>
-        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars($currentTechnology !== '' ? $currentTechnology : 'Tecnologia não identificada', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+        <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars($operationalTechnology($currentTechnology), ENT_QUOTES, 'UTF-8'); ?></strong></div>
     </div>
 </section>
 
@@ -203,6 +229,7 @@ ob_start();
         <fieldset class="field field--span-2 fidelity-fieldset">
             <legend>Fidelidade</legend>
             <label class="checkbox-field" for="apply-fidelity">
+                <input type="hidden" name="fidelity_choice_present" value="1">
                 <input id="apply-fidelity" type="checkbox" name="apply_fidelity" value="1" data-fidelity-toggle <?= $applyFidelity ? 'checked' : ''; ?>>
                 <span><strong>Aplicar nova fidelidade</strong><small>Somente com benefício real, aceite expresso e prazo máximo de 12 meses.</small></span>
             </label>
@@ -234,6 +261,37 @@ ob_start();
         </div>
     </div>
 </form>
+</div>
+
+<aside class="migration-checklist" id="migration-checklist" aria-label="Jornada da migração" data-process-steps>
+    <header><div><p class="section-heading__eyebrow">Jornada da migração</p><h2>4 etapas</h2></div><button type="button" data-close-process-steps aria-label="Fechar etapas">×</button></header>
+    <div class="migration-checklist__items">
+        <?php foreach ([1 => 'Nova condição', 2 => 'Aceite', 3 => 'Execução técnica', 4 => 'Finalização'] as $stageNumber => $stageLabel): ?>
+            <div class="migration-checklist__step <?= $stageNumber === 1 ? 'is-current migration-checklist__step--info' : 'migration-checklist__step--muted'; ?>" <?= $stageNumber === 1 ? 'aria-current="step"' : ''; ?>><span><?= $stageNumber; ?></span><span><strong><?= htmlspecialchars($stageLabel, ENT_QUOTES, 'UTF-8'); ?></strong><small><?= $stageNumber === 1 ? 'Em andamento' : 'Não iniciada'; ?></small></span></div>
+        <?php endforeach; ?>
+    </div>
+    <details class="migration-technical-details">
+        <summary>Ver detalhes técnicos do processo</summary>
+        <ol><?php foreach (['Dados da migração', 'Preparar documento', 'Enviar ou abrir aceite', 'Confirmar aceite', 'Executar instalação ou troca', 'Confirmar equipamento', 'Alterar plano no MkAuth', 'Validar conexão', 'Abrir chamado financeiro', 'Acompanhar chamado financeiro', 'Concluir migração'] as $technicalLabel): ?><li><span><?= htmlspecialchars($technicalLabel, ENT_QUOTES, 'UTF-8'); ?></span><small>Não iniciada</small></li><?php endforeach; ?></ol>
+    </details>
+</aside>
+<button class="migration-checklist__backdrop" type="button" data-close-process-steps aria-label="Fechar lista de etapas" hidden></button>
+</div>
+</main>
+
+<?php if ($processId > 0): ?>
+<dialog class="migration-cancel-dialog" data-migration-cancel-dialog aria-labelledby="migration-condition-cancel-title">
+    <form method="post" action="<?= htmlspecialchars(Url::to('/processos/cancelar'), ENT_QUOTES, 'UTF-8'); ?>" class="form-grid" data-prevent-double-submit>
+        <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($processCsrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="process_id" value="<?= $processId; ?>">
+        <header class="field--span-2"><p class="section-heading__eyebrow">Cancelar migração</p><h2 id="migration-condition-cancel-title">O histórico será preservado</h2></header>
+        <label class="field field--span-2"><span>Motivo do cancelamento</span><textarea name="reason" rows="3" required></textarea></label>
+        <label class="checkbox-field field--span-2"><input type="radio" name="after_cancel" value="client" checked><span><strong>Cancelar e voltar ao cliente</strong></span></label>
+        <label class="checkbox-field field--span-2"><input type="radio" name="after_cancel" value="restart"><span><strong>Cancelar e iniciar nova migração</strong></span></label>
+        <footer class="migration-workspace__actions field--span-2"><button class="button button--ghost" type="button" data-close-migration-cancel>Não cancelar</button><span></span><button class="button button--danger" type="submit" data-submit-label="Cancelando...">Confirmar cancelamento</button></footer>
+    </form>
+</dialog>
+<?php endif; ?>
 <?php
 $content = (string) ob_get_clean();
 require __DIR__ . '/../layouts/app.php';

@@ -438,6 +438,7 @@ final class ClientController
             'processId' => $processId,
             'revisionMode' => $revisionMode,
             'csrfToken' => Csrf::token('client_upgrade:' . (string) ($context['login'] ?? '')),
+            'processCsrfToken' => $processId > 0 ? Csrf::token('operational_process:' . $processId) : '',
         ]);
 
         return Response::html($html, $errors === [] ? 200 : 422);
@@ -690,8 +691,15 @@ final class ClientController
             return Response::redirect($returnTo);
         }
 
-        $remote = (string) $request->input('client_absent', '0') === '1';
-        $remoteReason = trim((string) $request->input('remote_signature_reason', ''));
+        $resendOnly = (string) $request->input('resend_only', '0') === '1'
+            && trim((string) ($acceptance['sent_at'] ?? '')) !== '';
+        $existingRemoteReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
+        $remote = $resendOnly
+            ? $existingRemoteReason !== ''
+            : (string) $request->input('client_absent', '0') === '1';
+        $remoteReason = $resendOnly
+            ? $existingRemoteReason
+            : trim((string) $request->input('remote_signature_reason', ''));
         $phoneOriginal = preg_replace('/\D+/', '', (string) ($acceptance['telefone_enviado'] ?? $contract['telefone_cliente'] ?? '')) ?? '';
         $phone = preg_replace('/\D+/', '', (string) $request->input('phone', $phoneOriginal)) ?? '';
         if (in_array(strlen($phone), [10, 11], true)) {
@@ -714,9 +722,9 @@ final class ClientController
             $errors[] = 'Informe um e-mail válido.';
         }
         if ($remote && $remoteReason === '') {
-            $errors[] = 'Informe por que o cliente não está presente.';
+            $errors[] = 'Informe o motivo da assinatura remota.';
         }
-        if (!$remote && $signatureData === '') {
+        if (!$resendOnly && !$remote && $signatureData === '') {
             $errors[] = 'Colete a assinatura local antes de enviar.';
         }
         if ($errors !== []) {
@@ -727,11 +735,11 @@ final class ClientController
         try {
             $operator = $this->resolveUser();
             $signaturePath = null;
-            if (!$remote) {
+            if (!$resendOnly && !$remote) {
                 $signaturePath = $this->acceptanceEvidenceService->saveSignature((int) $acceptance['id'], $signatureData, 'local');
             }
             $evidencePath = $this->acceptanceEvidenceService->saveEvidence((int) $acceptance['id'], [
-                'event' => 'local_signature_and_channels_prepared',
+                'event' => $resendOnly ? 'acceptance_confirmation_resent' : 'local_signature_and_channels_prepared',
                 'acceptance_id' => (int) $acceptance['id'],
                 'contract_id' => (int) $contract['id'],
                 'process_id' => $processId,
@@ -752,7 +760,7 @@ final class ClientController
             ]);
 
             $updated = array_merge($acceptance, [
-                'status' => $remote ? 'assinatura_pendente' : 'criado',
+                'status' => $resendOnly ? (string) ($acceptance['status'] ?? 'enviado') : ($remote ? 'assinatura_pendente' : 'criado'),
                 'telefone_enviado' => $phone,
                 'remote_signature_reason' => $remote ? $remoteReason : null,
                 'evidence_json_path' => $evidencePath,
@@ -779,7 +787,9 @@ final class ClientController
                 'evidence_json_path' => $evidencePath,
             ], $request);
             $this->operationalProcessService->synchronizeAcceptance((int) $acceptance['id']);
-            Flash::set('success', 'Assinatura e canais registrados. Em homologação, os envios permanecem em dry-run.');
+            Flash::set('success', $resendOnly
+                ? 'Confirmação reenviada pelos canais selecionados. Em homologação, os envios permanecem em dry-run.'
+                : 'Assinatura e canais registrados. Em homologação, os envios permanecem em dry-run.');
         } catch (\Throwable $exception) {
             Flash::set('error', 'Não foi possível preparar o aceite: ' . $exception->getMessage());
         }
@@ -2088,6 +2098,9 @@ final class ClientController
         }
 
         $connection = $this->resolveRadiusConnection($login);
+        $connection['available'] = !isset($connection['message']);
+        $connection['checked_at'] = date('c');
+        $connection['source'] = 'mkauth_radius_readback';
 
         return Response::json([
             'status' => 'success',
@@ -5523,50 +5536,77 @@ final class ClientController
             (float) ($context['current_monthly_value'] ?? 0),
             $monthlyValue
         );
-        // Classificação técnica e isenção são sempre derivadas no servidor.
-        // O formulário só pode acrescentar retenção, benefício livre e a
-        // confirmação manual prevista pela configuração comercial.
+        // Classificação, valores automáticos e elegibilidade são sempre
+        // recalculados com o catálogo e a configuração do servidor.
         $benefitFlags = $benefitDefaults['flags'];
-        $benefitFlags['retention'] = (string) $request->input('retention_condition', '0') === '1';
-        $benefitDescription = trim((string) $request->input('beneficio_concedido', ''));
-        if ($benefitDescription === '') {
-            $benefitDescription = $benefitDefaults['description'];
-        }
-        $benefitValue = $this->normalizeMoney((string) $request->input('valor_beneficio', (string) $benefitDefaults['value']));
-        $benefitOriginalValue = (float) $benefitDefaults['value'];
-        $benefitAdjustmentReason = trim((string) $request->input('benefit_adjustment_reason', ''));
-        $benefitOtherText = trim((string) $request->input('beneficio_outro_text', ''));
+        $canAdjustCommercial = $this->canUpgradeCommercial();
+        $benefitFlags['retention'] = $canAdjustCommercial
+            && (string) $request->input('retention_condition', '0') === '1';
+        $benefitAdjustmentReason = $canAdjustCommercial
+            ? trim((string) $request->input('benefit_adjustment_reason', ''))
+            : '';
+        $benefitOtherText = $canAdjustCommercial
+            ? trim((string) $request->input('beneficio_outro_text', ''))
+            : '';
         $benefitFlags['other_benefit'] = $benefitOtherText !== '';
         $waiverMode = $this->radioFiberAdhesionWaiverMode();
         if (!empty($benefitFlags['radio_to_fiber'])) {
             if ($waiverMode === 'manual') {
-                $benefitFlags['adhesion_waiver'] = (string) $request->input('manual_adhesion_waiver', '0') === '1';
+                $benefitFlags['adhesion_waiver'] = $canAdjustCommercial
+                    && (string) $request->input('manual_adhesion_waiver', '0') === '1';
             } elseif ($waiverMode === 'disabled') {
                 $benefitFlags['adhesion_waiver'] = false;
             } else {
                 $benefitFlags['adhesion_waiver'] = true;
             }
         }
-        if (!empty($benefitFlags['adhesion_waiver'])) {
-            $benefitValue = (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0);
+        $benefitOriginalValue = !empty($benefitFlags['adhesion_waiver'])
+            ? (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0)
+            : (float) $benefitDefaults['value'];
+        $requestedBenefitValue = $this->normalizeMoney((string) $request->input(
+            'valor_beneficio',
+            number_format($benefitOriginalValue, 2, '.', '')
+        ));
+        $explicitBenefitAdjustment = $canAdjustCommercial && $benefitAdjustmentReason !== '';
+        $benefitValue = $explicitBenefitAdjustment ? $requestedBenefitValue : $benefitOriginalValue;
+        $benefitAdjusted = abs($benefitValue - $benefitOriginalValue) > 0.009;
+        $benefitDescription = $this->buildUpgradeBenefitDescription($benefitFlags, $benefitOtherText);
+        if ($benefitDescription === '') {
+            $benefitDescription = (string) $benefitDefaults['description'];
         }
+        $eligibleBenefit = $benefitValue > 0.0 && trim($benefitDescription) !== '';
         $automaticFidelity = (!empty($benefitFlags['radio_to_fiber'])
                 && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true))
             || (!empty($benefitFlags['plan_upgrade'])
                 && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false));
-        $applyFidelity = (string) $request->input('apply_fidelity', $automaticFidelity ? '1' : '0') === '1';
+        $automaticFidelity = $automaticFidelity && $eligibleBenefit;
+        $hasExplicitFidelityChoice = (string) $request->input('fidelity_choice_present', '0') === '1';
+        $applyFidelity = $eligibleBenefit && ($hasExplicitFidelityChoice
+            ? (string) $request->input('apply_fidelity', '0') === '1'
+            : $automaticFidelity);
         $fidelityMonths = $applyFidelity ? (int) $request->input('fidelidade_meses', '12') : 0;
         $fidelityBenefitDescription = trim((string) $request->input('fidelity_benefit_description', ''));
         if ($applyFidelity && $fidelityBenefitDescription === '') {
-            $fidelityBenefitDescription = (string) $benefitDefaults['description'];
+            $fidelityBenefitDescription = $benefitDescription;
         }
 
-        if (!$this->canUpgradeCommercial()) {
+        if (!$canAdjustCommercial) {
             $benefitFlags = $benefitDefaults['flags'];
             $benefitDescription = $benefitDefaults['description'];
             $benefitValue = (float) $benefitDefaults['value'];
             $benefitOtherText = '';
             $benefitAdjustmentReason = '';
+            $benefitOriginalValue = (float) $benefitDefaults['value'];
+            $benefitAdjusted = false;
+            $automaticFidelity = $benefitValue > 0.0
+                && trim((string) $benefitDescription) !== ''
+                && ((!empty($benefitFlags['radio_to_fiber'])
+                    && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true))
+                    || (!empty($benefitFlags['plan_upgrade'])
+                    && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false)));
+            $applyFidelity = $automaticFidelity;
+            $fidelityMonths = $applyFidelity ? 12 : 0;
+            $fidelityBenefitDescription = $applyFidelity ? (string) $benefitDescription : '';
         }
 
         return [
@@ -5603,9 +5643,9 @@ final class ClientController
             'beneficio_outro_text' => $benefitOtherText,
             'valor_beneficio' => $benefitValue,
             'benefit_original_value' => $benefitOriginalValue,
-            'benefit_adjusted' => abs($benefitValue - $benefitOriginalValue) > 0.009,
+            'benefit_adjusted' => $benefitAdjusted,
             'benefit_adjustment_reason' => $benefitAdjustmentReason,
-            'novo_valor_mensal' => $this->normalizeMoney((string) $request->input('novo_valor_mensal', (string) $monthlyValue)),
+            'novo_valor_mensal' => $monthlyValue,
             'retention_condition' => !empty($benefitFlags['retention']),
             'apply_fidelity' => $applyFidelity,
             'fidelity_benefit_description' => $fidelityBenefitDescription,
@@ -6172,6 +6212,8 @@ final class ClientController
             'benefit_original_value' => (float) ($data['benefit_original_value'] ?? $benefitDefaults['value']),
             'benefit_adjusted' => !empty($data['benefit_adjusted']),
             'benefit_adjustment_reason' => (string) ($data['benefit_adjustment_reason'] ?? ''),
+            'benefit_adjusted_at' => !empty($data['benefit_adjusted']) ? date('Y-m-d H:i:s') : null,
+            'benefit_adjusted_by_login' => !empty($data['benefit_adjusted']) ? $operatorLogin : null,
             'adhesion_default_value' => (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0),
             'adhesion_charged_value' => !empty($benefitFlags['adhesion_waiver'])
                 ? 0.0

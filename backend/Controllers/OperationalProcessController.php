@@ -155,8 +155,17 @@ final class OperationalProcessController
         if (in_array((string) ($activeStep['step_key'] ?? ''), ['technical_execution', 'confirm_equipment', 'validate_connection'], true)) {
             try {
                 $connection = $this->mkauthDatabase->radiusConnectionStatus((string) ($process['mkauth_login'] ?? ''));
+                $connection['available'] = true;
+                $connection['checked_at'] = date('Y-m-d H:i:s');
+                $connection['source'] = 'mkauth_radius_readback';
             } catch (\Throwable) {
-                $connection = ['available' => false, 'online' => false, 'session' => null];
+                $connection = [
+                    'available' => false,
+                    'online' => false,
+                    'session' => null,
+                    'checked_at' => date('Y-m-d H:i:s'),
+                    'source' => 'mkauth_radius_readback',
+                ];
             }
         }
 
@@ -413,7 +422,7 @@ final class OperationalProcessController
             return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
         }
 
-        $serviceExecuted = trim((string) $request->input('service_executed', ''));
+        $serviceExecuted = $this->technicalExecutionDescription($process);
         $equipmentInstalled = trim((string) $request->input('equipment_installed', ''));
         $equipmentRemoved = trim((string) $request->input('equipment_removed', ''));
         $equipmentReference = trim((string) $request->input('equipment_reference', ''));
@@ -422,8 +431,8 @@ final class OperationalProcessController
         $nextAction = trim((string) $request->input('next_action', ''));
         $responsibleLogin = trim((string) $request->input('responsible_login', ''));
         $pendingDueDate = trim((string) $request->input('pending_due_date', ''));
-        if ($serviceExecuted === '' || $equipmentInstalled === '') {
-            Flash::set('error', 'Informe o serviço executado e o equipamento instalado.');
+        if ($equipmentInstalled === '') {
+            Flash::set('error', 'Informe o equipamento instalado.');
             return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
         }
 
@@ -708,6 +717,37 @@ final class OperationalProcessController
         }
 
         return [];
+    }
+
+    private function technicalExecutionDescription(array $process): string
+    {
+        $migration = is_array($process['metadata']['migration'] ?? null)
+            ? $process['metadata']['migration']
+            : [];
+        $operation = match ((string) ($migration['operation_type'] ?? '')) {
+            'migration' => 'Migração',
+            'downgrade' => 'Downgrade',
+            default => 'Upgrade',
+        };
+        $currentTechnology = $this->operationalTechnologyLabel((string) ($migration['current_technology'] ?? ''));
+        $newTechnology = $this->operationalTechnologyLabel((string) ($migration['new_technology'] ?? ''));
+
+        return $currentTechnology !== '' && $newTechnology !== '' && $currentTechnology !== $newTechnology
+            ? sprintf('%s de %s para %s executada', $operation, $currentTechnology, $newTechnology)
+            : $operation . ' de plano executado';
+    }
+
+    private function operationalTechnologyLabel(string $technology): string
+    {
+        $normalized = strtolower(trim($technology));
+        if (str_contains($normalized, 'radio') || str_contains($normalized, 'rádio') || $normalized === 'd') {
+            return 'Rádio';
+        }
+        if (str_contains($normalized, 'fibra') || str_contains($normalized, 'ftth') || $normalized === 'h') {
+            return 'Fibra';
+        }
+
+        return trim($technology);
     }
 
     private function canOverride(): bool

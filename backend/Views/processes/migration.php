@@ -29,11 +29,26 @@ $acceptanceAccepted = (string) ($acceptance['status'] ?? '') === 'aceito'
     && trim((string) ($acceptance['revoked_at'] ?? '')) === '';
 $acceptancePending = in_array((string) ($acceptance['status'] ?? ''), ['criado', 'enviado', 'assinatura_pendente'], true)
     && trim((string) ($acceptance['revoked_at'] ?? '')) === '';
-$acceptanceSendLabel = trim((string) ($acceptance['sent_at'] ?? '')) !== '' ? 'Reenviar' : 'Enviar confirmação';
+$acceptanceSent = trim((string) ($acceptance['sent_at'] ?? '')) !== '';
 $phone = trim((string) ($acceptance['telefone_enviado'] ?? $client['phone'] ?? $contract['telefone_cliente'] ?? ''));
 $email = trim((string) ($client['email'] ?? ''));
 $h = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 $money = static fn (mixed $value): string => is_numeric($value) ? 'R$ ' . number_format((float) $value, 2, ',', '.') : '-';
+$dateTime = static function (mixed $value): string {
+    $timestamp = strtotime((string) $value);
+    return $timestamp !== false ? date('d/m/Y \à\s H:i', $timestamp) : '-';
+};
+$operationalTechnology = static function (mixed $value): string {
+    $value = trim((string) $value);
+    $normalized = strtolower($value);
+    if (str_contains($normalized, 'radio') || str_contains($normalized, 'rádio') || $normalized === 'd') {
+        return 'Rádio';
+    }
+    if (str_contains($normalized, 'fibra') || str_contains($normalized, 'ftth') || $normalized === 'h') {
+        return 'Fibra';
+    }
+    return $value !== '' ? $value : '-';
+};
 $phaseFor = static fn (string $key): int => match ($key) {
     'migration_data' => 1,
     'prepare_document', 'send_acceptance', 'confirm_acceptance' => 2,
@@ -54,6 +69,8 @@ foreach ($steps as $candidateStep) {
     }
 }
 $technicalEvidence = is_array($technicalExecutionStep['evidence'] ?? null) ? $technicalExecutionStep['evidence'] : [];
+$acceptanceCheckStep = $stepsByKey['confirm_acceptance'] ?? [];
+$acceptanceLastCheckedAt = (string) ($acceptanceCheckStep['last_checked_at'] ?? $acceptance['updated_at'] ?? '');
 $externalActionDone = false;
 foreach (['change_plan', 'open_financial_ticket'] as $externalStepKey) {
     $externalStep = $stepsByKey[$externalStepKey] ?? [];
@@ -66,15 +83,13 @@ $statusClass = (string) ($activeStep['status_class'] ?? 'muted');
 $statusLabel = (string) ($activeStep['status_label'] ?? 'Não iniciada');
 $nextUrl = is_array($nextStep) ? (string) ($nextStep['url'] ?? '') : '';
 $previousUrl = is_array($previousStep) ? (string) ($previousStep['url'] ?? '') : '';
-$renderCondition = static function () use ($migration, $money, $h): void { ?>
+$renderCondition = static function () use ($migration, $money, $h, $operationalTechnology): void { ?>
     <div class="migration-condition-summary">
         <div class="summary-grid">
             <div class="summary-item"><span>Operação</span><strong><?= $h(match ((string) ($migration['operation_type'] ?? '')) { 'migration' => 'Migração', 'upgrade' => 'Upgrade', 'downgrade' => 'Downgrade', default => '-' }); ?></strong></div>
             <div class="summary-item"><span>Plano atual</span><strong><?= $h($migration['current_plan_name'] ?? '-'); ?></strong></div>
             <div class="summary-item"><span>Nova condição</span><strong><?= $h($migration['new_plan_name'] ?? '-'); ?> · <?= $money($migration['new_monthly_value'] ?? null); ?></strong></div>
-            <div class="summary-item"><span>Tecnologia</span><strong><?= $h($migration['current_technology'] ?? '-'); ?> → <?= $h($migration['new_technology'] ?? '-'); ?></strong></div>
-            <div class="summary-item"><span>Adesão padrão</span><strong><?= $money($migration['adhesion_default_value'] ?? null); ?></strong></div>
-            <div class="summary-item"><span>Valor cobrado</span><strong><?= $money($migration['adhesion_charged_value'] ?? null); ?></strong></div>
+            <div class="summary-item"><span>Tecnologia</span><strong><?= $h($operationalTechnology($migration['current_technology'] ?? '-')); ?> → <?= $h($operationalTechnology($migration['new_technology'] ?? '-')); ?></strong></div>
             <div class="summary-item"><span>Benefício</span><strong><?= $money($migration['benefit_value'] ?? 0); ?></strong></div>
             <div class="summary-item"><span>Fidelidade</span><strong><?= (int) ($migration['fidelity_months'] ?? 0) > 0 ? (int) $migration['fidelity_months'] . ' meses' : 'Não aplicada'; ?></strong></div>
         </div>
@@ -171,8 +186,9 @@ ob_start();
             <?php elseif (in_array($stepKey, ['prepare_document', 'send_acceptance', 'confirm_acceptance'], true)): ?>
                 <?php $renderCondition(); ?>
                 <section class="acceptance-state-card">
-                    <span>Aceite do titular</span><strong><?= $acceptanceAccepted ? 'Confirmado' : 'Aguardando confirmação'; ?></strong>
-                    <small><?= $acceptanceAccepted ? 'Documento, abertura/envio e confirmação foram reconciliados.' : 'A assinatura local não conclui a confirmação remota do titular.'; ?></small>
+                    <span>Aceite do titular</span>
+                    <strong><?= $acceptanceAccepted ? 'Confirmação recebida' : ($acceptanceSent ? 'Aguardando confirmação do cliente' : 'Pronto para enviar'); ?></strong>
+                    <small><?php if ($acceptanceAccepted): ?>Confirmado em <?= $h($dateTime($acceptance['accepted_at'] ?? '')); ?>.<?php elseif ($acceptanceSent): ?>Última verificação: <?= $h($dateTime($acceptanceLastCheckedAt)); ?>.<?php else: ?>Prepare a assinatura e escolha ao menos um canal cadastrado.<?php endif; ?></small>
                 </section>
                 <?php if (!$acceptanceAccepted): ?>
                     <?php if ($editContact): ?>
@@ -189,12 +205,17 @@ ob_start();
                     <form class="migration-acceptance-compact" method="post" action="<?= $h(Url::to('/clientes/migracao/aceite-preparar')); ?>" data-migration-acceptance-form data-prevent-double-submit>
                         <input type="hidden" name="_csrf" value="<?= $h($csrfToken ?? ''); ?>">
                         <input type="hidden" name="process_id" value="<?= $processId; ?>">
-                        <label class="checkbox-field"><input type="checkbox" name="client_absent" value="1" data-client-absent><span><strong>Cliente não está presente</strong><small>O titular assinará e confirmará no próprio aparelho.</small></span></label>
-                        <label class="field" data-remote-reason hidden><span>Motivo da assinatura remota</span><input name="remote_signature_reason" maxlength="500"></label>
-                        <div data-local-signature>
-                            <strong>Coletar assinatura local</strong>
-                            <div class="signature-pad" data-signature-pad><canvas data-signature-canvas aria-label="Área para assinatura local"></canvas><input type="hidden" name="assinatura_cliente" data-signature-input><div class="signature-actions"><button class="button button--ghost" type="button" data-signature-clear>Limpar assinatura</button></div><p class="field-help" data-signature-help>Peça ao titular para assinar no aparelho do técnico.</p></div>
-                        </div>
+                        <?php if ($acceptanceSent): ?>
+                            <input type="hidden" name="resend_only" value="1">
+                            <p class="field-help">O reenvio reutiliza o mesmo aceite e o mesmo token. Nenhuma nova assinatura será criada.</p>
+                        <?php else: ?>
+                            <label class="checkbox-field"><input type="checkbox" name="client_absent" value="1" data-client-absent <?= trim((string) ($acceptance['remote_signature_reason'] ?? '')) !== '' ? 'checked' : ''; ?>><span><strong>Solicitar assinatura remota</strong><small>O titular assinará e confirmará o aceite no próprio aparelho.</small></span></label>
+                            <label class="field" data-remote-reason hidden><span>Motivo da assinatura remota</span><select name="remote_signature_reason"><option value="">Selecione o motivo</option><?php foreach (['Titular indisponível', 'Atendimento acompanhado por terceiro', 'Solicitação do cliente', 'Assinatura posterior', 'Outro motivo'] as $remoteReasonOption): ?><option value="<?= $h($remoteReasonOption); ?>" <?= strcasecmp(trim((string) ($acceptance['remote_signature_reason'] ?? '')), $remoteReasonOption) === 0 ? 'selected' : ''; ?>><?= $h($remoteReasonOption); ?></option><?php endforeach; ?></select></label>
+                            <div data-local-signature>
+                                <strong>Coletar assinatura local</strong>
+                                <div class="signature-pad" data-signature-pad><canvas data-signature-canvas aria-label="Área para assinatura local"></canvas><input type="hidden" name="assinatura_cliente" data-signature-input><div class="signature-actions"><button class="button button--ghost" type="button" data-signature-clear>Limpar assinatura</button></div><p class="field-help" data-signature-help>Peça ao titular para assinar no aparelho do técnico.</p></div>
+                            </div>
+                        <?php endif; ?>
                         <div class="acceptance-channels-grid">
                             <span class="field--span-2">Contatos usados no aceite (somente leitura)</span>
                             <label class="checkbox-field"><input type="checkbox" name="channel_whatsapp" value="1" checked><span><strong>WhatsApp</strong><small><?= $h($phone !== '' ? $phone : 'Não cadastrado'); ?></small></span></label>
@@ -208,53 +229,78 @@ ob_start();
                         <?php else: ?>
                             <p class="alert alert--warning">Atenção: ao continuar, os canais habilitados fora de dry-run poderão enviar uma mensagem real.</p>
                         <?php endif; ?>
-                        <footer class="migration-workspace__actions"><?php if ($previousUrl !== ''): ?><a class="button button--ghost" href="<?= $h(Url::to($previousUrl)); ?>">Voltar</a><?php else: ?><span></span><?php endif; ?><a class="button button--ghost" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')); ?>">Atualizar situação</a><a class="button button--ghost" href="<?= $h(Url::to('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')))); ?>">Salvar e sair</a><button class="button" type="submit" data-submit-label="Enviando..."><?= $h($acceptanceSendLabel); ?></button></footer>
+                        <footer class="migration-workspace__actions">
+                            <?php if ($previousUrl !== ''): ?><a class="button button--ghost" href="<?= $h(Url::to($previousUrl)); ?>">Voltar</a><?php else: ?><span></span><?php endif; ?>
+                            <a class="button button--ghost" href="<?= $h(Url::to('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')))); ?>">Salvar e sair</a>
+                            <?php if ($acceptanceSent): ?>
+                                <button class="button button--ghost" type="submit" data-submit-label="Reenviando...">Reenviar confirmação</button>
+                                <a class="button" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')); ?>">Atualizar confirmação</a>
+                            <?php else: ?>
+                                <button class="button" type="submit" data-submit-label="Enviando...">Enviar confirmação</button>
+                            <?php endif; ?>
+                        </footer>
                     </form>
                     <?php endif; ?>
                 <?php elseif ($nextUrl !== ''): ?>
-                    <footer class="migration-workspace__actions"><?php if ($previousUrl !== ''): ?><a class="button button--ghost" href="<?= $h(Url::to($previousUrl)); ?>">Voltar</a><?php else: ?><span></span><?php endif; ?><span></span><a class="button" href="<?= $h(Url::to($nextUrl)); ?>">Continuar</a></footer>
+                    <footer class="migration-workspace__actions"><?php if ($previousUrl !== ''): ?><a class="button button--ghost" href="<?= $h(Url::to($previousUrl)); ?>">Voltar</a><?php else: ?><span></span><?php endif; ?><span></span><a class="button" href="<?= $h(Url::to($nextUrl)); ?>">Continuar para execução</a></footer>
                 <?php endif; ?>
             <?php elseif ($currentPhase === 4): ?>
                 <?php $renderCondition(); ?>
                 <section class="migration-finalization-progress" aria-live="polite">
                     <h3>Finalização automática</h3>
                     <?php foreach ([
-                        'confirm_acceptance' => 'Aceite confirmado',
-                        'technical_execution' => 'Execução técnica concluída',
-                        'change_plan' => 'Aplicando plano no MkAuth',
-                        'validate_connection' => 'Validando conexão',
-                        'open_financial_ticket' => 'Abrindo chamado financeiro',
-                        'follow_financial_ticket' => 'Aguardando revisão financeira',
-                    ] as $finalKey => $finalLabel): ?>
-                        <?php $finalStep = $stepsByKey[$finalKey] ?? []; $finalStatus = (string) ($finalStep['status'] ?? 'not_started'); ?>
+                        ['key' => 'confirm_acceptance', 'label' => 'Aceite confirmado'],
+                        ['key' => 'technical_execution', 'label' => 'Execução técnica concluída'],
+                        ['key' => 'change_plan', 'label' => 'Aplicar novo plano'],
+                        ['key' => 'change_plan', 'label' => 'Confirmar plano', 'confirmation' => true],
+                        ['key' => 'validate_connection', 'label' => 'Verificar conexão'],
+                        ['key' => 'open_financial_ticket', 'label' => 'Abrir chamado financeiro'],
+                    ] as $finalItem): ?>
+                        <?php
+                        $finalKey = (string) $finalItem['key'];
+                        $finalLabel = (string) $finalItem['label'];
+                        $finalStep = $stepsByKey[$finalKey] ?? [];
+                        $finalStatus = (string) ($finalStep['status'] ?? 'not_started');
+                        if (!empty($finalItem['confirmation'])) {
+                            $confirmed = !empty($finalStep['evidence']['plan_confirmation']['confirmed']);
+                            $finalStatus = $confirmed ? 'completed' : ($finalStatus === 'attention' ? 'attention' : 'not_started');
+                        }
+                        ?>
                         <div class="migration-finalization-progress__item migration-finalization-progress__item--<?= $h($finalStatus); ?>"><span><?= in_array($finalStatus, ['completed', 'not_applicable'], true) ? '✓' : ($finalStatus === 'attention' ? '!' : ($finalStatus === 'waiting' ? '⟳' : '○')); ?></span><strong><?= $h($finalLabel); ?></strong><small><?= $h($finalStep['status_label'] ?? 'Não iniciada'); ?></small></div>
                     <?php endforeach; ?>
                 </section>
                 <?php if (is_array($dryRun)): ?><section class="process-dry-run"><p><?= $h($dryRun['message'] ?? ''); ?></p><div class="summary-grid"><div class="summary-item"><span>Antes</span><strong><?= $h($dryRun['before']['plan'] ?? '-'); ?></strong></div><div class="summary-item"><span>Depois</span><strong><?= $h($dryRun['after']['plan'] ?? '-'); ?></strong></div><div class="summary-item"><span>Escrita externa</span><strong><?= !empty($dryRun['write_enabled']) ? 'Habilitada' : 'Bloqueada'; ?></strong></div></div></section><?php endif; ?>
                 <form method="post" action="<?= $h(Url::to('/processos/migracao/finalizar-tecnico')); ?>" class="migration-active-form" data-prevent-double-submit>
                     <input type="hidden" name="_csrf" value="<?= $h($csrfToken ?? ''); ?>"><input type="hidden" name="process_id" value="<?= $processId; ?>"><input type="hidden" name="request_id" value="<?= $h(bin2hex(random_bytes(16))); ?>">
+                    <p class="alert alert--warning">Ambiente de testes: escritas externas, notificações e chamado real permanecem bloqueados. Dry-runs não serão registrados como execução real.</p>
                     <p class="page-description">A tentativa retoma da primeira subetapa pendente. Ações já concluídas não são repetidas.</p>
-                    <footer class="migration-workspace__actions"><a class="button button--ghost" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution')); ?>">Voltar</a><a class="button button--ghost" href="<?= $h(Url::to('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')))); ?>">Salvar e sair</a><button class="button" type="submit" data-submit-label="Finalizando...">Finalizar atendimento técnico</button></footer>
+                    <footer class="migration-workspace__actions"><a class="button button--ghost" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution')); ?>">Voltar</a><a class="button button--ghost" href="<?= $h(Url::to('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')))); ?>">Salvar e sair</a><button class="button" type="submit" data-submit-label="Finalizando atendimento...">Finalizar atendimento técnico</button></footer>
                 </form>
             <?php elseif ($currentPhase === 3): ?>
-                <section class="connection-status-compact"><span>PPPoE · consulta somente leitura</span><strong><?= !empty($connection['online']) ? 'PPPoE: Online' : 'PPPoE: Offline ou indisponível'; ?></strong><a class="button button--ghost button--small" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution')); ?>">Atualizar situação</a></section>
+                <section class="connection-status-compact" data-connection-checker data-connection-url="<?= $h(Url::to('/api/cliente/conexao?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')))); ?>">
+                    <span>PPPoE · consulta somente leitura</span>
+                    <strong data-connection-status><?= !empty($connection['online']) ? 'PPPoE online' : 'PPPoE offline ou indisponível'; ?></strong>
+                    <small data-connection-ip <?= empty($connection['online']) ? 'hidden' : ''; ?>>IP: <?= $h($connection['session']['framedipaddress'] ?? '-'); ?></small>
+                    <small data-connection-checked><?= !empty($connection['online']) ? 'Verificado às ' : 'Última verificação às '; ?><?= $h($dateTime($connection['checked_at'] ?? '')); ?> · origem: Radius MkAuth</small>
+                </section>
                 <form method="post" action="<?= $h(Url::to('/processos/migracao/execucao')); ?>" enctype="multipart/form-data" class="migration-active-form" data-prevent-double-submit>
                     <input type="hidden" name="_csrf" value="<?= $h($csrfToken ?? ''); ?>">
                     <input type="hidden" name="process_id" value="<?= $processId; ?>">
                     <div class="form-grid">
-                        <label class="field field--span-2"><span>Serviço executado</span><textarea name="service_executed" rows="2" required><?= $h($technicalEvidence['service_executed'] ?? ''); ?></textarea></label>
                         <label class="field"><span>Equipamento instalado</span><input name="equipment_installed" required value="<?= $h($technicalEvidence['equipment_installed'] ?? ''); ?>"></label>
                         <label class="field"><span>Equipamento retirado</span><input name="equipment_removed" value="<?= $h($technicalEvidence['equipment_removed'] ?? ''); ?>"></label>
                         <label class="field"><span>Serial, MAC ou referência</span><input name="equipment_reference" value="<?= $h($technicalEvidence['equipment_reference'] ?? $technicalExecutionStep['external_reference'] ?? ''); ?>"></label>
                         <label class="field"><span>Anexos e evidências</span><input type="file" name="evidence_files[]" accept="image/jpeg,image/png,image/webp,application/pdf" multiple><small class="field-help">JPG, PNG, WebP ou PDF; armazenamento protegido e limite configurável.</small></label>
-                        <label class="field field--span-2"><span>Observação</span><textarea name="observation" rows="3"><?= $h($technicalExecutionStep['observation'] ?? ''); ?></textarea></label>
-                        <?php if (empty($connection['online']) && !empty($canOverride)): ?>
-                            <label class="checkbox-field field--span-2"><input type="checkbox" name="offline_override" value="1"><span><strong>Continuar com PPPoE offline</strong><small>Exceção gerencial; exige justificativa e permanece visível na Finalização.</small></span></label>
-                            <label class="field field--span-2"><span>Justificativa da exceção</span><textarea name="offline_justification" rows="2"></textarea></label>
+                        <label class="field field--span-2"><span>Observação técnica (opcional)</span><textarea name="observation" rows="3"><?= $h($technicalExecutionStep['observation'] ?? ''); ?></textarea></label>
+                        <?php if (!empty($canOverride)): ?>
+                            <div class="field--span-2" data-offline-exception <?= !empty($connection['online']) ? 'hidden' : ''; ?>>
+                                <label class="checkbox-field"><input type="checkbox" name="offline_override" value="1"><span><strong>Continuar com PPPoE offline</strong><small>Exceção gerencial; exige justificativa e permanece visível na Finalização.</small></span></label>
+                                <label class="field"><span>Justificativa da exceção</span><textarea name="offline_justification" rows="2"></textarea></label>
+                            </div>
                         <?php endif; ?>
                     </div>
                     <details class="migration-pending-details"><summary>Ficou algo pendente?</summary><div class="form-grid"><label class="field field--span-2"><span>Motivo</span><textarea name="pending_reason" rows="2"></textarea></label><label class="field"><span>Próxima ação</span><input name="next_action"></label><label class="field"><span>Responsável</span><input name="responsible_login"></label><label class="field"><span>Prazo</span><input type="date" name="pending_due_date"></label></div></details>
-                    <footer class="migration-workspace__actions"><a class="button button--ghost" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')); ?>">Voltar</a><button class="button button--ghost" type="submit" name="continue_to" value="exit" data-submit-label="Salvando...">Salvar e sair</button><button class="button" type="submit" data-submit-label="Concluindo...">Concluir execução técnica</button></footer>
+                    <footer class="migration-workspace__actions"><a class="button button--ghost" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')); ?>">Voltar</a><button class="button button--ghost" type="submit" name="continue_to" value="exit" data-submit-label="Salvando...">Salvar e sair</button><button class="button button--ghost" type="button" data-check-connection>Verificar conexão agora</button><button class="button" type="submit" data-submit-label="Concluindo...">Concluir execução técnica</button></footer>
                 </form>
                 <?php if (!empty($technicalEvidence['files'])): ?>
                     <section class="migration-evidence-list"><h3>Evidências anexadas</h3>
@@ -273,7 +319,7 @@ ob_start();
         </section>
 
         <aside class="migration-checklist" id="migration-checklist" aria-label="Checklist da migração" data-process-steps>
-            <header><div><p class="section-heading__eyebrow">Jornada operacional</p><h2>4 etapas</h2></div><button type="button" data-close-process-steps aria-label="Fechar etapas">×</button></header>
+            <header><div><p class="section-heading__eyebrow">Jornada da migração</p><h2>4 etapas</h2></div><button type="button" data-close-process-steps aria-label="Fechar etapas">×</button></header>
             <div class="migration-checklist__items">
                 <?php foreach ($visibleStages as $stage): ?>
                     <a class="migration-checklist__step migration-checklist__step--<?= $h($stage['status_class'] ?? 'muted'); ?> <?= !empty($stage['active']) ? 'is-current' : ''; ?>" href="<?= $h(Url::to((string) ($stage['url'] ?? '#'))); ?>" <?= !empty($stage['active']) ? 'aria-current="step"' : ''; ?>>

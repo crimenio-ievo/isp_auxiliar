@@ -76,9 +76,9 @@ $check(10, str_contains($upgradeView, 'data-plan-technology') && str_contains($u
 $check(11, str_contains($migrationView, 'Contatos usados no aceite (somente leitura)') && str_contains($migrationView, 'type="hidden" name="phone"'), 'contatos do aceite devem ser somente leitura');
 $check(12, str_contains($migrationView, 'Corrigir contato no cadastro') && str_contains($processController, 'updateMigrationContacts'), 'correção controlada deve retornar ao mesmo processo');
 $check(13, str_contains($migrationView, 'Coletar assinatura local'), 'aceite com cliente presente deve permanecer na etapa 2');
-$check(14, str_contains($migrationView, 'Cliente não está presente'), 'aceite remoto deve permanecer na etapa 2');
-$check(15, str_contains($migrationView, 'Enviar confirmação') && str_contains($migrationView, 'Atualizar situação'), 'envio e confirmação devem estar na mesma etapa');
-$check(16, str_contains($migrationView, 'Serviço executado') && str_contains($migrationView, 'Equipamento instalado') && str_contains($processController, "'confirm_equipment'"), 'execução técnica deve ser unificada');
+$check(14, str_contains($migrationView, 'Solicitar assinatura remota'), 'aceite remoto deve permanecer na etapa 2');
+$check(15, str_contains($migrationView, 'Enviar confirmação') && str_contains($migrationView, 'Atualizar confirmação'), 'envio e confirmação devem estar na mesma etapa');
+$check(16, !str_contains($migrationView, '<span>Serviço executado</span>') && str_contains($migrationView, 'Equipamento instalado') && str_contains($processController, 'technicalExecutionDescription'), 'execução técnica deve derivar o serviço e permanecer unificada');
 
 $tmpRoot = sys_get_temp_dir() . '/isp-aux-evidence-' . bin2hex(random_bytes(6));
 mkdir($tmpRoot, 0770, true);
