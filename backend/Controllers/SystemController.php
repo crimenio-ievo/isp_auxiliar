@@ -224,12 +224,10 @@ final class SystemController
             'commit' => $this->config->get('app.release.commit', ''),
             'build_date' => trim((string) $this->config->get('app.release.build_date', ''))
                 ?: (string) ($version['build_date'] ?? ''),
-            'database_schema_version' => $schemaVersion,
+            'schema_version' => $schemaVersion,
             'external_writes_enabled' => (bool) $this->config->get('app.mkauth.write_enabled', false),
-            'notifications_dry_run' => [
-                'email' => (bool) $this->config->get('email.dry_run', true),
-                'evotrix' => (bool) $this->config->get('evotrix.dry_run', true),
-            ],
+            'notification_dry_run' => (bool) $this->config->get('email.dry_run', true)
+                && (bool) $this->config->get('evotrix.dry_run', true),
             'ticket_dry_run' => (bool) $this->config->get('contracts.mkauth_ticket.dry_run', true),
         ]);
     }

@@ -28,12 +28,14 @@ final class ReleaseChannelController
         }
 
         try {
-            $result = $this->releaseChannelService->savePreference($user, (string) $request->input('release_channel', 'stable'));
-            $_SESSION['release_channel_preference'] = (string) $result['channel'];
-            Flash::set('success', 'Preferência de canal salva.');
-            if ((string) ($result['destination'] ?? '') !== '') {
+            $result = $this->releaseChannelService->resolveSwitch(
+                $user,
+                (string) $request->input('release_channel', '')
+            );
+            if (!empty($result['redirect']) && (string) ($result['destination'] ?? '') !== '') {
                 return Response::redirect((string) $result['destination']);
             }
+            Flash::set('info', (string) ($result['message'] ?? 'Você já está neste ambiente.'));
         } catch (\Throwable $exception) {
             Flash::set('error', $exception->getMessage());
         }

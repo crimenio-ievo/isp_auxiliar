@@ -20,13 +20,7 @@ final class ReleaseChannelService
 
     public function preference(array $user): string
     {
-        $login = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
-        if ($login === '') {
-            return 'stable';
-        }
-        $saved = $this->localRepository->providerSetting($this->preferenceKey($login), 'stable');
-
-        return $saved === 'beta' && $this->canUseBeta($user) ? 'beta' : 'stable';
+        return $this->currentChannel();
     }
 
     public function canUseBeta(array $user): bool
@@ -38,6 +32,11 @@ final class ReleaseChannelService
 
     public function savePreference(array $user, string $channel): array
     {
+        return $this->resolveSwitch($user, $channel);
+    }
+
+    public function resolveSwitch(array $user, string $channel): array
+    {
         $channel = strtolower(trim($channel));
         if (!in_array($channel, ['stable', 'beta'], true)) {
             throw new \InvalidArgumentException('Canal de versão inválido.');
@@ -45,23 +44,29 @@ final class ReleaseChannelService
         if ($channel === 'beta' && !$this->canUseBeta($user)) {
             throw new \RuntimeException('Seu usuário não possui permissão para acessar o canal Beta.');
         }
-        $login = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
-        if ($login === '') {
-            throw new \RuntimeException('Usuário autenticado não identificado.');
+        $current = $this->currentChannel();
+        if ($channel === $current) {
+            return [
+                'channel' => $channel,
+                'current_channel' => $current,
+                'destination' => '',
+                'redirect' => false,
+                'message' => 'Você já está no ambiente ' . ($current === 'beta' ? 'Beta' : 'Stable') . '.',
+            ];
         }
 
-        $previous = $this->preference($user);
-        $this->localRepository->saveProviderSettings([$this->preferenceKey($login) => $channel]);
-        $this->localRepository->log(
-            isset($user['id']) ? (int) $user['id'] : null,
-            $login,
-            'release.channel.preference_changed',
-            'release_channel',
-            null,
-            ['previous' => $previous, 'selected' => $channel, 'destination_configured' => $this->destination($channel) !== '']
-        );
+        $destination = $this->destination($channel);
+        if ($destination === '') {
+            throw new \RuntimeException('O destino do canal selecionado não está configurado com uma URL segura.');
+        }
 
-        return ['channel' => $channel, 'destination' => $this->destination($channel)];
+        return [
+            'channel' => $channel,
+            'current_channel' => $current,
+            'destination' => $destination,
+            'redirect' => true,
+            'message' => 'Abrindo o ambiente ' . ($channel === 'beta' ? 'Beta' : 'Stable') . '.',
+        ];
     }
 
     public function destination(string $channel): string
@@ -82,10 +87,5 @@ final class ReleaseChannelService
         }
 
         return rtrim($url, '/');
-    }
-
-    private function preferenceKey(string $login): string
-    {
-        return 'release_channel_user_' . hash('sha256', $login);
     }
 }

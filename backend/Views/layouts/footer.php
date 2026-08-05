@@ -2,31 +2,15 @@
 
 declare(strict_types=1);
 
-$versionInfo = defined('APP_VERSION_INFO') && is_array(APP_VERSION_INFO)
-    ? APP_VERSION_INFO
-    : [
-        'app_name' => 'ISP Auxiliar',
-        'app_version' => '0.1.0',
-        'build_date' => date('Y-m-d'),
-        'modules' => [
-            'isp_auxiliar' => '0.1.0',
-            'isp_map2' => '0.1.0',
-        ],
-    ];
+$releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
+$channel = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta' ? 'Beta' : 'Stable';
+$releaseId = trim((string) ($releaseInfo['id'] ?? '')) ?: 'release não informada';
+$commit = trim((string) ($releaseInfo['commit'] ?? ''));
+$commit = $commit !== '' ? substr($commit, 0, 7) : 'sem-hash';
 ?>
 <footer class="footer">
     <p>ISP Auxiliar · suporte ao cadastro, aceite e acompanhamento operacional.</p>
     <p class="footer__version">
-        <?= htmlspecialchars((string) ($versionInfo['app_name'] ?? 'ISP Auxiliar'), ENT_QUOTES, 'UTF-8'); ?>
-        v<?= htmlspecialchars((string) ($versionInfo['app_version'] ?? '0.1.0'), ENT_QUOTES, 'UTF-8'); ?>
-        · build <?= htmlspecialchars((string) ($versionInfo['build_date'] ?? date('Y-m-d')), ENT_QUOTES, 'UTF-8'); ?>
-        · módulos:
-        <?php
-        $modules = [];
-        foreach ((array) ($versionInfo['modules'] ?? []) as $module => $version) {
-            $modules[] = htmlspecialchars((string) $module, ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars((string) $version, ENT_QUOTES, 'UTF-8');
-        }
-        echo implode(' · ', $modules);
-        ?>
+        <?= htmlspecialchars($channel, ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseId, ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($commit, ENT_QUOTES, 'UTF-8'); ?>
     </p>
 </footer>

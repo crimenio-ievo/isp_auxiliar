@@ -41,8 +41,7 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
     <?php if ($isBetaRelease): ?>
         <aside class="beta-environment-banner" role="status" aria-label="Ambiente Beta">
-            <strong>AMBIENTE BETA</strong>
-            <span>Recursos em homologação. Verifique os dados antes de concluir operações.</span>
+            <strong>AMBIENTE BETA — recursos em homologação</strong>
         </aside>
     <?php endif; ?>
     <?php if (!$hideHeader): ?>

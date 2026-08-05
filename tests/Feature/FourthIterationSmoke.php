@@ -369,21 +369,19 @@ try {
     $translatedEvent = $translateAudit->invoke($controller, 'contract.acceptance.accepted', ['actor_login' => 'vanessa']);
     $check(42, ($translatedEvent['label'] ?? '') === 'Cliente confirmou o aceite.' && str_contains((string) ($translatedEvent['description'] ?? ''), 'vanessa'), 'eventos técnicos são traduzidos sem inventar responsável');
 
-    $releaseLogin = 'release_' . bin2hex(random_bytes(4));
     $releaseConfig = new Config(['app' => ['release' => ['channel' => 'stable', 'stable_base_url' => 'https://stable.example.test/isp', 'beta_base_url' => 'https://beta.example.test/isp']]]);
     $releaseService = new ReleaseChannelService($releaseConfig, $local);
-    $check(43, $releaseService->currentChannel() === 'stable' && $releaseService->preference(['login' => $releaseLogin, 'role' => 'viewer']) === 'stable', 'Stable é o padrão');
+    $check(43, $releaseService->currentChannel() === 'stable' && $releaseService->preference(['login' => 'release.viewer', 'role' => 'viewer']) === 'stable', 'Stable é o canal atual');
     $betaDenied = false;
     try {
-        $releaseService->savePreference(['login' => $releaseLogin, 'role' => 'viewer'], 'beta');
+        $releaseService->resolveSwitch(['login' => 'release.viewer', 'role' => 'viewer'], 'beta');
     } catch (RuntimeException) {
         $betaDenied = true;
     }
     $check(44, $betaDenied, 'Beta exige permissão');
     $check(45, $releaseService->destination('beta') === 'https://beta.example.test/isp', 'URL do canal vem somente da configuração');
-    $releaseResult = $releaseService->savePreference(['login' => $releaseLogin, 'role' => 'manager', 'name' => 'Gestor release'], 'beta');
-    $releaseAudit = $database->fetchOne('SELECT id FROM audit_logs WHERE actor_login = :login AND action = "release.channel.preference_changed" ORDER BY id DESC LIMIT 1', ['login' => $releaseLogin]);
-    $check(46, ($releaseResult['channel'] ?? '') === 'beta' && (int) ($releaseAudit['id'] ?? 0) > 0, 'alteração do canal é auditada');
+    $releaseResult = $releaseService->resolveSwitch(['login' => 'release.manager', 'role' => 'manager'], 'beta');
+    $check(46, ($releaseResult['destination'] ?? '') === 'https://beta.example.test/isp' && !empty($releaseResult['redirect']), 'troca resolve o canal sem persistir preferência');
 
     $autoloadPath = var_export($rootPath . '/backend/bootstrap/autoload.php', true);
     $layoutPath = var_export($rootPath . '/backend/Views/layouts/app.php', true);
@@ -391,7 +389,7 @@ try {
     $stableScript = 'require ' . $autoloadPath . '; define("APP_RELEASE_INFO", ["channel" => "stable"]); $pageTitle="Teste"; $appName="Teste"; $layoutMode="guest"; $hideHeader=true; $hideFooter=true; $content="ok"; require ' . $layoutPath . ';';
     $betaOutput = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg($betaScript));
     $stableOutput = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg($stableScript));
-    $check(47, str_contains($betaOutput, 'AMBIENTE BETA') && str_contains($betaOutput, 'Recursos em homologação'), 'banner Beta aparece');
+    $check(47, str_contains($betaOutput, 'AMBIENTE BETA') && str_contains($betaOutput, 'recursos em homologação'), 'banner Beta aparece');
     $check(48, !str_contains($stableOutput, 'AMBIENTE BETA'), 'Stable não mostra banner Beta');
     $unsafeRelease = new ReleaseChannelService(new Config(['app' => ['release' => ['channel' => 'stable', 'beta_base_url' => 'https://usuario:senha@evil.example.test/redirecionar']]]), $local);
     $check(49, $unsafeRelease->destination('beta') === '', 'open redirect e URL com credencial são bloqueados');

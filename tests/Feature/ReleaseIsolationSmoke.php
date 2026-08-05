@@ -56,7 +56,7 @@ $_SESSION['user'] = ['login' => 'release.admin.test', 'name' => 'Admin', 'role' 
 [$adminStatus, $adminBody] = $responseData($controller->release(new Request('GET', '/api/release')));
 $release = json_decode($adminBody, true);
 $assert($adminStatus === 200 && is_array($release), 'Administrador não recebeu release info.');
-foreach (['channel', 'release_id', 'commit', 'build_date', 'database_schema_version', 'external_writes_enabled', 'notifications_dry_run', 'ticket_dry_run'] as $field) {
+foreach (['channel', 'release_id', 'commit', 'build_date', 'schema_version', 'external_writes_enabled', 'notification_dry_run', 'ticket_dry_run'] as $field) {
     $assert(array_key_exists($field, $release), 'Campo de release ausente: ' . $field);
 }
 $assert(!preg_match('/smtp_password|api_token|client_secret|db_password/i', $adminBody), 'Release info expôs campo de credencial.');
@@ -69,6 +69,10 @@ $safeConfig = new Config(['app' => ['release' => [
 $safeChannels = new ReleaseChannelService($safeConfig, $local);
 $assert($safeChannels->destination('stable') === 'https://stable.example.test/app', 'Destino Stable configurado foi alterado.');
 $assert($safeChannels->destination('beta') === 'https://beta.example.test/app', 'Destino Beta configurado foi alterado.');
+$switch = $safeChannels->resolveSwitch(['login' => 'release.admin.test', 'role' => 'admin'], 'beta');
+$assert(empty($switch['redirect']) && ($switch['destination'] ?? '') === '', 'Seleção do próprio canal provocaria recarga.');
+$switch = $safeChannels->resolveSwitch(['login' => 'release.admin.test', 'role' => 'admin'], 'stable');
+$assert(!empty($switch['redirect']) && ($switch['destination'] ?? '') === 'https://stable.example.test/app', 'Troca não resolveu o destino configurado.');
 $unsafeChannels = new ReleaseChannelService(new Config(['app' => ['release' => [
     'stable_base_url' => 'https://usuario:senha@host.example.test/app',
 ]]]), $local);
