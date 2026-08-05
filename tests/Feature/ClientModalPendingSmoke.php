@@ -154,9 +154,8 @@ try {
     $check(23, str_contains($withActiveProcess, '/processos/migracao?id=77&amp;step=open_financial_ticket'), 'Continuar processo aponta para a etapa correta');
     $check(24, !str_contains($layoutSource, '20260803a') && str_contains($layoutSource, "releaseInfo['id']") && str_contains($layoutSource, "releaseInfo['commit']") && str_contains($layoutSource, 'filemtime(') && substr_count($layoutSource, '?v=') === 2 && substr_count($layoutSource, 'rawurlencode($assetVersion)') === 2, 'assets possuem cache busting por release, commit ou filemtime');
 
-    $_SESSION['release_channel_preference'] = 'beta';
     $releaseHeader = $view->render('layouts/header', ['layoutMode' => 'app', 'user' => $_SESSION['user'], 'appName' => 'ISP Auxiliar']);
-    $check(25, str_contains($releaseHeader, 'Canal selecionado: Beta.') && str_contains($releaseHeader, 'Beta ainda utiliza a mesma build da Stable neste ambiente.') && str_contains($headerSource, 'data-shared-build'), 'Stable/Beta informam corretamente a build compartilhada');
+    $check(25, str_contains($releaseHeader, 'Canal: <strong>Beta</strong>') && str_contains($releaseHeader, 'Abrir Stable') && !str_contains($headerSource, 'data-shared-build'), 'Stable/Beta usam destinos reais e exibem o canal atual');
 
     $guard = new MkAuthWriteGuard('test', false);
     $writeBlocked = false;
