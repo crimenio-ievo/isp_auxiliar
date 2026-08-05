@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+if (($layoutMode ?? 'app') === 'guest') {
+    return;
+}
+
 $releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
 $channel = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta' ? 'Beta' : 'Stable';
 $releaseId = trim((string) ($releaseInfo['id'] ?? '')) ?: 'release não informada';

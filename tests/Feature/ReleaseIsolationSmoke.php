@@ -78,6 +78,10 @@ $unsafeChannels = new ReleaseChannelService(new Config(['app' => ['release' => [
 ]]]), $local);
 $assert($unsafeChannels->destination('stable') === '', 'URL com credencial foi aceita pelo seletor.');
 
+$footerPath = var_export($root . '/backend/Views/layouts/footer.php', true);
+$guestFooter = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg('$layoutMode="guest"; define("APP_RELEASE_INFO", ["channel"=>"beta","id"=>"secret-release","commit"=>"abcdef123"]); ob_start(); require ' . $footerPath . '; echo ob_get_clean();'));
+$assert($guestFooter === '', 'Página pública exibiu identificação de release.');
+
 $publicIndex = (string) file_get_contents($root . '/public/index.php');
 $assert(strpos($publicIndex, 'bootstrapApplication()') < strpos($publicIndex, 'session_start()'), 'Sessão abriu antes da configuração da release.');
 $assert(str_contains($publicIndex, 'session_name(') && str_contains($publicIndex, 'session_save_path('), 'Nome e path da sessão não foram isolados.');
