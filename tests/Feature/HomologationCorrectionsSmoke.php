@@ -84,8 +84,8 @@ $migrationView = (string) file_get_contents($root . '/backend/Views/processes/mi
 $actionComponent = (string) file_get_contents($root . '/backend/Views/components/migration_actions.php');
 $upgradeView = (string) file_get_contents($root . '/backend/Views/clients/upgrade.php');
 $createView = (string) file_get_contents($root . '/backend/Views/clients/create.php');
-$assert(str_contains($actionComponent, 'migration-actions__primary') && str_contains($migrationView, '$renderMigrationActions'), 'Componente compartilhado de ações não foi aplicado.');
-$assert(str_contains($migrationView, 'Continuar para execução') && str_contains($migrationView, 'A confirmação do titular ainda está pendente.'), 'Aceite não bloqueia continuação pendente.');
+$assert(str_contains($actionComponent, 'migration-actions__back') && str_contains($actionComponent, 'migration-actions__right') && str_contains($migrationView, '$renderMigrationActions'), 'Componente compartilhado de ações não foi aplicado.');
+$assert(str_contains($migrationView, "'name' => 'acceptance_action'") && str_contains($migrationView, 'Aguardando confirmação do cliente'), 'Aceite não mantém o Continuar contextual na etapa pendente.');
 $assert(str_contains($migrationView, 'capture="environment"') && str_contains($migrationView, 'data-migration-evidence-preview'), 'Execução não oferece câmera e preview.');
 $assert(str_contains($migrationView, 'Atualizar verificações') && str_contains($migrationView, 'Fechamento financeiro confirmado'), 'Finalização não atualiza toda a matriz de pendências.');
 $assert(str_contains($upgradeView, 'benefit_flags[]') && str_contains($upgradeView, 'Descrição do outro benefício'), 'Checkboxes e outro benefício não aparecem na Nova condição.');
