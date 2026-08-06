@@ -206,6 +206,7 @@ final class OperationalProcessController
                 'whatsapp' => (bool) $this->config->get('evotrix.dry_run', true),
                 'email' => (bool) $this->config->get('email.dry_run', true),
             ],
+            'externalOperationsBlocked' => !(bool) $this->config->get('app.mkauth.write_enabled', false),
         ]));
     }
 
@@ -439,7 +440,6 @@ final class OperationalProcessController
 
         $operator = $this->resolveUser();
         $evidenceService = $this->evidenceService ?? new MigrationEvidenceService($this->config);
-        $advanceToFinalization = true;
         try {
             $files = $evidenceService->store($processId, 'technical_execution', (array) ($_FILES['evidence_files'] ?? []), $operator);
             $technicalStep = $this->findStep($process, 'technical_execution');
@@ -498,7 +498,6 @@ final class OperationalProcessController
             } else {
                 $offlineJustification = trim((string) $request->input('offline_justification', ''));
                 $authorized = (string) $request->input('offline_override', '') === '1' && $this->canOverride();
-                $advanceToFinalization = $authorized && $offlineJustification !== '';
                 $this->processService->updateStep($processId, 'validate_connection', $authorized && $offlineJustification !== '' ? 'complete' : 'attention', [
                     'observation' => $offlineJustification,
                     'pending_reason' => 'PPPoE offline ou indisponível após a execução técnica.',
@@ -514,10 +513,6 @@ final class OperationalProcessController
             }
         } catch (\Throwable $exception) {
             Flash::set('error', $exception->getMessage());
-            return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
-        }
-
-        if (!$advanceToFinalization) {
             return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
         }
 

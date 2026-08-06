@@ -544,7 +544,7 @@ final class ClientController
                     if ($nextAction === 'stay') {
                         return Response::redirect('/processos/migracao?id=' . (int) ($result['process_id'] ?? $processId) . '&step=migration_data');
                     }
-                    return Response::redirect('/processos/migracao?id=' . (int) ($result['process_id'] ?? $processId));
+                    return Response::redirect('/processos/migracao?id=' . (int) ($result['process_id'] ?? $processId) . '&step=confirm_acceptance');
                 }
                 $operator = $this->resolveUser();
                 $oldAcceptance = $this->contractAcceptanceRepository->findLatestByContractId($correctionOf);
@@ -620,7 +620,7 @@ final class ClientController
             return Response::redirect('/processos/migracao?id=' . $processId . '&step=migration_data');
         }
         return Response::redirect($processId > 0
-            ? '/processos/migracao?id=' . $processId
+            ? '/processos/migracao?id=' . $processId . '&step=confirm_acceptance'
             : '/clientes/detalhe?login=' . rawurlencode($login));
     }
 
@@ -703,8 +703,49 @@ final class ClientController
             return Response::redirect($returnTo);
         }
 
-        $resendOnly = (string) $request->input('resend_only', '0') === '1'
-            && trim((string) ($acceptance['sent_at'] ?? '')) !== '';
+        $acceptanceAction = trim((string) $request->input('acceptance_action', 'continue'));
+        if (!in_array($acceptanceAction, ['continue', 'verify', 'resend'], true)) {
+            Flash::set('error', 'A ação informada para o aceite não é válida.');
+            return Response::redirect($returnTo);
+        }
+        $acceptanceSent = trim((string) ($acceptance['sent_at'] ?? '')) !== '';
+        $acceptanceAccepted = (string) ($acceptance['status'] ?? '') === 'aceito'
+            && trim((string) ($acceptance['revoked_at'] ?? '')) === '';
+
+        if ($acceptanceAccepted) {
+            $this->operationalProcessService->synchronizeAcceptance((int) $acceptance['id']);
+            if ($acceptanceAction === 'continue') {
+                return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+            }
+            Flash::set('success', 'Confirmação verificada. O aceite do titular já está concluído.');
+            return Response::redirect($returnTo);
+        }
+        if ($acceptanceSent && $acceptanceAction !== 'resend') {
+            $this->operationalProcessService->synchronizeAcceptance((int) $acceptance['id']);
+            $refreshedAcceptance = $this->contractAcceptanceRepository->findById((int) $acceptance['id']) ?? $acceptance;
+            $nowAccepted = (string) ($refreshedAcceptance['status'] ?? '') === 'aceito'
+                && trim((string) ($refreshedAcceptance['revoked_at'] ?? '')) === '';
+            if ($nowAccepted && $acceptanceAction === 'continue') {
+                return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
+            }
+            Flash::set(
+                $nowAccepted ? 'success' : 'warning',
+                $nowAccepted
+                    ? 'Confirmação recebida. Você já pode continuar para a execução técnica.'
+                    : 'A confirmação do cliente ainda está pendente. Nenhuma mensagem foi reenviada.'
+            );
+            return Response::redirect($returnTo);
+        }
+        if (!$acceptanceSent && $acceptanceAction === 'verify') {
+            Flash::set('warning', 'A confirmação ainda não foi enviada. Use Continuar para preparar o primeiro envio.');
+            return Response::redirect($returnTo);
+        }
+        if (!$acceptanceSent && $acceptanceAction === 'resend') {
+            Flash::set('error', 'O reenvio só fica disponível depois do primeiro envio.');
+            return Response::redirect($returnTo);
+        }
+
+        $resendOnly = $acceptanceAction === 'resend';
         $existingRemoteReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
         $remote = $resendOnly
             ? $existingRemoteReason !== ''
