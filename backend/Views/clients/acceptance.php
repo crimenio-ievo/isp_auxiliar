@@ -128,6 +128,7 @@ ob_start();
         data-draft-key="client-acceptance-<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>"
         data-draft-json="<?= htmlspecialchars((string) ($draftJson ?? '{}'), ENT_QUOTES, 'UTF-8'); ?>"
     >
+        <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($sendRequestId, ENT_QUOTES, 'UTF-8'); ?>">

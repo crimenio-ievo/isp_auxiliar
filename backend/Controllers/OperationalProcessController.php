@@ -431,7 +431,8 @@ final class OperationalProcessController
         $nextAction = trim((string) $request->input('next_action', ''));
         $responsibleLogin = trim((string) $request->input('responsible_login', ''));
         $pendingDueDate = trim((string) $request->input('pending_due_date', ''));
-        if ($equipmentInstalled === '') {
+        $saveOnly = (string) $request->input('continue_to', '') === 'exit';
+        if (!$saveOnly && $equipmentInstalled === '') {
             Flash::set('error', 'Informe o equipamento instalado.');
             return Response::redirect('/processos/migracao?id=' . $processId . '&step=technical_execution');
         }
@@ -451,6 +452,18 @@ final class OperationalProcessController
                 'pending_due_date' => $pendingDueDate,
                 'files' => array_values(array_merge((array) ($existingEvidence['files'] ?? []), $files)),
             ]);
+            if ($saveOnly) {
+                $this->processService->updateStep($processId, 'technical_execution', 'save', [
+                    'observation' => $observation,
+                    'external_reference' => $equipmentReference,
+                    'pending_reason' => $pendingReason,
+                    'next_action' => $nextAction,
+                    'responsible_login' => $responsibleLogin,
+                    'evidence' => $evidence,
+                ], $operator);
+                Flash::set('success', 'Execução técnica salva. O processo pode ser retomado pelo perfil do cliente.');
+                return Response::redirect('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')));
+            }
             $this->processService->updateStep($processId, 'technical_execution', 'complete', [
                 'observation' => $observation !== '' ? $observation : $serviceExecuted,
                 'external_reference' => $equipmentReference,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Core\Url;
 
 $form = is_array($form ?? null) ? $form : [];
+$errors = is_array($errors ?? null) ? $errors : [];
 $clearDraftKeys = is_array($clearDraftKeys ?? null) ? $clearDraftKeys : [];
 $dueDays = is_array($dueDays ?? null) ? $dueDays : [];
 $fieldValue = static function (string $name, string $default = '') use ($form): string {
@@ -19,6 +20,18 @@ $fieldSelected = static function (string $name, string $value, string $default =
     $current = (string) ($form[$name] ?? $default);
 
     return $current === $value ? 'selected' : '';
+};
+$firstErrorField = $errors !== [] ? (string) array_key_first($errors) : '';
+if ($firstErrorField === 'pessoa') {
+    $firstErrorField = 'cpf_cnpj';
+}
+$fieldState = static function (string $name) use ($errors, $firstErrorField): string {
+    $attributes = isset($errors[$name]) ? ' aria-invalid="true"' : '';
+    return $attributes . ($firstErrorField === $name ? ' data-focus-field' : '');
+};
+$fieldError = static function (string $name) use ($errors): string {
+    $message = trim((string) ($errors[$name] ?? ''));
+    return $message !== '' ? '<small class="field-error">' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</small>' : '';
 };
 $draftId = (string) ($draftId ?? '');
 $checkpointToken = (string) ($checkpointToken ?? '');
@@ -78,6 +91,13 @@ ob_start();
     </section>
 <?php endif; ?>
 
+<?php if ($errors !== []): ?>
+    <section class="alert alert--error" role="alert" tabindex="-1" data-focus-on-load>
+        <strong>Revise os campos indicados:</strong>
+        <ul><?php foreach ($errors as $message): ?><li><?= htmlspecialchars((string) $message, ENT_QUOTES, 'UTF-8'); ?></li><?php endforeach; ?></ul>
+    </section>
+<?php endif; ?>
+
 <form
     class="content-grid content-grid--form"
     method="post"
@@ -90,6 +110,7 @@ ob_start();
     data-clear-draft-endpoint="<?= htmlspecialchars(Url::to('/clientes/rascunho/limpar'), ENT_QUOTES, 'UTF-8'); ?>"
     data-contract-commercial-config="<?= htmlspecialchars(json_encode($commercial, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}', ENT_QUOTES, 'UTF-8'); ?>"
 >
+    <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId, ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -102,7 +123,8 @@ ob_start();
         <div class="form-grid">
             <label class="field field--span-2">
                 <span>Nome completo</span>
-                <input type="text" name="nome_completo" placeholder="Nome do titular" value="<?= $fieldValue('nome_completo'); ?>" required>
+                <input type="text" name="nome_completo" placeholder="Nome do titular" value="<?= $fieldValue('nome_completo'); ?>" required<?= $fieldState('nome_completo'); ?>>
+                <?= $fieldError('nome_completo'); ?>
             </label>
 
             <label class="field field--span-2">
@@ -118,14 +140,16 @@ ob_start();
 
             <label class="field">
                 <span>CPF/CNPJ</span>
-                <input type="text" name="cpf_cnpj" placeholder="Somente numeros ou com pontuacao" value="<?= $fieldValue('cpf_cnpj'); ?>" data-cpf-input required>
+                <input type="text" name="cpf_cnpj" placeholder="Somente numeros ou com pontuacao" value="<?= $fieldValue('cpf_cnpj'); ?>" data-cpf-input required<?= $fieldState('cpf_cnpj'); ?>>
                 <small class="field-help" data-live-feedback="cpf">Digite 11 digitos para CPF ou 14 para CNPJ.</small>
+                <?= $fieldError('cpf_cnpj'); ?>
             </label>
 
             <label class="field">
                 <span>Celular</span>
-                <input type="text" name="celular" placeholder="(xx) x xxxx-xxxx" inputmode="tel" autocomplete="tel" value="<?= $fieldValue('celular'); ?>" data-phone-input required>
+                <input type="text" name="celular" placeholder="(xx) x xxxx-xxxx" inputmode="tel" autocomplete="tel" value="<?= $fieldValue('celular'); ?>" data-phone-input required<?= $fieldState('celular'); ?>>
                 <small class="field-help" data-live-feedback="phone">Use DDD + numero. O sistema vai formatar automaticamente.</small>
+                <?= $fieldError('celular'); ?>
             </label>
 
             <label class="field">
@@ -139,8 +163,9 @@ ob_start();
 
             <label class="field">
                 <span>Login</span>
-                <input type="text" name="login" placeholder="primeiroNome_local" value="<?= $fieldValue('login'); ?>" data-login-input required>
+                <input type="text" name="login" placeholder="primeiroNome_local" value="<?= $fieldValue('login'); ?>" data-login-input required<?= $fieldState('login'); ?>>
                 <small class="field-help" data-live-feedback="login">Use letras minusculas, numeros, ponto, hifen ou underscore. Espacos e simbolos sao rejeitados.</small>
+                <?= $fieldError('login'); ?>
             </label>
 
             <label class="field">
@@ -159,23 +184,25 @@ ob_start();
         <div class="form-grid">
             <label class="field">
                 <span>Tipo de instalação</span>
-                <select name="tipo_instalacao" data-install-type-select required>
+                <select name="tipo_instalacao" data-install-type-select required<?= $fieldState('tipo_instalacao'); ?>>
                     <option value="fibra" <?= $fieldSelected('tipo_instalacao', 'fibra', (string) ($defaultInstallType ?? 'fibra')); ?>>Fibra</option>
                     <option value="radio" <?= $fieldSelected('tipo_instalacao', 'radio', (string) ($defaultInstallType ?? 'fibra')); ?>>Rádio</option>
                 </select>
+                <?= $fieldError('tipo_instalacao'); ?>
             </label>
 
             <label class="field">
                 <span>Local DICI</span>
-                <select name="local_dici" data-local-dici-select required>
+                <select name="local_dici" data-local-dici-select required<?= $fieldState('local_dici'); ?>>
                     <option value="u" <?= $fieldSelected('local_dici', 'u', (string) ($defaultLocalDici ?? 'r')); ?>>Urbano</option>
                     <option value="r" <?= $fieldSelected('local_dici', 'r', (string) ($defaultLocalDici ?? 'r')); ?>>Rural</option>
                 </select>
+                <?= $fieldError('local_dici'); ?>
             </label>
 
             <label class="field">
                 <span>Plano</span>
-                <select name="plano" data-plan-select required>
+                <select name="plano" data-plan-select required<?= $fieldState('plano'); ?>>
                     <option value="">Selecione um plano</option>
                     <?php foreach ($plans as $plan): ?>
                         <?php
@@ -195,11 +222,12 @@ ob_start();
                     <?php endforeach; ?>
                 </select>
                 <small class="field-help" data-plan-help>Mostrando apenas planos ativos e compatíveis com tipo de instalação e Local DICI.</small>
+                <?= $fieldError('plano'); ?>
             </label>
 
             <label class="field">
                 <span>Vencimento</span>
-                <select name="vencimento" required>
+                <select name="vencimento" required<?= $fieldState('vencimento'); ?>>
                     <?php foreach ($dueDays as $dueDay): ?>
                         <?php $day = str_pad((string) ($dueDay['day'] ?? ''), 2, '0', STR_PAD_LEFT); ?>
                         <option value="<?= htmlspecialchars($day, ENT_QUOTES, 'UTF-8'); ?>" <?= $fieldSelected('vencimento', $day, (string) ($defaultDueDay ?? '05')); ?>>
@@ -208,6 +236,7 @@ ob_start();
                     <?php endforeach; ?>
                 </select>
                 <small class="field-help">Escolha um dos dias disponíveis para vencimento.</small>
+                <?= $fieldError('vencimento'); ?>
             </label>
 
             <label class="field">
@@ -218,7 +247,7 @@ ob_start();
 
             <label class="field">
                 <span>Cidade</span>
-                <select name="cidade" data-city-select>
+                <select name="cidade" data-city-select required<?= $fieldState('cidade'); ?>>
                     <option value="">Selecione</option>
                     <?php if ($formCity !== '' && !$cityExists): ?>
                         <option
@@ -241,11 +270,13 @@ ob_start();
                         </option>
                     <?php endforeach; ?>
                 </select>
+                <?= $fieldError('cidade'); ?>
             </label>
 
             <label class="field">
                 <span>Estado</span>
-                <input type="text" name="estado" data-city-state readonly value="<?= $fieldValue('estado'); ?>">
+                <input type="text" name="estado" data-city-state readonly value="<?= $fieldValue('estado'); ?>"<?= $fieldState('estado'); ?>>
+                <?= $fieldError('estado'); ?>
             </label>
 
             <label class="field">
@@ -255,18 +286,21 @@ ob_start();
 
             <label class="field field--span-2">
                 <span>Endereço</span>
-                <input type="text" name="endereco" placeholder="Como for mais usual na regiao" value="<?= $fieldValue('endereco'); ?>">
+                <input type="text" name="endereco" placeholder="Como for mais usual na regiao" value="<?= $fieldValue('endereco'); ?>" required<?= $fieldState('endereco'); ?>>
+                <?= $fieldError('endereco'); ?>
             </label>
 
             <label class="field">
                 <span>Número</span>
-                <input type="text" name="numero" value="<?= $fieldValue('numero', 'SN'); ?>" data-address-number-input>
+                <input type="text" name="numero" value="<?= $fieldValue('numero', 'SN'); ?>" data-address-number-input required<?= $fieldState('numero'); ?>>
                 <small class="field-help">Se não houver número, deixe em branco para salvar como <strong>SN</strong>.</small>
+                <?= $fieldError('numero'); ?>
             </label>
 
             <label class="field">
                 <span>Bairro</span>
-                <input type="text" name="bairro" placeholder="Bairro" value="<?= $fieldValue('bairro'); ?>">
+                <input type="text" name="bairro" placeholder="Bairro" value="<?= $fieldValue('bairro'); ?>" required<?= $fieldState('bairro'); ?>>
+                <?= $fieldError('bairro'); ?>
             </label>
 
             <label class="field">
@@ -277,13 +311,14 @@ ob_start();
             <label class="field field--span-2">
                 <span>Coordenada da instalação</span>
                 <div class="geo-capture" data-geo-capture>
-                <input type="text" name="coordenadas" placeholder="-20.850552,-42.803886" value="<?= $fieldValue('coordenadas'); ?>" data-geo-coordinate required>
+                <input type="text" name="coordenadas" placeholder="-20.850552,-42.803886" value="<?= $fieldValue('coordenadas'); ?>" data-geo-coordinate required<?= $fieldState('coordenadas'); ?>>
                     <input type="hidden" name="coordenadas_precisao" value="<?= $fieldValue('coordenadas_precisao'); ?>" data-geo-accuracy>
                     <input type="hidden" name="coordenadas_capturadas_em" value="<?= $fieldValue('coordenadas_capturadas_em'); ?>" data-geo-captured-at>
                     <button class="button button--ghost" type="button" data-geo-button>Capturar coordenada do celular</button>
                     <button class="button button--ghost" type="button" data-geo-map>Marcar no mapa</button>
                 </div>
                 <small class="field-help" data-geo-help>Obrigatório. O sistema tenta capturar automaticamente pelo GPS do celular; se falhar, informe a coordenada ou marque no mapa.</small>
+                <?= $fieldError('coordenadas'); ?>
             </label>
 
             <section class="card card--span-2 contract-commercial-card">
@@ -297,23 +332,25 @@ ob_start();
                 <div class="form-grid" data-contract-commercial-form>
                     <label class="field">
                         <span>Tipo de adesão</span>
-                        <select name="tipo_adesao" data-adhesion-type-input>
+                        <select name="tipo_adesao" data-adhesion-type-input<?= $fieldState('tipo_adesao'); ?>>
                             <option value="cheia" <?= $fieldSelected('tipo_adesao', 'cheia', $initialAdhesionType); ?>>Cheia</option>
                             <option value="promocional" <?= $fieldSelected('tipo_adesao', 'promocional', $initialAdhesionType); ?>>Promocional</option>
                             <option value="isenta" <?= $fieldSelected('tipo_adesao', 'isenta', $initialAdhesionType); ?>>Isenta</option>
                         </select>
                         <small class="field-help">Cheia é o padrão. Ajuste para promocional ou isenta apenas quando necessário.</small>
+                        <?= $fieldError('tipo_adesao'); ?>
                     </label>
 
                     <label class="field">
                         <span>Valor da adesão</span>
-                        <input type="text" name="valor_adesao" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('valor_adesao', $defaultAdhesionValue !== 0.0 ? number_format($defaultAdhesionValue, 2, ',', '.') : '0,00'); ?>" data-adhesion-value-input required <?= in_array($initialAdhesionType, ['cheia', 'isenta'], true) ? 'readonly' : ''; ?>>
+                        <input type="text" name="valor_adesao" inputmode="decimal" placeholder="0,00" value="<?= $fieldValue('valor_adesao', $defaultAdhesionValue !== 0.0 ? number_format($defaultAdhesionValue, 2, ',', '.') : '0,00'); ?>" data-adhesion-value-input required <?= in_array($initialAdhesionType, ['cheia', 'isenta'], true) ? 'readonly' : ''; ?><?= $fieldState('valor_adesao'); ?>>
                         <small class="field-help" data-adhesion-value-help>Na adesão cheia o valor segue o padrão configurado. Na isenta, o valor fica zerado.</small>
+                        <?= $fieldError('valor_adesao'); ?>
                     </label>
 
                     <label class="field">
                         <span>Parcelas da adesão</span>
-                        <select name="parcelas_adesao" data-adhesion-parcels-input required>
+                        <select name="parcelas_adesao" data-adhesion-parcels-input required<?= $fieldState('parcelas_adesao'); ?>>
                             <?php for ($installment = 1; $installment <= $maxAdhesionInstallments; $installment += 1): ?>
                                 <option value="<?= htmlspecialchars((string) $installment, ENT_QUOTES, 'UTF-8'); ?>" <?= $fieldSelected('parcelas_adesao', (string) $installment, (string) $initialAdhesionInstallments); ?>>
                                     <?= htmlspecialchars((string) $installment, ENT_QUOTES, 'UTF-8'); ?>
@@ -321,6 +358,7 @@ ob_start();
                             <?php endfor; ?>
                         </select>
                         <small class="field-help">Não ultrapassa o máximo configurado no módulo.</small>
+                        <?= $fieldError('parcelas_adesao'); ?>
                     </label>
 
                     <label class="field">
@@ -331,14 +369,16 @@ ob_start();
 
                     <label class="field">
                         <span>Fidelidade</span>
-                        <input type="number" name="fidelidade_meses" min="1" value="<?= $fieldValue('fidelidade_meses', (string) $initialAdhesionFidelity); ?>" data-adhesion-fidelity-input required>
+                        <input type="number" name="fidelidade_meses" min="1" value="<?= $fieldValue('fidelidade_meses', (string) $initialAdhesionFidelity); ?>" data-adhesion-fidelity-input required<?= $fieldState('fidelidade_meses'); ?>>
                         <small class="field-help">Padrão configurado: <?= htmlspecialchars((string) ($commercial['fidelidade_meses_padrao'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses.</small>
+                        <?= $fieldError('fidelidade_meses'); ?>
                     </label>
 
                     <label class="field">
                         <span>Autorizado por</span>
-                        <input type="text" name="beneficio_concedido_por" placeholder="Quem aprovou o benefício" value="<?= htmlspecialchars($initialBenefitAuthorizer, ENT_QUOTES, 'UTF-8'); ?>" data-adhesion-authorizer-input data-skip-draft-restore>
+                        <input type="text" name="beneficio_concedido_por" placeholder="Quem aprovou o benefício" value="<?= htmlspecialchars($initialBenefitAuthorizer, ENT_QUOTES, 'UTF-8'); ?>" data-adhesion-authorizer-input data-skip-draft-restore<?= $fieldState('beneficio_concedido_por'); ?>>
                         <small class="field-help">Preencha manualmente quem aprovou desconto, promoção, isenção ou condição especial.</small>
+                        <?= $fieldError('beneficio_concedido_por'); ?>
                     </label>
 
                     <input type="hidden" name="beneficio_valor" value="<?= $fieldValue('beneficio_valor', $defaultBenefitValue); ?>" data-adhesion-benefit-input>
@@ -350,7 +390,7 @@ ob_start();
                 </div>
             </section>
 
-            <label class="field field--span-2">
+            <label class="field field--span-2" <?= isset($errors['fotos']) ? 'aria-invalid="true"' : ''; ?>>
                 <span>Fotos da instalação</span>
                 <div class="photo-uploader" data-photo-uploader>
                     <div class="photo-uploader__actions">
@@ -367,6 +407,7 @@ ob_start();
                     </div>
                     <div class="photo-uploader__preview" data-photo-preview></div>
                 </div>
+                <?= $fieldError('fotos'); ?>
             </label>
 
             <label class="field field--span-2">

@@ -3610,14 +3610,31 @@ body.client-panel-open {
 
 .migration-phase-legend .is-current {
     border-color: var(--primary);
-    color: var(--primary);
-    background: var(--primary-soft);
-}
-
-.migration-phase-legend .is-current b,
-.migration-phase-legend .is-past b {
     color: #fff;
     background: var(--primary);
+    box-shadow: 0 4px 12px rgb(13 148 136 / 22%);
+}
+
+.migration-phase-legend .is-current b {
+    color: var(--primary);
+    background: #fff;
+}
+
+.migration-phase-legend .is-completed {
+    border-color: #bbf7d0;
+    color: #166534;
+    background: #f0fdf4;
+}
+
+.migration-phase-legend .is-completed b {
+    color: #fff;
+    background: #16a34a;
+}
+
+.migration-phase-legend .is-pending {
+    border-color: #fde68a;
+    color: #92400e;
+    background: #fffbeb;
 }
 
 .migration-workspace__grid {
@@ -3679,6 +3696,85 @@ body.client-panel-open {
 
 .migration-workspace__actions > :nth-child(2) {
     justify-self: end;
+}
+
+.migration-actions {
+    display: grid;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.migration-actions__primary {
+    display: grid;
+    gap: 5px;
+}
+
+.migration-actions__primary-button {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    font-weight: 800;
+}
+
+.migration-actions__navigation {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.migration-actions__navigation-item--start {
+    margin-right: auto;
+}
+
+.migration-actions__navigation-item--end,
+.migration-actions__more {
+    margin-left: 0;
+}
+
+.migration-actions__navigation-item {
+    display: grid;
+    gap: 3px;
+}
+
+.migration-actions__help {
+    color: var(--muted);
+    font-size: var(--font-small);
+}
+
+.migration-actions__more {
+    position: relative;
+}
+
+.migration-actions__more summary {
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 800;
+    list-style: none;
+}
+
+.migration-actions__more[open] > div {
+    position: absolute;
+    z-index: 12;
+    right: 0;
+    bottom: calc(100% + 6px);
+    display: grid;
+    min-width: 210px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+.migration-actions button:disabled {
+    cursor: not-allowed;
+    opacity: .55;
 }
 
 .migration-checklist {
@@ -3754,16 +3850,38 @@ body.client-panel-open {
 
 .migration-checklist__step.is-current {
     border-color: var(--primary);
-    background: var(--primary-soft);
+    color: #fff;
+    background: var(--primary);
+    box-shadow: 0 5px 14px rgb(13 148 136 / 20%);
 }
 
-.migration-checklist__step--success > span:first-child {
+.migration-checklist__step.is-current strong,
+.migration-checklist__step.is-current small {
+    color: #fff;
+}
+
+.migration-checklist__step.is-current > span:first-child {
+    color: var(--primary);
+    background: #fff;
+}
+
+.migration-checklist__step.is-completed > span:first-child {
     color: #fff;
     background: #15803d;
 }
 
-.migration-checklist__step--warning > span:first-child { background: #fef3c7; color: #92400e; }
-.migration-checklist__step--danger > span:first-child { background: #fee2e2; color: #b91c1c; }
+.migration-checklist__step.is-completed {
+    border-color: #dcfce7;
+    background: #f0fdf4;
+}
+
+.migration-checklist__step.is-pending {
+    border-color: #fde68a;
+    color: #92400e;
+    background: #fffbeb;
+}
+
+.migration-checklist__step.is-pending > span:first-child { background: #fef3c7; color: #92400e; }
 
 .migration-technical-details {
     margin-top: 10px;
@@ -3806,6 +3924,31 @@ body.client-panel-open {
 
 .commercial-adjustments > .form-grid { margin-top: 12px; }
 
+.benefit-conditions {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+}
+
+.benefit-conditions legend {
+    padding: 0 6px;
+    font-weight: 800;
+}
+
+.benefit-checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.benefit-checkbox-grid .checkbox-field {
+    margin: 0;
+    background: #fff;
+}
+
 .automatic-condition-list {
     display: grid;
     gap: 5px;
@@ -3840,6 +3983,60 @@ body.client-panel-open {
     height: 38px;
     object-fit: cover;
     border-radius: 6px;
+}
+
+.migration-evidence-uploader,
+.migration-evidence-preview {
+    display: grid;
+    gap: 8px;
+}
+
+.migration-evidence-uploader__choices {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.migration-evidence-uploader__choices input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+}
+
+.migration-evidence-preview {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+.migration-evidence-preview__item {
+    display: grid;
+    gap: 5px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+
+.migration-evidence-preview__item img,
+.migration-evidence-preview__file {
+    width: 100%;
+    height: 84px;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.migration-evidence-preview__file {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    background: #fff;
+    font-weight: 800;
+}
+
+.migration-finalization-pending ul {
+    margin: 8px 0 0;
+    padding-left: 20px;
 }
 
 .migration-finalization-progress__item small,
@@ -3951,7 +4148,24 @@ body.client-panel-open {
     .migration-workspace__actions > :last-child { grid-column: 1 / -1; grid-row: 1; }
     .migration-workspace__actions > :nth-child(2) { justify-self: stretch; }
     .migration-workspace__actions .button { width: 100%; }
+    .migration-actions {
+        position: sticky;
+        z-index: 5;
+        bottom: -12px;
+        margin: 0 -12px -12px;
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+        background: rgb(255 255 255 / 96%);
+        box-shadow: 0 -8px 22px rgb(15 23 42 / 8%);
+    }
+    .migration-actions__navigation { display: grid; grid-template-columns: 1fr 1fr; }
+    .migration-actions__navigation-item,
+    .migration-actions__navigation-item .button,
+    .migration-actions__more,
+    .migration-actions__more summary { width: 100%; }
+    .migration-actions__navigation-item--start { margin-right: 0; }
+    .migration-actions__more[open] > div { position: static; margin-top: 6px; }
     .acceptance-channels-grid,
+    .benefit-checkbox-grid,
     .adhesion-summary .summary-grid { grid-template-columns: 1fr; }
     .migration-checklist {
         position: fixed;

@@ -15,13 +15,20 @@ $currentTechnology = trim((string) ($context['current_technology'] ?? ''));
 $currentValue = $context['current_monthly_value'] ?? null;
 $selectedPlan = trim((string) ($form['new_plan_id'] ?? $form['novo_plano'] ?? $context['new_plan'] ?? ''));
 $benefitValue = number_format((float) ($form['valor_beneficio'] ?? $context['benefit_value'] ?? 0), 2, ',', '.');
-$retention = !empty($form) ? !empty($form['retention_condition']) : !empty($context['retention_condition']);
+$benefitFlags = is_array($form['benefit_flags'] ?? null)
+    ? $form['benefit_flags']
+    : (is_array($context['benefit_flags'] ?? null) ? $context['benefit_flags'] : []);
+$automaticBenefitFlags = is_array($form['benefit_automatic_flags'] ?? null)
+    ? $form['benefit_automatic_flags']
+    : (is_array($context['benefit_automatic_flags'] ?? null) ? $context['benefit_automatic_flags'] : []);
+$retention = !empty($benefitFlags['retention']);
 $applyFidelity = !empty($form) ? !empty($form['apply_fidelity']) : !empty($context['apply_fidelity']);
 $fidelityMonths = $applyFidelity && array_key_exists('fidelidade_meses', $form)
     ? (int) $form['fidelidade_meses']
     : max(1, min(12, (int) ($context['fidelity_months'] ?? 12)));
 $fidelityDescription = trim((string) ($form['fidelity_benefit_description'] ?? $context['fidelity_benefit_description'] ?? ''));
-$otherBenefit = trim((string) ($form['beneficio_outro_text'] ?? ''));
+$otherBenefit = trim((string) ($form['beneficio_outro_text'] ?? $context['benefit_other_text'] ?? ''));
+$otherBenefitValue = number_format((float) ($form['beneficio_outro_valor'] ?? $context['benefit_other_value'] ?? 0), 2, ',', '.');
 $benefitAdjustmentReason = trim((string) ($form['benefit_adjustment_reason'] ?? ''));
 $observation = trim((string) ($form['observacao'] ?? $context['observacao'] ?? ''));
 $correctionOf = (int) ($correctionOf ?? 0);
@@ -30,6 +37,8 @@ $processId = (int) ($processId ?? 0);
 $revisionMode = trim((string) ($revisionMode ?? ''));
 $adhesionDefault = (float) ($context['adhesion_default_value'] ?? 0);
 $waiverMode = (string) ($context['adhesion_waiver_mode'] ?? 'disabled');
+$automaticBenefitValue = (float) ($context['benefit_automatic_value'] ?? 0);
+$canAdjustCommercial = !empty($context['can_adjust_commercial']);
 $errorFor = static fn (string $field): string => trim((string) ($errors[$field] ?? ''));
 $firstErrorField = $errors !== [] ? (string) array_key_first($errors) : '';
 $operationLabels = ['migration' => 'Migração', 'upgrade' => 'Upgrade', 'downgrade' => 'Downgrade'];
@@ -66,7 +75,6 @@ ob_start();
         <strong>1/4</strong>
         <div class="process-progress"><span style="width: 25%"></span></div>
         <button class="button button--ghost button--small" type="button" data-open-process-steps aria-controls="migration-checklist" aria-expanded="false">Ver as 4 etapas</button>
-        <?php if ($processId > 0): ?><button class="button button--ghost button--small" type="button" data-open-migration-cancel>Cancelar processo</button><?php endif; ?>
     </div>
 </header>
 
@@ -181,71 +189,75 @@ ob_start();
             <small class="field-help">Troca de tecnologia = migração; condição superior = upgrade; condição inferior = downgrade.</small>
         </div>
 
-        <section class="field field--span-2 adhesion-summary adhesion-summary--compact" aria-live="polite"
-            data-adhesion-summary
+        <fieldset class="field field--span-2 benefit-conditions" data-benefit-conditions
             data-adhesion-default="<?= htmlspecialchars((string) $adhesionDefault, ENT_QUOTES, 'UTF-8'); ?>"
-            data-waiver-mode="<?= htmlspecialchars($waiverMode, ENT_QUOTES, 'UTF-8'); ?>">
-            <strong>Condições aplicadas automaticamente</strong>
-            <ul class="automatic-condition-list">
-                <li data-automatic-operation>✓ Operação calculada pelo plano e tecnologia</li>
-                <li data-adhesion-charged>✓ Adesão definida após escolher o plano</li>
-                <li data-adhesion-benefit>✓ Benefício calculado pela regra comercial</li>
-                <li>✓ Fidelidade conforme configuração do provedor</li>
-            </ul>
-            <?php if ($waiverMode === 'manual'): ?>
-                <label class="checkbox-field" data-manual-waiver hidden>
-                    <input type="checkbox" name="manual_adhesion_waiver" value="1" <?= !empty($form['manual_adhesion_waiver']) ? 'checked' : ''; ?>>
-                    <span><strong>Confirmar isenção da adesão</strong><small>Disponível somente para migração de rádio para fibra.</small></span>
-                </label>
-            <?php endif; ?>
-        </section>
-
-        <details class="field field--span-2 commercial-adjustments" <?= ($retention || $applyFidelity || $otherBenefit !== '' || $benefitAdjustmentReason !== '') ? 'open' : ''; ?>>
-            <summary>Ajustar condições</summary>
-            <div class="form-grid">
-        <label class="field" for="benefit-value">
-            <span>Valor do benefício</span>
-            <input id="benefit-value" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" aria-describedby="benefit-value-error" <?= $firstErrorField === 'valor_beneficio' ? 'data-focus-field' : ''; ?>>
-            <?php if ($errorFor('valor_beneficio') !== ''): ?><small id="benefit-value-error" class="field-error"><?= htmlspecialchars($errorFor('valor_beneficio'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
-        </label>
-
-        <label class="field" for="benefit-adjustment-reason">
-            <span>Justificativa do ajuste</span>
-            <input id="benefit-adjustment-reason" name="benefit_adjustment_reason" value="<?= htmlspecialchars($benefitAdjustmentReason, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="benefit-adjustment-reason-error">
-            <small class="field-help">Obrigatória somente quando o valor automático for alterado.</small>
-            <?php if ($errorFor('benefit_adjustment_reason') !== ''): ?><small id="benefit-adjustment-reason-error" class="field-error"><?= htmlspecialchars($errorFor('benefit_adjustment_reason'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
-        </label>
-
-        <label class="field" for="other-benefit">
-            <span>Outro benefício</span>
-            <input id="other-benefit" name="beneficio_outro_text" value="<?= htmlspecialchars($otherBenefit, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" placeholder="Descreva, se houver">
-        </label>
-
-        <label class="field field--span-2 checkbox-field" for="retention-condition">
-            <input id="retention-condition" type="checkbox" name="retention_condition" value="1" <?= $retention ? 'checked' : ''; ?>>
-            <span><strong>Condição comercial de retenção</strong><small>Não muda o tipo técnico da operação e exige justificativa na observação.</small></span>
-        </label>
-
-        <fieldset class="field field--span-2 fidelity-fieldset">
-            <legend>Fidelidade</legend>
-            <label class="checkbox-field" for="apply-fidelity">
-                <input type="hidden" name="fidelity_choice_present" value="1">
-                <input id="apply-fidelity" type="checkbox" name="apply_fidelity" value="1" data-fidelity-toggle <?= $applyFidelity ? 'checked' : ''; ?>>
-                <span><strong>Aplicar nova fidelidade</strong><small>Somente com benefício real, aceite expresso e prazo máximo de 12 meses.</small></span>
-            </label>
-            <div class="form-grid" data-fidelity-fields <?= !$applyFidelity ? 'hidden' : ''; ?>>
-                <label class="field field--span-2" for="fidelity-description">
-                    <span>Benefício que justifica a fidelidade</span>
-                    <input id="fidelity-description" name="fidelity_benefit_description" value="<?= htmlspecialchars($fidelityDescription, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="fidelity-description-error" <?= !$applyFidelity ? 'disabled' : ''; ?>>
-                    <?php if ($errorFor('fidelity_benefit_description') !== ''): ?><small id="fidelity-description-error" class="field-error"><?= htmlspecialchars($errorFor('fidelity_benefit_description'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
-                </label>
-                <label class="field" for="fidelity-months">
-                    <span>Prazo de permanência</span>
-                    <input id="fidelity-months" type="number" name="fidelidade_meses" min="1" max="12" value="<?= $fidelityMonths; ?>" aria-describedby="fidelity-months-error" <?= !$applyFidelity ? 'disabled' : ''; ?>>
-                    <?php if ($errorFor('fidelidade_meses') !== ''): ?><small id="fidelity-months-error" class="field-error"><?= htmlspecialchars($errorFor('fidelidade_meses'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+            data-waiver-mode="<?= htmlspecialchars($waiverMode, ENT_QUOTES, 'UTF-8'); ?>"
+            data-automatic-flags="<?= htmlspecialchars(json_encode($automaticBenefitFlags, JSON_UNESCAPED_UNICODE) ?: '{}', ENT_QUOTES, 'UTF-8'); ?>">
+            <legend>Benefícios e condições</legend>
+            <input type="hidden" name="benefit_choices_present" value="1">
+            <div class="benefit-checkbox-grid">
+                <?php foreach ([
+                    'radio_to_fiber' => ['Migração Rádio → Fibra', 'Mudança de tecnologia confirmada pelo catálogo.'],
+                    'adhesion_waiver' => ['Isenção de adesão/instalação', 'Usa o valor configurado, sem herdar isenção de outra operação.'],
+                    'plan_upgrade' => ['Upgrade de plano', 'Aumento de velocidade ou condição comercial.'],
+                    'retention' => ['Condição de retenção', 'Exige vantagem real e justificativa.'],
+                    'other_benefit' => ['Outro benefício', 'Exige descrição e pode possuir valor.'],
+                ] as $flag => [$label, $help]): ?>
+                    <label class="checkbox-field">
+                        <input type="checkbox" name="benefit_flags[]" value="<?= htmlspecialchars($flag, ENT_QUOTES, 'UTF-8'); ?>" data-benefit-flag="<?= htmlspecialchars($flag, ENT_QUOTES, 'UTF-8'); ?>" <?= !empty($benefitFlags[$flag]) ? 'checked' : ''; ?> <?= !$canAdjustCommercial ? 'disabled' : ''; ?>>
+                        <span><strong><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></strong><small><?= htmlspecialchars($help, ENT_QUOTES, 'UTF-8'); ?></small></span>
+                    </label>
+                <?php endforeach; ?>
+                <label class="checkbox-field" for="apply-fidelity">
+                    <input type="hidden" name="fidelity_choice_present" value="1">
+                    <input id="apply-fidelity" type="checkbox" name="apply_fidelity" value="1" data-fidelity-toggle <?= $applyFidelity ? 'checked' : ''; ?> <?= !$canAdjustCommercial ? 'disabled' : ''; ?>>
+                    <span><strong>Aplicar nova fidelidade</strong><small>Somente com benefício real, valor, descrição e prazo válido.</small></span>
                 </label>
             </div>
+            <?php if ($canAdjustCommercial): ?><small class="field-help">As marcações são preenchidas automaticamente. Qualquer divergência exige justificativa e fica auditada.</small><?php else: ?><small class="field-help">Seleção automática somente leitura para este perfil.</small><?php endif; ?>
+            <ul class="automatic-condition-list" aria-live="polite">
+                <li data-adhesion-charged>Valor cobrado: R$ 0,00</li>
+                <li data-adhesion-benefit>Benefício concedido: R$ 0,00</li>
+            </ul>
         </fieldset>
+
+        <details class="field field--span-2 commercial-adjustments" <?= ($retention || $applyFidelity || !empty($benefitFlags['other_benefit']) || $benefitAdjustmentReason !== '') ? 'open' : ''; ?>>
+            <summary>Ajustar benefício</summary>
+            <div class="form-grid">
+                <label class="field" for="automatic-benefit-value">
+                    <span>Valor automático</span>
+                    <input id="automatic-benefit-value" value="<?= number_format($automaticBenefitValue, 2, ',', '.'); ?>" readonly data-automatic-benefit-value>
+                </label>
+                <label class="field" for="benefit-value">
+                    <span>Valor final</span>
+                    <input id="benefit-value" name="valor_beneficio" value="<?= htmlspecialchars($benefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" aria-describedby="benefit-value-error" <?= !$canAdjustCommercial ? 'readonly' : ''; ?> <?= $firstErrorField === 'valor_beneficio' ? 'data-focus-field' : ''; ?>>
+                    <?php if ($errorFor('valor_beneficio') !== ''): ?><small id="benefit-value-error" class="field-error"><?= htmlspecialchars($errorFor('valor_beneficio'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+                </label>
+                <label class="field field--span-2" for="benefit-adjustment-reason">
+                    <span>Justificativa do ajuste</span>
+                    <input id="benefit-adjustment-reason" name="benefit_adjustment_reason" value="<?= htmlspecialchars($benefitAdjustmentReason, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="benefit-adjustment-reason-error" <?= !$canAdjustCommercial ? 'readonly' : ''; ?>>
+                    <small class="field-help">Obrigatória somente quando seleção, valor ou fidelidade diferirem do cálculo automático.</small>
+                    <?php if ($errorFor('benefit_adjustment_reason') !== ''): ?><small id="benefit-adjustment-reason-error" class="field-error"><?= htmlspecialchars($errorFor('benefit_adjustment_reason'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+                </label>
+                <div class="form-grid field--span-2" data-other-benefit-fields <?= empty($benefitFlags['other_benefit']) ? 'hidden' : ''; ?>>
+                    <label class="field" for="other-benefit">
+                        <span>Descrição do outro benefício</span>
+                        <input id="other-benefit" name="beneficio_outro_text" value="<?= htmlspecialchars($otherBenefit, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="other-benefit-error" <?= empty($benefitFlags['other_benefit']) ? 'disabled' : ''; ?>>
+                        <?php if ($errorFor('beneficio_outro_text') !== ''): ?><small id="other-benefit-error" class="field-error"><?= htmlspecialchars($errorFor('beneficio_outro_text'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+                    </label>
+                    <label class="field" for="other-benefit-value"><span>Valor do outro benefício</span><input id="other-benefit-value" name="beneficio_outro_valor" value="<?= htmlspecialchars($otherBenefitValue, ENT_QUOTES, 'UTF-8'); ?>" inputmode="decimal" <?= empty($benefitFlags['other_benefit']) ? 'disabled' : ''; ?>></label>
+                </div>
+                <fieldset class="field field--span-2 fidelity-fieldset" data-fidelity-fields <?= !$applyFidelity ? 'hidden' : ''; ?>>
+                    <legend>Fidelidade</legend>
+                    <div class="form-grid">
+                        <label class="field field--span-2" for="fidelity-description">
+                            <span>Benefício que justifica a fidelidade</span>
+                            <input id="fidelity-description" name="fidelity_benefit_description" value="<?= htmlspecialchars($fidelityDescription, ENT_QUOTES, 'UTF-8'); ?>" maxlength="500" aria-describedby="fidelity-description-error" <?= !$applyFidelity ? 'disabled' : ''; ?>>
+                            <?php if ($errorFor('fidelity_benefit_description') !== ''): ?><small id="fidelity-description-error" class="field-error"><?= htmlspecialchars($errorFor('fidelity_benefit_description'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
+                        </label>
+                        <label class="field" for="fidelity-months"><span>Prazo de permanência</span><input id="fidelity-months" type="number" name="fidelidade_meses" min="1" max="12" value="<?= $fidelityMonths; ?>" aria-describedby="fidelity-months-error" <?= !$applyFidelity ? 'disabled' : ''; ?>><?php if ($errorFor('fidelidade_meses') !== ''): ?><small id="fidelity-months-error" class="field-error"><?= htmlspecialchars($errorFor('fidelidade_meses'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?></label>
+                    </div>
+                </fieldset>
             </div>
         </details>
 
@@ -255,9 +267,32 @@ ob_start();
             <?php if ($errorFor('observacao') !== ''): ?><small id="upgrade-observation-error" class="field-error"><?= htmlspecialchars($errorFor('observacao'), ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?>
         </label>
 
-        <div class="form-actions field--span-2">
-            <button class="button" type="submit" name="next_action" value="continue" data-submit-label="Salvando...">Salvar e continuar</button>
-            <button class="button button--ghost" type="submit" name="next_action" value="later" data-submit-label="Salvando...">Salvar e voltar depois</button>
+        <div class="field--span-2">
+            <?php
+            $migrationActionBar = [
+                'primary' => [
+                    'tag' => 'button',
+                    'type' => 'submit',
+                    'name' => 'next_action',
+                    'value' => 'stay',
+                    'label' => $correctionOf > 0 ? 'Corrigir nova condição' : 'Salvar nova condição',
+                    'attrs' => ['data-submit-label' => 'Salvando...'],
+                ],
+                'navigation' => [
+                    ['label' => 'Voltar ao cliente', 'href' => Url::to('/clientes/detalhe?login=' . rawurlencode($login)), 'class' => 'button--ghost', 'align' => 'start'],
+                    ['tag' => 'button', 'type' => 'submit', 'name' => 'next_action', 'value' => 'later', 'label' => 'Salvar e sair', 'class' => 'button--ghost', 'attrs' => ['data-submit-label' => 'Salvando...']],
+                    ['tag' => 'button', 'type' => 'submit', 'name' => 'next_action', 'value' => 'continue', 'label' => 'Continuar para o aceite', 'attrs' => ['data-submit-label' => 'Salvando...']],
+                ],
+                'more' => $processId > 0 ? [[
+                    'tag' => 'button',
+                    'type' => 'button',
+                    'label' => 'Cancelar processo',
+                    'class' => 'button--danger',
+                    'attrs' => ['data-open-migration-cancel' => true],
+                ]] : [],
+            ];
+            require __DIR__ . '/../components/migration_actions.php';
+            ?>
         </div>
     </div>
 </form>

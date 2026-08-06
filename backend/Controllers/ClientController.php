@@ -28,6 +28,8 @@ use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
 use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\Contracts\AcceptanceEvidenceService;
+use App\Services\Commercial\UpgradeBenefitService;
+use App\Services\Clients\ClientCompletionValidator;
 use App\Services\Processes\OperationalProcessService;
 use App\Services\Notifications\NotificationTemplateService;
 
@@ -467,6 +469,7 @@ final class ClientController
         $processId = (int) $request->input('process_id', 0);
         $revisionMode = trim((string) $request->input('revision_mode', ''));
         $correctionReason = trim((string) $request->input('correction_reason', ''));
+        $nextAction = trim((string) $request->input('next_action', 'continue'));
         $correctionContract = $correctionOf > 0 ? $this->loadCorrectableUpgrade($correctionOf, $login, $processId) : null;
 
         if ($correctionOf > 0 && (!is_array($correctionContract) || !$this->canCorrectUpgradeContract($correctionContract))) {
@@ -535,6 +538,12 @@ final class ClientController
                     $this->database->fetchOne('SELECT RELEASE_LOCK(:lock_name) AS released', ['lock_name' => $upgradeLockName]);
                     $upgradeLockAcquired = false;
                     Flash::set('success', 'Condição corrigida no mesmo processo. O aceite anterior foi invalidado e a nova revisão está pronta.');
+                    if ($nextAction === 'later') {
+                        return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+                    }
+                    if ($nextAction === 'stay') {
+                        return Response::redirect('/processos/migracao?id=' . (int) ($result['process_id'] ?? $processId) . '&step=migration_data');
+                    }
                     return Response::redirect('/processos/migracao?id=' . (int) ($result['process_id'] ?? $processId));
                 }
                 $operator = $this->resolveUser();
@@ -603,9 +612,12 @@ final class ClientController
             : 'Nova condição salva. Confira o documento, colete a assinatura e escolha os canais.');
 
         $processId = (int) ($result['process_id'] ?? 0);
-        if ((string) $request->input('next_action', '') === 'later') {
+        if ($nextAction === 'later') {
             Flash::set('success', 'Nova condição salva. O processo pode ser retomado pelo perfil do cliente.');
             return Response::redirect('/clientes/detalhe?login=' . rawurlencode($login));
+        }
+        if ($nextAction === 'stay' && $processId > 0) {
+            return Response::redirect('/processos/migracao?id=' . $processId . '&step=migration_data');
         }
         return Response::redirect($processId > 0
             ? '/processos/migracao?id=' . $processId
@@ -1199,13 +1211,16 @@ final class ClientController
         $draftId = trim((string) $request->query('draft', ''));
         $checkpointToken = trim((string) $request->query('token', ''));
         $formData = $this->loadFormDraft();
+        $formErrors = is_array($_SESSION['client_create_errors'] ?? null) ? $_SESSION['client_create_errors'] : [];
+        unset($_SESSION['client_create_errors']);
         $draftMedia = [];
 
         if ($draftId !== '') {
             $draftRecord = $this->loadDraftRecord($draftId);
 
             if (is_array($draftRecord)) {
-                $formData = is_array($draftRecord['data'] ?? null) ? $draftRecord['data'] : $formData;
+                $storedDraftData = is_array($draftRecord['data'] ?? null) ? $draftRecord['data'] : [];
+                $formData = $formErrors !== [] ? array_replace($storedDraftData, $formData) : $storedDraftData;
                 $draftMedia = is_array($draftRecord['media'] ?? null) ? $draftRecord['media'] : [];
                 $checkpointToken = trim((string) ($draftRecord['checkpoint_token'] ?? $checkpointToken));
             }
@@ -1234,6 +1249,7 @@ final class ClientController
             'flash' => Flash::get(),
             'cities' => $cities,
             'form' => $formData,
+            'errors' => $formErrors,
             'draftId' => $draftId,
             'checkpointToken' => $checkpointToken,
             'draftMedia' => $draftMedia,
@@ -1247,6 +1263,7 @@ final class ClientController
             'defaultLocalDici' => 'r',
             'defaultInstallType' => 'fibra',
             'contractCommercial' => $this->contractCommercialConfig(),
+            'csrfToken' => Csrf::token('client_create'),
         ]);
 
         return Response::html($html);
@@ -1256,6 +1273,10 @@ final class ClientController
     {
         if (($denied = $this->guardClientCreationAccess()) !== null) {
             return $denied;
+        }
+        if (!Csrf::verify($request, 'client_create')) {
+            Flash::set('error', 'A sessão do cadastro expirou. Reabra o formulário e tente novamente.');
+            return Response::redirect('/clientes/novo');
         }
 
         $draftId = trim((string) $request->input('draft_id', ''));
@@ -1277,6 +1298,7 @@ final class ClientController
         $errors = $this->validateDraft($data, $request, $originalFormData, $editingCheckpoint, $hasExistingPhotos);
 
         if ($errors !== []) {
+            $_SESSION['client_create_errors'] = $errors;
             Flash::set('error', implode(' ', $errors));
             $redirect = '/clientes/novo';
             if ($draftId !== '') {
@@ -1333,6 +1355,10 @@ final class ClientController
         $draftId = trim((string) $request->query('draft', ''));
         $draftRecord = $this->loadDraftRecord($draftId);
         $draft = $this->loadDraft($draftId);
+        if ($draft === null) {
+            Flash::set('error', 'Nao foi possivel localizar os dados iniciais do cliente.');
+            return Response::redirect('/clientes/novo');
+        }
         $checkpointToken = '';
         $detectedEmail = strtolower(trim((string) ($draft['email_original'] ?? $draft['email'] ?? '')));
         $hasRealEmail = $detectedEmail !== '' && $detectedEmail !== 'cliente@ievo.com.br';
@@ -1340,11 +1366,6 @@ final class ClientController
 
         if (is_array($draftRecord)) {
             $checkpointToken = trim((string) ($draftRecord['checkpoint_token'] ?? ''));
-        }
-
-        if ($draft === null) {
-            Flash::set('error', 'Nao foi possivel localizar os dados iniciais do cliente.');
-            return Response::redirect('/clientes/novo');
         }
 
         $html = $this->view->render('clients/acceptance', [
@@ -1364,6 +1385,7 @@ final class ClientController
             'hasRealEmail' => $hasRealEmail,
             'detectedPhone' => $detectedPhone,
             'providerName' => $this->resolveProviderDisplayName(),
+            'csrfToken' => Csrf::token('client_finalize:' . $draftId),
         ]);
 
         return Response::html($html);
@@ -1376,6 +1398,10 @@ final class ClientController
         }
 
         $draftId = trim((string) $request->input('draft_id', $request->query('draft', '')));
+        if (!Csrf::verify($request, 'client_finalize:' . $draftId)) {
+            Flash::set('error', 'A sessão da conclusão expirou. Reabra o aceite e tente novamente.');
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+        }
         $checkpointToken = trim((string) $request->input('checkpoint_token', $request->query('token', '')));
         $editingCheckpoint = $checkpointToken !== '' && $this->isValidCheckpointToken($checkpointToken);
         $existingCheckpoint = $editingCheckpoint ? $this->loadInstallationCheckpoint($checkpointToken) : null;
@@ -1391,6 +1417,28 @@ final class ClientController
         $data = array_merge($draft, $acceptanceData);
         $emailContext = $this->resolveEmailContext($draft);
         $data = array_merge($data, $emailContext);
+        $data = $this->clientCompletionValidator()->normalize($data);
+        $completionErrors = $this->clientCompletionValidator()->validate($data);
+        if (trim((string) ($data['plano'] ?? '')) !== '' && !$this->isPlanAllowedForSelection(
+            (string) $data['plano'],
+            (string) ($data['tipo_instalacao'] ?? ''),
+            (string) ($data['local_dici'] ?? '')
+        )) {
+            $completionErrors['plano'] = 'Selecione um plano oficial compatível para concluir o cadastro.';
+        }
+        if (trim((string) ($data['vencimento'] ?? '')) !== '' && !$this->isDueDayAllowed((string) $data['vencimento'])) {
+            $completionErrors['vencimento'] = 'Selecione um vencimento disponível no MkAuth.';
+        }
+        if ($completionErrors !== []) {
+            $this->saveFormDraft($data, $draftId, $editingCheckpoint ? $checkpointToken : null);
+            $_SESSION['client_create_errors'] = $completionErrors;
+            Flash::set('error', 'O rascunho está incompleto. Corrija os campos indicados antes de concluir o cliente.');
+            $redirect = '/clientes/novo?draft=' . rawurlencode($draftId);
+            if ($editingCheckpoint) {
+                $redirect .= '&token=' . rawurlencode($checkpointToken);
+            }
+            return Response::redirect($redirect);
+        }
         $errors = $this->validateAcceptance($data, $request);
         $sendWhatsapp = $this->normalizeBoolean((string) $request->input('send_whatsapp', '1'));
         $sendEmail = $this->normalizeBoolean((string) $request->input('send_email', '0'));
@@ -1496,25 +1544,71 @@ final class ClientController
             return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
         }
 
-        $this->deleteDraftMedia($draftId);
-        $this->clearClientDraft($draftId);
-        $this->clearFormDraft();
-        $_SESSION['clear_client_drafts'] = ['client-create', 'client-create-' . $draftId, 'client-acceptance-' . $draftId];
-
         $message = $response['mensagem'] ?? 'Cliente provisionado com sucesso.';
         $confirmedPlanName = trim((string) ($provisionResult['plan_confirmation']['expected_name'] ?? $payload['plano'] ?? ''));
         $successLabel = $action === 'update'
             ? 'Cliente atualizado e plano ' . $confirmedPlanName . ' confirmado no MkAuth.'
             : 'Cliente criado e plano ' . $confirmedPlanName . ' confirmado no MkAuth.';
         $connectionToken = $editingCheckpoint ? $checkpointToken : bin2hex(random_bytes(16));
-        $this->syncContractArtifacts($data, $payload, null, $request);
-        $registrationId = $this->recordClientRegistration($data, $payload, $connectionToken);
-        $this->recordEvidenceFiles($registrationId, (string) ($data['evidence_ref'] ?? ''), (string) ($evidence['folder'] ?? ''));
-        $this->syncContractArtifacts($data, $payload, $registrationId, $request);
-        $contractRecord = $registrationId !== null ? $this->contractRepository->findByClientId($registrationId) : null;
-        $acceptanceRecord = is_array($contractRecord) && isset($contractRecord['id'])
-            ? $this->contractAcceptanceRepository->findLatestByContractId((int) $contractRecord['id'])
-            : null;
+        $registrationId = null;
+        $contractRecord = null;
+        $acceptanceRecord = null;
+        $pdo = $this->database->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        try {
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+            $this->syncContractArtifacts($data, $payload, null, $request);
+            $registrationId = $this->recordClientRegistration($data, $payload, $connectionToken);
+            $this->recordEvidenceFiles($registrationId, (string) ($data['evidence_ref'] ?? ''), (string) ($evidence['folder'] ?? ''));
+            $this->syncContractArtifacts($data, $payload, $registrationId, $request);
+            $contractRecord = $registrationId !== null ? $this->contractRepository->findByClientId($registrationId) : null;
+            $acceptanceRecord = is_array($contractRecord) && isset($contractRecord['id'])
+                ? $this->contractAcceptanceRepository->findLatestByContractId((int) $contractRecord['id'])
+                : null;
+            $connectionToken = $this->saveInstallationCheckpoint([
+                'status' => 'awaiting_connection',
+                'login' => (string) ($payload['login'] ?? ''),
+                'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
+                'plan' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
+                'form_data' => $draft,
+                'telefone_original' => (string) ($data['telefone_original'] ?? $data['celular'] ?? ''),
+                'telefone_cliente' => (string) ($data['telefone_cliente'] ?? $data['celular'] ?? ''),
+                'email_original' => (string) ($data['email_original'] ?? ''),
+                'email_cliente' => (string) ($data['email_cliente'] ?? $data['email'] ?? ''),
+                'has_real_email' => (bool) ($data['has_real_email'] ?? false),
+                'contact_corrections' => [],
+                'created_at' => date('Y-m-d H:i:s'),
+                'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
+                'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
+                'mkauth_message' => (string) $message,
+            ], $registrationId, $connectionToken);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $data['uuid_cliente'] = (string) ($provisionResult['client_uuid'] ?? $data['uuid_cliente'] ?? '');
+            $data['provision_request_id'] = (string) ($provisionResult['request_id'] ?? $data['provision_request_id'] ?? '');
+            $data['provision_status'] = 'external_created_local_pending';
+            $this->saveDraft($data, $draftId, $editingCheckpoint ? $checkpointToken : null);
+            $this->recordAudit('client.local_finalize_failed', 'client_registration', null, [
+                'login' => (string) ($payload['login'] ?? ''),
+                'client_uuid_present' => trim((string) ($data['uuid_cliente'] ?? '')) !== '',
+                'request_id' => (string) ($data['provision_request_id'] ?? ''),
+                'error' => $exception->getMessage(),
+            ], $request);
+            Flash::set('error', 'O cliente foi confirmado no MkAuth, mas a finalização local falhou. O UUID e o request_id foram preservados; tente novamente sem criar outro cliente.');
+            return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
+        }
+
+        $this->deleteDraftMedia($draftId);
+        $this->clearClientDraft($draftId);
+        $this->clearFormDraft();
+        $_SESSION['clear_client_drafts'] = ['client-create', 'client-create-' . $draftId, 'client-acceptance-' . $draftId];
         $integrationResults = [];
 
         if ($contractRecord !== null && $acceptanceRecord !== null) {
@@ -1558,31 +1652,6 @@ final class ClientController
             $acceptanceSendSummary = ' Envios do aceite: ' . implode(' · ', $summaryParts);
         }
 
-        try {
-            $connectionToken = $this->saveInstallationCheckpoint([
-                'status' => 'awaiting_connection',
-                'login' => (string) ($payload['login'] ?? ''),
-                'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
-                'plan' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
-                'form_data' => $draft,
-                'telefone_original' => (string) ($data['telefone_original'] ?? $data['celular'] ?? ''),
-                'telefone_cliente' => (string) ($data['telefone_cliente'] ?? $data['celular'] ?? ''),
-                'email_original' => (string) ($data['email_original'] ?? ''),
-                'email_cliente' => (string) ($data['email_cliente'] ?? $data['email'] ?? ''),
-                'has_real_email' => (bool) ($data['has_real_email'] ?? false),
-                'contact_corrections' => [],
-                'created_at' => date('Y-m-d H:i:s'),
-                'created_by' => (string) ($this->resolveUser()['name'] ?? 'Operador'),
-                'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
-                'mkauth_message' => (string) $message,
-            ], $registrationId, $connectionToken);
-        } catch (\Throwable $exception) {
-            $postProvisionWarnings[] = 'Nao foi possivel salvar o checkpoint local agora: ' . $exception->getMessage();
-            $this->recordAudit('client.checkpoint.save_failed', 'installation_checkpoint', null, [
-                'login' => (string) ($payload['login'] ?? ''),
-                'error' => $exception->getMessage(),
-            ], $request);
-        }
         $this->recordAudit('client.provisioned', 'client_registration', $registrationId, [
             'login' => (string) ($payload['login'] ?? ''),
             'action' => $action,
@@ -3408,94 +3477,53 @@ final class ClientController
 
     private function validateDraft(array $data, Request $request, array $originalData = [], bool $editingCheckpoint = false, bool $hasExistingPhotos = false): array
     {
-        $errors = [];
+        $errors = $this->clientCompletionValidator()->validate($data);
         $commercial = $this->contractCommercialConfig();
 
-        if (trim((string) $data['nome_completo']) === '') {
-            $errors[] = 'Informe o nome completo do cliente.';
-        }
-
-        if (trim((string) $data['cpf_cnpj']) === '') {
-            $errors[] = 'Informe CPF ou CNPJ.';
-        } elseif (!$this->isValidCpfCnpj((string) $data['cpf_cnpj'])) {
-            $errors[] = 'CPF/CNPJ invalido.';
-        }
-
-        if (trim((string) $data['login']) === '') {
-            $errors[] = 'Informe o login do cliente.';
-        } elseif (!$this->isValidLogin((string) $data['login'])) {
-            $errors[] = 'Login invalido. Use letras minusculas, numeros, ponto, hifen ou underscore.';
-        }
-
-        if (!in_array((string) ($data['tipo_instalacao'] ?? ''), ['fibra', 'radio'], true)) {
-            $errors[] = 'Selecione o tipo de instalação.';
-        }
-
-        if (trim((string) $data['plano']) === '') {
-            $errors[] = 'Selecione um plano.';
-        } elseif (!$this->isPlanAllowedForSelection(
+        if (trim((string) ($data['plano'] ?? '')) !== '' && !$this->isPlanAllowedForSelection(
             (string) $data['plano'],
             (string) ($data['tipo_instalacao'] ?? ''),
             (string) ($data['local_dici'] ?? 'r')
         )) {
-            $errors[] = 'O plano selecionado não corresponde ao tipo de instalação e Local DICI escolhidos.';
+            $errors['plano'] = 'O plano selecionado não corresponde ao tipo de instalação e Local DICI escolhidos.';
         }
 
-        if (trim((string) $data['vencimento']) === '') {
-            $errors[] = 'Selecione o vencimento.';
-        } elseif (!$this->isDueDayAllowed((string) $data['vencimento'])) {
-            $errors[] = 'Selecione um vencimento disponível no MkAuth.';
-        }
-
-        if (trim((string) $data['cidade']) === '') {
-            $errors[] = 'Informe a cidade.';
+        if (trim((string) ($data['vencimento'] ?? '')) !== '' && !$this->isDueDayAllowed((string) $data['vencimento'])) {
+            $errors['vencimento'] = 'Selecione um vencimento disponível no MkAuth.';
         }
 
         $tipoAdesao = strtolower(trim((string) ($data['tipo_adesao'] ?? '')));
-        if (!in_array($tipoAdesao, ['cheia', 'promocional', 'isenta'], true)) {
-            $errors[] = 'Selecione um tipo de adesão válido.';
-        }
-
         if (in_array($tipoAdesao, ['promocional', 'isenta'], true) && trim((string) ($data['beneficio_concedido_por'] ?? '')) === '') {
-            $errors[] = 'Informe quem autorizou esta condição comercial.';
+            $errors['beneficio_concedido_por'] = 'Informe quem autorizou esta condição comercial.';
         }
 
         $valorAdesaoPadrao = (float) ($commercial['valor_adesao_padrao'] ?? 0);
         $valorAdesao = $this->normalizeMoney((string) ($data['valor_adesao'] ?? '0'));
 
         if ($tipoAdesao === 'cheia' && abs($valorAdesao - $valorAdesaoPadrao) > 0.009) {
-            $errors[] = 'A adesão cheia deve usar exatamente o valor padrão configurado.';
+            $errors['valor_adesao'] = 'A adesão cheia deve usar exatamente o valor padrão configurado.';
         }
 
         if ($tipoAdesao === 'isenta' && abs($valorAdesao) > 0.009) {
-            $errors[] = 'A adesão isenta deve ter valor R$ 0,00.';
+            $errors['valor_adesao'] = 'A adesão isenta deve ter valor R$ 0,00.';
         }
 
         $parcelasMaximas = max(1, (int) ($commercial['parcelas_maximas_adesao'] ?? 3));
         $parcelasAdesao = (int) ($data['parcelas_adesao'] ?? 1);
         if ($parcelasAdesao < 1 || $parcelasAdesao > $parcelasMaximas) {
-            $errors[] = 'As parcelas de adesão não podem ultrapassar o máximo configurado.';
-        }
-
-        $fidelidadeMeses = (int) ($data['fidelidade_meses'] ?? 0);
-        if ($fidelidadeMeses < 1) {
-            $errors[] = 'Informe a fidelidade em meses.';
+            $errors['parcelas_adesao'] = 'As parcelas de adesão não podem ultrapassar o máximo configurado.';
         }
 
         if (!$this->isValidEmail((string) $data['email'])) {
-            $errors[] = 'E-mail invalido.';
-        }
-
-        if (!$this->isValidPhone((string) $data['celular'])) {
-            $errors[] = 'Telefone invalido. Use DDD + numero com 10 ou 11 digitos.';
+            $errors['email'] = 'E-mail inválido.';
         }
 
         $originalLogin = $this->normalizeLoginInput((string) ($originalData['login'] ?? ''));
         $currentLogin = $this->normalizeLoginInput((string) $data['login']);
 
         if (!$editingCheckpoint || $originalLogin !== $currentLogin) {
-            if ($this->clientFieldExists('login', (string) $data['login'])) {
-                $errors[] = 'Login já existe no MkAuth. Informe outro login.';
+            if (!isset($errors['login']) && $this->clientFieldExists('login', (string) $data['login'])) {
+                $errors['login'] = 'Login já existe no MkAuth. Informe outro login.';
             }
         }
 
@@ -3503,17 +3531,13 @@ final class ClientController
         $currentDocument = preg_replace('/\D+/', '', (string) ($data['cpf_cnpj'] ?? '')) ?? '';
 
         if (!$editingCheckpoint || $originalDocument !== $currentDocument) {
-            if ($this->clientFieldExists('cpf_cnpj', (string) $data['cpf_cnpj'])) {
-                $errors[] = 'CPF/CNPJ já existe no MkAuth.';
+            if (!isset($errors['cpf_cnpj']) && $this->clientFieldExists('cpf_cnpj', (string) $data['cpf_cnpj'])) {
+                $errors['cpf_cnpj'] = 'CPF/CNPJ já existe no MkAuth.';
             }
         }
 
-        if (!$this->isValidCoordinates((string) ($data['coordenadas'] ?? ''))) {
-            $errors[] = 'Capture as coordenadas pelo celular antes de prosseguir.';
-        }
-
         if ($this->countUploadedPhotos($request) < 1 && !$hasExistingPhotos) {
-            $errors[] = 'Envie ao menos uma foto da instalacao.';
+            $errors['fotos'] = 'Envie ao menos uma foto da instalação.';
         }
 
         return $errors;
@@ -3538,6 +3562,11 @@ final class ClientController
         }
 
         return $errors;
+    }
+
+    private function clientCompletionValidator(): ClientCompletionValidator
+    {
+        return new ClientCompletionValidator();
     }
 
     private function collectAcceptanceData(Request $request): array
@@ -3587,6 +3616,10 @@ final class ClientController
                 ? rtrim(rtrim(number_format($speedMbps, 2, ',', ''), '0'), ',') . ' Mbps'
                 : '';
             $label = $name;
+            $localDiciSource = self::normalizeTextForMatch($name . ' ' . (string) ($plan['descricao'] ?? ''));
+            $planLocalDici = str_contains($localDiciSource, 'rural')
+                ? 'r'
+                : (str_contains($localDiciSource, 'urban') ? 'u' : 'any');
 
             if ($speedLabel !== '' && !str_contains(strtolower($name), strtolower((string) floor($speedMbps ?? 0)))) {
                 $label .= ' — ' . $speedLabel;
@@ -3604,6 +3637,7 @@ final class ClientController
                 'technology' => $technologyCode,
                 'technology_label' => (string) $technology['label'],
                 'install_type' => (string) $technology['family'],
+                'local_dici' => $planLocalDici,
                 'technology_verified' => (bool) $technology['verified'],
                 'speed_down' => $speedRaw,
                 'speed_mbps' => $speedMbps,
@@ -3746,7 +3780,7 @@ final class ClientController
             }
 
             return ((string) ($plan['install_type'] ?? '') === $installType)
-                && ((string) ($plan['local_dici'] ?? '') === $localDici);
+                && in_array((string) ($plan['local_dici'] ?? ''), [$localDici, 'any'], true);
         }
 
         return false;
@@ -5490,11 +5524,16 @@ final class ClientController
             'new_technology' => trim((string) ($upgradeSnapshot['new_technology'] ?? $defaultNewTechnology)),
             'new_technology_family' => $defaultNewTechnologyFamily,
             'benefit_flags' => $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null) ?: $defaultBenefitDefaults['flags'],
+            'benefit_automatic_flags' => $defaultBenefitDefaults['flags'],
             'benefit_description' => trim((string) ($upgradeSnapshot['benefit_description'] ?? $defaultBenefitDefaults['description'])),
             'benefit_value' => isset($upgradeSnapshot['benefit_value']) ? (float) $upgradeSnapshot['benefit_value'] : (float) $defaultBenefitDefaults['value'],
+            'benefit_automatic_value' => (float) $defaultBenefitDefaults['value'],
+            'benefit_other_text' => trim((string) ($upgradeSnapshot['benefit_other_text'] ?? '')),
+            'benefit_other_value' => (float) ($upgradeSnapshot['benefit_other_value'] ?? 0),
             'new_monthly_value' => isset($upgradeSnapshot['new_monthly_value']) ? (float) $upgradeSnapshot['new_monthly_value'] : $defaultNewMonthlyValue,
             'fidelity_months' => $fidelityMonths,
             'apply_fidelity' => $fidelityMonths > 0,
+            'automatic_fidelity' => !empty($defaultBenefitDefaults['automatic_fidelity']),
             'fidelity_benefit_description' => trim((string) ($upgradeSnapshot['fidelity_benefit_description'] ?? '')),
             'retention_condition' => !empty($upgradeSnapshot['retention_condition']),
             'observacao' => trim((string) ($upgradeSnapshot['observation'] ?? '')),
@@ -5506,6 +5545,7 @@ final class ClientController
             'auto_fidelity_migration' => (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true),
             'auto_fidelity_upgrade' => (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false),
             'suggest_retention_downgrade' => (bool) $this->config->get('contracts.commercial.sugerir_retencao_downgrade', true),
+            'can_adjust_commercial' => $this->canUpgradeCommercial(),
         ];
     }
 
@@ -5538,48 +5578,40 @@ final class ClientController
         );
         // Classificação, valores automáticos e elegibilidade são sempre
         // recalculados com o catálogo e a configuração do servidor.
-        $benefitFlags = $benefitDefaults['flags'];
+        $automaticBenefitFlags = $this->normalizeUpgradeBenefitFlags($benefitDefaults['flags']);
+        $benefitFlags = $automaticBenefitFlags;
         $canAdjustCommercial = $this->canUpgradeCommercial();
-        $benefitFlags['retention'] = $canAdjustCommercial
-            && (string) $request->input('retention_condition', '0') === '1';
         $benefitAdjustmentReason = $canAdjustCommercial
             ? trim((string) $request->input('benefit_adjustment_reason', ''))
             : '';
-        $benefitOtherText = $canAdjustCommercial
+        $hasBenefitChoice = (string) $request->input('benefit_choices_present', '0') === '1';
+        if ($canAdjustCommercial && $hasBenefitChoice) {
+            $benefitFlags = $this->normalizeUpgradeBenefitFlags($request->input('benefit_flags', []));
+        } elseif ($canAdjustCommercial) {
+            // Compatibilidade com rascunhos e formulários anteriores: ainda
+            // exige perfil autorizado e justificativa quando divergir.
+            $legacyOtherText = trim((string) $request->input('beneficio_outro_text', ''));
+            $benefitFlags['retention'] = (string) $request->input('retention_condition', '0') === '1';
+            $benefitFlags['other_benefit'] = $legacyOtherText !== '';
+        }
+        $benefitOtherText = $canAdjustCommercial && !empty($benefitFlags['other_benefit'])
             ? trim((string) $request->input('beneficio_outro_text', ''))
             : '';
-        $benefitFlags['other_benefit'] = $benefitOtherText !== '';
+        $benefitOtherValue = $canAdjustCommercial && !empty($benefitFlags['other_benefit'])
+            ? $this->normalizeMoney((string) $request->input('beneficio_outro_valor', '0'))
+            : 0.0;
         $waiverMode = $this->radioFiberAdhesionWaiverMode();
-        if (!empty($benefitFlags['radio_to_fiber'])) {
-            if ($waiverMode === 'manual') {
-                $benefitFlags['adhesion_waiver'] = $canAdjustCommercial
-                    && (string) $request->input('manual_adhesion_waiver', '0') === '1';
-            } elseif ($waiverMode === 'disabled') {
-                $benefitFlags['adhesion_waiver'] = false;
-            } else {
-                $benefitFlags['adhesion_waiver'] = true;
-            }
-        }
-        $benefitOriginalValue = !empty($benefitFlags['adhesion_waiver'])
-            ? (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0)
-            : (float) $benefitDefaults['value'];
+        $benefitOriginalValue = (float) $benefitDefaults['value'];
         $requestedBenefitValue = $this->normalizeMoney((string) $request->input(
             'valor_beneficio',
             number_format($benefitOriginalValue, 2, '.', '')
         ));
-        $explicitBenefitAdjustment = $canAdjustCommercial && $benefitAdjustmentReason !== '';
-        $benefitValue = $explicitBenefitAdjustment ? $requestedBenefitValue : $benefitOriginalValue;
-        $benefitAdjusted = abs($benefitValue - $benefitOriginalValue) > 0.009;
+        $benefitValue = $canAdjustCommercial && ($hasBenefitChoice || $benefitAdjustmentReason !== '')
+            ? $requestedBenefitValue
+            : $benefitOriginalValue;
         $benefitDescription = $this->buildUpgradeBenefitDescription($benefitFlags, $benefitOtherText);
-        if ($benefitDescription === '') {
-            $benefitDescription = (string) $benefitDefaults['description'];
-        }
         $eligibleBenefit = $benefitValue > 0.0 && trim($benefitDescription) !== '';
-        $automaticFidelity = (!empty($benefitFlags['radio_to_fiber'])
-                && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true))
-            || (!empty($benefitFlags['plan_upgrade'])
-                && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false));
-        $automaticFidelity = $automaticFidelity && $eligibleBenefit;
+        $automaticFidelity = !empty($benefitDefaults['automatic_fidelity']);
         $hasExplicitFidelityChoice = (string) $request->input('fidelity_choice_present', '0') === '1';
         $applyFidelity = $eligibleBenefit && ($hasExplicitFidelityChoice
             ? (string) $request->input('apply_fidelity', '0') === '1'
@@ -5589,21 +5621,20 @@ final class ClientController
         if ($applyFidelity && $fidelityBenefitDescription === '') {
             $fidelityBenefitDescription = $benefitDescription;
         }
+        $flagsAdjusted = $benefitFlags !== $automaticBenefitFlags;
+        $valueAdjusted = abs($benefitValue - $benefitOriginalValue) > 0.009;
+        $fidelityAdjusted = $applyFidelity !== $automaticFidelity;
+        $benefitAdjusted = $flagsAdjusted || $valueAdjusted || $fidelityAdjusted;
 
         if (!$canAdjustCommercial) {
-            $benefitFlags = $benefitDefaults['flags'];
+            $benefitFlags = $automaticBenefitFlags;
             $benefitDescription = $benefitDefaults['description'];
             $benefitValue = (float) $benefitDefaults['value'];
             $benefitOtherText = '';
+            $benefitOtherValue = 0.0;
             $benefitAdjustmentReason = '';
             $benefitOriginalValue = (float) $benefitDefaults['value'];
             $benefitAdjusted = false;
-            $automaticFidelity = $benefitValue > 0.0
-                && trim((string) $benefitDescription) !== ''
-                && ((!empty($benefitFlags['radio_to_fiber'])
-                    && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_migracao', true))
-                    || (!empty($benefitFlags['plan_upgrade'])
-                    && (bool) $this->config->get('contracts.commercial.fidelidade_automatica_upgrade', false)));
             $applyFidelity = $automaticFidelity;
             $fidelityMonths = $applyFidelity ? 12 : 0;
             $fidelityBenefitDescription = $applyFidelity ? (string) $benefitDescription : '';
@@ -5639,11 +5670,15 @@ final class ClientController
             ),
             'nova_tecnologia_family' => $selectedTechnologyFamily,
             'benefit_flags' => $benefitFlags,
+            'benefit_automatic_flags' => $automaticBenefitFlags,
             'beneficio_concedido' => $benefitDescription,
             'beneficio_outro_text' => $benefitOtherText,
+            'beneficio_outro_valor' => $benefitOtherValue,
             'valor_beneficio' => $benefitValue,
             'benefit_original_value' => $benefitOriginalValue,
             'benefit_adjusted' => $benefitAdjusted,
+            'benefit_flags_adjusted' => $flagsAdjusted ?? false,
+            'benefit_fidelity_adjusted' => $fidelityAdjusted ?? false,
             'benefit_adjustment_reason' => $benefitAdjustmentReason,
             'novo_valor_mensal' => $monthlyValue,
             'retention_condition' => !empty($benefitFlags['retention']),
@@ -5713,12 +5748,21 @@ final class ClientController
             $errors['novo_plano'] = 'Selecione um plano diferente do atual.';
         }
 
-        if (!empty($data['retention_condition']) && trim((string) ($data['observacao'] ?? '')) === '') {
-            $errors['observacao'] = 'Justifique a condição comercial de retenção.';
+        if (!empty($data['retention_condition'])) {
+            if ((float) ($data['valor_beneficio'] ?? 0) <= 0 || trim((string) ($data['beneficio_concedido'] ?? '')) === '') {
+                $errors['valor_beneficio'] = 'A retenção exige benefício, desconto ou vantagem comercial mensurável.';
+            }
+            if (trim((string) ($data['observacao'] ?? '')) === '' && trim((string) ($data['benefit_adjustment_reason'] ?? '')) === '') {
+                $errors['observacao'] = 'Justifique a condição comercial de retenção.';
+            }
         }
 
         if (!empty($data['benefit_adjusted']) && trim((string) ($data['benefit_adjustment_reason'] ?? '')) === '') {
-            $errors['benefit_adjustment_reason'] = 'Justifique a alteração do valor automático do benefício.';
+            $errors['benefit_adjustment_reason'] = 'Justifique a alteração da seleção, valor ou fidelidade calculados automaticamente.';
+        }
+
+        if (!empty($data['benefit_flags']['other_benefit']) && trim((string) ($data['beneficio_outro_text'] ?? '')) === '') {
+            $errors['beneficio_outro_text'] = 'Descreva o outro benefício selecionado.';
         }
 
         if (!empty($data['apply_fidelity'])) {
@@ -5806,6 +5850,12 @@ final class ClientController
             'acceptance_id' => $acceptanceId,
             'status' => 'assinatura_pendente',
             'tipo_aceite' => 'upgrade_migracao',
+            'benefit_automatic_flags' => $data['benefit_automatic_flags'] ?? [],
+            'benefit_final_flags' => $data['benefit_flags'] ?? [],
+            'benefit_original_value' => (float) ($data['benefit_original_value'] ?? 0),
+            'benefit_final_value' => (float) ($data['valor_beneficio'] ?? 0),
+            'benefit_adjusted' => !empty($data['benefit_adjusted']),
+            'benefit_adjustment_reason' => (string) ($data['benefit_adjustment_reason'] ?? ''),
         ], $request);
         $this->recordAudit('contract.acceptance.created', 'contract_acceptance', $acceptanceId, [
             'login' => (string) $contractData['mkauth_login'],
@@ -6189,9 +6239,6 @@ final class ClientController
         }
         $benefitOtherText = trim((string) ($data['beneficio_outro_text'] ?? ''));
         $benefitDescription = $this->buildUpgradeBenefitDescription($benefitFlags, $benefitOtherText);
-        if ($benefitDescription === '') {
-            $benefitDescription = $benefitDefaults['description'];
-        }
         $snapshot = [
             'operation_type' => (string) ($data['operation_type'] ?? 'upgrade'),
             'current_plan_id' => (string) ($currentPlanOption['id'] ?? $data['current_plan_id'] ?? $currentPlan),
@@ -6206,14 +6253,19 @@ final class ClientController
             'new_technology' => $newTechnology,
             'new_technology_family' => $newTechnologyFamily,
             'benefit_flags' => $benefitFlags,
-            'benefit_description' => $benefitDescription !== '' ? $benefitDescription : (string) ($data['beneficio_concedido'] ?? $context['benefit_description'] ?? ''),
+            'benefit_automatic_flags' => $this->normalizeUpgradeBenefitFlags($data['benefit_automatic_flags'] ?? $benefitDefaults['flags']),
+            'benefit_final_flags' => $benefitFlags,
+            'benefit_description' => $benefitDescription,
             'benefit_other_text' => $benefitOtherText,
+            'benefit_other_value' => (float) ($data['beneficio_outro_valor'] ?? 0),
             'benefit_value' => (float) ($data['valor_beneficio'] ?? $benefitDefaults['value']),
             'benefit_original_value' => (float) ($data['benefit_original_value'] ?? $benefitDefaults['value']),
             'benefit_adjusted' => !empty($data['benefit_adjusted']),
             'benefit_adjustment_reason' => (string) ($data['benefit_adjustment_reason'] ?? ''),
             'benefit_adjusted_at' => !empty($data['benefit_adjusted']) ? date('Y-m-d H:i:s') : null,
             'benefit_adjusted_by_login' => !empty($data['benefit_adjusted']) ? $operatorLogin : null,
+            'benefit_adjusted_by_user_id' => !empty($data['benefit_adjusted']) && isset($operator['id']) ? (int) $operator['id'] : null,
+            'benefit_automatic_fidelity' => !empty($benefitDefaults['automatic_fidelity']),
             'adhesion_default_value' => (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0),
             'adhesion_charged_value' => !empty($benefitFlags['adhesion_waiver'])
                 ? 0.0
@@ -6440,133 +6492,34 @@ final class ClientController
 
     private function resolveUpgradeBenefitDefaults(string $currentTechnology, string $newTechnology, string $currentPlan = '', string $newPlan = '', float $currentMonthlyValue = 0.0, float $newMonthlyValue = 0.0): array
     {
-        $currentTechnologyNormalized = self::normalizeTextForMatch($currentTechnology);
-        $newTechnologyNormalized = self::normalizeTextForMatch($newTechnology);
-        $movingFromRadioToFiber = (
-            str_contains($currentTechnologyNormalized, 'radio')
-            && str_contains($newTechnologyNormalized, 'fibra')
+        return $this->upgradeBenefitService()->calculate(
+            $currentTechnology,
+            $newTechnology,
+            $currentPlan,
+            $newPlan,
+            $currentMonthlyValue,
+            $newMonthlyValue
         );
-
-        $waiverMode = $this->radioFiberAdhesionWaiverMode();
-        $adhesionWaiver = $movingFromRadioToFiber && $waiverMode === 'automatic';
-        $flags = [
-            'radio_to_fiber' => $movingFromRadioToFiber,
-            'adhesion_waiver' => $adhesionWaiver,
-            'plan_upgrade' => !$movingFromRadioToFiber && $newMonthlyValue > 0.0 && $currentMonthlyValue > 0.0 && $newMonthlyValue >= $currentMonthlyValue,
-            'retention' => false,
-            'other_benefit' => false,
-        ];
-
-        if ($flags['radio_to_fiber']) {
-            return [
-                'flags' => $flags,
-                'description' => $adhesionWaiver
-                    ? 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação conforme regra configurada'
-                    : 'migração de tecnologia de rádio para fibra óptica',
-                'value' => $adhesionWaiver
-                    ? (float) $this->config->get('contracts.commercial.valor_adesao_padrao', 0)
-                    : 0.00,
-            ];
-        }
-
-        return [
-            'flags' => $flags,
-            'description' => !empty($flags['plan_upgrade']) ? 'upgrade de plano' : '',
-            'value' => 0.00,
-        ];
     }
 
     private function radioFiberAdhesionWaiverMode(): string
     {
-        $mode = strtolower(trim((string) $this->config->get(
-            'contracts.commercial.modo_isencao_adesao_migracao_radio_fibra',
-            ''
-        )));
-        if (in_array($mode, ['automatic', 'disabled', 'manual'], true)) {
-            return $mode;
-        }
-
-        return (bool) $this->config->get('contracts.commercial.isentar_adesao_migracao_radio_fibra', false)
-            ? 'automatic'
-            : 'disabled';
+        return $this->upgradeBenefitService()->waiverMode();
     }
 
     private function normalizeUpgradeBenefitFlags(mixed $rawFlags): array
     {
-        if (is_string($rawFlags) && trim($rawFlags) !== '') {
-            $decoded = json_decode($rawFlags, true);
-            if (is_array($decoded)) {
-                $rawFlags = $decoded;
-            }
-        }
-
-        if (!is_array($rawFlags)) {
-            return [];
-        }
-
-        $map = [
-            'radio_to_fiber' => false,
-            'adhesion_waiver' => false,
-            'plan_upgrade' => false,
-            'retention' => false,
-            'other_benefit' => false,
-        ];
-
-        foreach ($map as $key => $default) {
-            $value = $rawFlags[$key] ?? $rawFlags[str_replace('_', '-', $key)] ?? null;
-            $map[$key] = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
-            $map[$key] = $map[$key] ?? in_array(strtolower((string) $value), ['1', 'true', 'yes', 'on'], true);
-        }
-
-        return $map;
+        return $this->upgradeBenefitService()->normalizeFlags($rawFlags);
     }
 
     private function buildUpgradeBenefitDescription(array $flags, string $otherText = ''): string
     {
-        $activeFlags = array_filter($flags, static fn ($value): bool => filter_var($value, FILTER_VALIDATE_BOOL));
+        return $this->upgradeBenefitService()->description($flags, $otherText);
+    }
 
-        if (count($activeFlags) === 2 && !empty($flags['radio_to_fiber']) && !empty($flags['adhesion_waiver'])) {
-            return 'migração de tecnologia de rádio para fibra óptica, com isenção da taxa de adesão/instalação';
-        }
-
-        if (count($activeFlags) === 2 && !empty($flags['plan_upgrade']) && !empty($flags['adhesion_waiver'])) {
-            return 'upgrade de plano, com isenção da taxa de adesão/instalação';
-        }
-
-        $parts = [];
-
-        if (!empty($flags['radio_to_fiber'])) {
-            $parts[] = 'migração de tecnologia de rádio para fibra óptica';
-        }
-
-        if (!empty($flags['adhesion_waiver'])) {
-            $parts[] = 'isenção da taxa de adesão/instalação';
-        }
-
-        if (!empty($flags['plan_upgrade'])) {
-            $parts[] = 'upgrade de plano';
-        }
-
-        if (!empty($flags['retention'])) {
-            $parts[] = 'condição comercial especial para retenção do cliente';
-        }
-
-        if (!empty($flags['other_benefit'])) {
-            $otherText = trim($otherText);
-            $parts[] = $otherText !== '' ? $otherText : 'outro benefício';
-        }
-
-        $parts = array_values(array_filter(array_map('trim', $parts), static fn (string $value): bool => $value !== ''));
-        if ($parts === []) {
-            return '';
-        }
-
-        if (count($parts) === 1) {
-            return $parts[0];
-        }
-
-        $last = array_pop($parts);
-        return implode(', ', $parts) . ' e ' . $last;
+    private function upgradeBenefitService(): UpgradeBenefitService
+    {
+        return new UpgradeBenefitService($this->config);
     }
 
     private function buildAcceptanceData(int $contractId, array $data, array $contractData, string $termHash, Request $request): array

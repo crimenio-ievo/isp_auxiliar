@@ -31,6 +31,7 @@ use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 use App\Infrastructure\MkAuth\TechnologyMapper;
 use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\Clients\ClientCompletionValidator;
 use App\Services\MkAuth\MkAuthPlanChangeService;
 use App\Services\Processes\OperationalProcessService;
 use App\Services\Processes\MigrationJourneyService;
@@ -178,6 +179,7 @@ function bootstrapApplication(): Application
         (int) $config->get('app.client_detail.timeout_seconds', 10)
     ));
     $container->set(ClientPayloadMapper::class, new ClientPayloadMapper());
+    $container->set(ClientCompletionValidator::class, new ClientCompletionValidator());
     $container->set(ClientPlanConfirmationService::class, new ClientPlanConfirmationService(
         $container->get(MkAuthDatabase::class)
     ));
@@ -185,7 +187,8 @@ function bootstrapApplication(): Application
         $container->get(ClientPayloadMapper::class),
         $container->get(MkAuthClient::class),
         $container->get(ClientPlanConfirmationService::class),
-        (string) $config->get('paths.logs', $rootPath . '/logs') . '/client-plan-confirmation.log'
+        (string) $config->get('paths.logs', $rootPath . '/logs') . '/client-plan-confirmation.log',
+        $container->get(ClientCompletionValidator::class)
     ));
     $container->set(MkAuthTicketService::class, new MkAuthTicketService(
         (array) $config->get('contracts.mkauth_ticket', []),

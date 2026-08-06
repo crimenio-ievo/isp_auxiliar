@@ -47,6 +47,7 @@ final class MigrationJourneyService
                 }
             }
             $target = $firstPending ?? ($stageSteps[0] ?? null);
+            $isActive = $number === $activeStage;
             $visible[] = [
                 'number' => $number,
                 'key' => $definition['key'],
@@ -54,7 +55,13 @@ final class MigrationJourneyService
                 'status' => $status,
                 'status_label' => $this->statusLabel($status),
                 'status_class' => $this->statusClass($status),
-                'active' => $number === $activeStage,
+                'active' => $isActive,
+                // O estado visual atual sempre prevalece sobre concluído.
+                'visual_state' => $isActive
+                    ? 'current'
+                    : ($status === 'completed'
+                        ? 'completed'
+                        : (in_array($status, ['waiting', 'attention'], true) ? 'pending' : 'not_started')),
                 'steps' => $stageSteps,
                 'url' => '/processos/migracao?id=' . (int) ($process['id'] ?? 0)
                     . '&step=' . rawurlencode((string) ($target['step_key'] ?? $definition['steps'][0])),

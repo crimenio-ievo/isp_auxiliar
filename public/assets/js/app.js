@@ -1487,7 +1487,7 @@ function updatePlanOptions() {
         }
 
         const matches = option.dataset.installType === selectedType
-            && option.dataset.localDici === selectedLocal;
+            && (option.dataset.localDici === selectedLocal || option.dataset.localDici === 'any');
 
         option.hidden = !matches;
         option.disabled = !matches;
@@ -3500,9 +3500,11 @@ document.querySelectorAll('[data-copy-value]').forEach((button) => {
 
 const migrationCancelDialog = document.querySelector('[data-migration-cancel-dialog]');
 if (migrationCancelDialog instanceof HTMLDialogElement) {
-    document.querySelector('[data-open-migration-cancel]')?.addEventListener('click', () => {
-        migrationCancelDialog.showModal();
-        migrationCancelDialog.querySelector('textarea[name="reason"]')?.focus();
+    document.querySelectorAll('[data-open-migration-cancel]').forEach((button) => {
+        button.addEventListener('click', () => {
+            migrationCancelDialog.showModal();
+            migrationCancelDialog.querySelector('textarea[name="reason"]')?.focus();
+        });
     });
     migrationCancelDialog.querySelector('[data-close-migration-cancel]')?.addEventListener('click', () => migrationCancelDialog.close());
     migrationCancelDialog.addEventListener('click', (event) => {
@@ -3871,16 +3873,21 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
     const fidelityToggle = simpleUpgradeForm.querySelector('[data-fidelity-toggle]');
     const fidelityFields = simpleUpgradeForm.querySelector('[data-fidelity-fields]');
     const planSearch = simpleUpgradeForm.querySelector('[data-simple-plan-search]');
-    const adhesionSummary = simpleUpgradeForm.querySelector('[data-adhesion-summary]');
+    const benefitConditions = simpleUpgradeForm.querySelector('[data-benefit-conditions]');
+    const benefitFlags = Array.from(simpleUpgradeForm.querySelectorAll('[data-benefit-flag]'));
     const adhesionCharged = simpleUpgradeForm.querySelector('[data-adhesion-charged]');
     const adhesionBenefit = simpleUpgradeForm.querySelector('[data-adhesion-benefit]');
-    const manualWaiver = simpleUpgradeForm.querySelector('[data-manual-waiver]');
     const benefitInput = simpleUpgradeForm.querySelector('input[name="valor_beneficio"]');
-    const retentionInput = simpleUpgradeForm.querySelector('input[name="retention_condition"]');
     const benefitReasonInput = simpleUpgradeForm.querySelector('input[name="benefit_adjustment_reason"]');
+    const automaticBenefitInput = simpleUpgradeForm.querySelector('[data-automatic-benefit-value]');
+    const otherBenefitFields = simpleUpgradeForm.querySelector('[data-other-benefit-fields]');
     const otherBenefitInput = simpleUpgradeForm.querySelector('input[name="beneficio_outro_text"]');
+    const otherBenefitValue = simpleUpgradeForm.querySelector('input[name="beneficio_outro_valor"]');
     const fidelityDescription = simpleUpgradeForm.querySelector('input[name="fidelity_benefit_description"]');
     const fidelityMonths = simpleUpgradeForm.querySelector('input[name="fidelidade_meses"]');
+    let automaticFlags = {};
+    let automaticValue = 0;
+    let automaticFidelity = false;
 
     const parseSpeed = (raw) => {
         const match = String(raw || '').toLowerCase().match(/([0-9]+(?:[.,][0-9]+)?)\s*([kmg])?/);
@@ -3892,33 +3899,53 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
         return value;
     };
 
-    const updateAdhesion = (newFamily = '', resetBenefit = false) => {
-        if (!(adhesionSummary instanceof HTMLElement)) return;
-        const currentFamily = simpleUpgradeForm.dataset.currentFamily || '';
-        const defaultValue = Number(adhesionSummary.dataset.adhesionDefault || 0);
-        const waiverMode = adhesionSummary.dataset.waiverMode || 'disabled';
-        const radioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
-        const manualInput = manualWaiver?.querySelector('input[type="checkbox"]');
-        if (manualWaiver instanceof HTMLElement) manualWaiver.hidden = !radioToFiber || waiverMode !== 'manual';
-        if (manualInput instanceof HTMLInputElement) manualInput.disabled = !radioToFiber || waiverMode !== 'manual';
-        const waived = radioToFiber && (waiverMode === 'automatic' || (waiverMode === 'manual' && manualInput instanceof HTMLInputElement && manualInput.checked));
-        const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-        if (adhesionCharged instanceof HTMLElement) adhesionCharged.textContent = money.format(waived ? 0 : defaultValue);
-        if (adhesionBenefit instanceof HTMLElement) adhesionBenefit.textContent = waived ? `Isenção de ${money.format(defaultValue)}` : 'Sem isenção';
-        if (benefitInput instanceof HTMLInputElement) {
-            const automaticValue = benefitInput.dataset.adhesionAutoValue || '';
-            const formattedDefault = defaultValue.toFixed(2).replace('.', ',');
-            const manualAdjustment = benefitReasonInput instanceof HTMLInputElement && benefitReasonInput.value.trim() !== '';
-            if (waived) {
-                if (resetBenefit || (!manualAdjustment && (benefitInput.value === '' || benefitInput.value === '0,00' || benefitInput.value === automaticValue))) {
-                    benefitInput.value = formattedDefault;
-                }
-                benefitInput.dataset.adhesionAutoValue = formattedDefault;
-            } else if (resetBenefit || (automaticValue !== '' && benefitInput.value === automaticValue)) {
-                benefitInput.value = '0,00';
-                delete benefitInput.dataset.adhesionAutoValue;
-            }
+    const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    const formatValue = (value) => Math.max(0, Number(value) || 0).toFixed(2).replace('.', ',');
+    const flagInput = (key) => benefitFlags.find((input) => input instanceof HTMLInputElement && input.dataset.benefitFlag === key);
+    const selectedFlags = () => Object.fromEntries(benefitFlags.map((input) => [input.dataset.benefitFlag || '', Boolean(input.checked)]));
+    const benefitDescription = (flags) => {
+        const labels = [];
+        if (flags.radio_to_fiber) labels.push('migração de tecnologia de rádio para fibra óptica');
+        if (flags.adhesion_waiver) labels.push('isenção da taxa de adesão/instalação');
+        if (flags.plan_upgrade) labels.push('upgrade de plano');
+        if (flags.retention) labels.push('condição comercial especial para retenção');
+        if (flags.other_benefit && otherBenefitInput instanceof HTMLInputElement && otherBenefitInput.value.trim()) labels.push(otherBenefitInput.value.trim());
+        return labels.join(', ');
+    };
+    const updateBenefitFields = () => {
+        const flags = selectedFlags();
+        const otherSelected = Boolean(flags.other_benefit);
+        if (otherBenefitFields instanceof HTMLElement) otherBenefitFields.hidden = !otherSelected;
+        [otherBenefitInput, otherBenefitValue].forEach((field) => {
+            if (field instanceof HTMLInputElement) field.disabled = !otherSelected;
+        });
+        if (otherBenefitInput instanceof HTMLInputElement) {
+            otherBenefitInput.required = otherSelected;
+            if (!otherSelected) otherBenefitInput.value = '';
         }
+        if (otherBenefitValue instanceof HTMLInputElement && !otherSelected) otherBenefitValue.value = '0,00';
+
+        const fidelitySelected = fidelityToggle instanceof HTMLInputElement && fidelityToggle.checked;
+        if (fidelityFields instanceof HTMLElement) fidelityFields.hidden = !fidelitySelected;
+        fidelityFields?.querySelectorAll('input, select, textarea').forEach((field) => {
+            if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) field.disabled = !fidelitySelected;
+        });
+        if (fidelityDescription instanceof HTMLInputElement) {
+            fidelityDescription.required = fidelitySelected;
+            if (fidelitySelected && !fidelityDescription.value.trim()) fidelityDescription.value = benefitDescription(flags);
+        }
+        if (fidelityMonths instanceof HTMLInputElement) fidelityMonths.required = fidelitySelected;
+
+        const defaultValue = Number(benefitConditions?.dataset.adhesionDefault || 0);
+        const waived = Boolean(flags.adhesion_waiver);
+        const finalValue = benefitInput instanceof HTMLInputElement ? parseMoneyFieldValue(benefitInput.value) : 0;
+        if (adhesionCharged instanceof HTMLElement) adhesionCharged.textContent = `Valor cobrado: ${money.format(waived ? 0 : defaultValue)}`;
+        if (adhesionBenefit instanceof HTMLElement) adhesionBenefit.textContent = `Benefício concedido: ${money.format(finalValue)}`;
+
+        const flagChanged = Object.keys(automaticFlags).some((key) => Boolean(flags[key]) !== Boolean(automaticFlags[key]));
+        const valueChanged = Math.abs(finalValue - automaticValue) > 0.009;
+        const fidelityChanged = fidelitySelected !== automaticFidelity;
+        if (benefitReasonInput instanceof HTMLInputElement) benefitReasonInput.required = flagChanged || valueChanged || fidelityChanged;
     };
 
     const updateOperation = (resetSelection = false) => {
@@ -3926,21 +3953,39 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
         const option = planSelect.selectedOptions[0];
         if (!(option instanceof HTMLOptionElement) || !option.value) {
             operationOutput.textContent = 'Selecione um plano';
-            updateAdhesion('', resetSelection);
+            automaticFlags = {};
+            automaticValue = 0;
+            automaticFidelity = false;
+            updateBenefitFields();
             return;
         }
         const currentPlan = simpleUpgradeForm.dataset.currentPlan || '';
         const currentFamily = simpleUpgradeForm.dataset.currentFamily || '';
         const newFamily = option.dataset.planFamily || '';
+        const currentSpeed = parseSpeed(simpleUpgradeForm.dataset.currentSpeed);
+        const newSpeed = parseSpeed(option.dataset.planSpeed);
+        const currentValue = Number(simpleUpgradeForm.dataset.currentValue || 0);
+        const newValue = Number(option.dataset.planValue || 0);
+        const changed = option.value.toLowerCase() !== currentPlan.toLowerCase();
+        const increased = changed && ((currentSpeed !== null && newSpeed !== null && newSpeed > currentSpeed) || newValue > currentValue + 0.009);
+        const radioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
+        const waiverMode = benefitConditions?.dataset.waiverMode || 'disabled';
+        automaticFlags = {
+            radio_to_fiber: radioToFiber,
+            adhesion_waiver: radioToFiber && waiverMode === 'automatic',
+            plan_upgrade: increased,
+            retention: false,
+            other_benefit: false,
+        };
+        automaticValue = automaticFlags.adhesion_waiver ? Number(benefitConditions?.dataset.adhesionDefault || 0) : 0;
+        automaticFidelity = automaticValue > 0
+            && ((radioToFiber && simpleUpgradeForm.dataset.autoFidelityMigration === '1')
+                || (increased && simpleUpgradeForm.dataset.autoFidelityUpgrade === '1'));
         let operation = '';
-        if (option.value.toLowerCase() !== currentPlan.toLowerCase()) {
+        if (changed) {
             if (currentFamily && newFamily && currentFamily !== newFamily) {
                 operation = 'Migração';
             } else if (currentFamily && newFamily) {
-                const currentSpeed = parseSpeed(simpleUpgradeForm.dataset.currentSpeed);
-                const newSpeed = parseSpeed(option.dataset.planSpeed);
-                const currentValue = Number(simpleUpgradeForm.dataset.currentValue || 0);
-                const newValue = Number(option.dataset.planValue || 0);
                 if (currentSpeed !== null && newSpeed !== null && currentSpeed !== newSpeed) {
                     operation = newSpeed > currentSpeed ? 'Upgrade' : 'Downgrade';
                 } else if (currentValue !== newValue) {
@@ -3950,34 +3995,20 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
         }
         operationOutput.textContent = operation || 'Sem mudança efetiva — escolha outro plano';
         if (resetSelection) {
-            if (retentionInput instanceof HTMLInputElement) {
-                retentionInput.checked = false;
-                delete retentionInput.dataset.manualTouched;
-            }
+            benefitFlags.forEach((input) => {
+                if (input instanceof HTMLInputElement) input.checked = Boolean(automaticFlags[input.dataset.benefitFlag || '']);
+            });
+            if (benefitInput instanceof HTMLInputElement) benefitInput.value = formatValue(automaticValue);
+            if (automaticBenefitInput instanceof HTMLInputElement) automaticBenefitInput.value = formatValue(automaticValue);
+            if (fidelityToggle instanceof HTMLInputElement) fidelityToggle.checked = automaticFidelity;
             if (benefitReasonInput instanceof HTMLInputElement) benefitReasonInput.value = '';
             if (otherBenefitInput instanceof HTMLInputElement) otherBenefitInput.value = '';
+            if (otherBenefitValue instanceof HTMLInputElement) otherBenefitValue.value = '0,00';
             if (fidelityDescription instanceof HTMLInputElement) fidelityDescription.value = '';
             if (fidelityMonths instanceof HTMLInputElement) fidelityMonths.value = '12';
-            if (fidelityToggle instanceof HTMLInputElement) delete fidelityToggle.dataset.manualTouched;
         }
-        if (fidelityToggle instanceof HTMLInputElement && fidelityToggle.dataset.manualTouched !== '1') {
-            const automaticBenefit = operation === 'Migração'
-                && simpleUpgradeForm.dataset.autoFidelityMigration === '1'
-                && Number(adhesionSummary?.dataset.adhesionDefault || 0) > 0;
-            fidelityToggle.checked = automaticBenefit;
-        }
-        updateAdhesion(newFamily, resetSelection);
-        updateFidelity();
-    };
-
-    const updateFidelity = () => {
-        if (!(fidelityToggle instanceof HTMLInputElement) || !(fidelityFields instanceof HTMLElement)) return;
-        fidelityFields.hidden = !fidelityToggle.checked;
-        fidelityFields.querySelectorAll('input, select, textarea').forEach((field) => {
-            if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) {
-                field.disabled = !fidelityToggle.checked;
-            }
-        });
+        if (automaticBenefitInput instanceof HTMLInputElement) automaticBenefitInput.value = formatValue(automaticValue);
+        updateBenefitFields();
     };
 
     const filterPlans = () => {
@@ -3990,13 +4021,14 @@ if (simpleUpgradeForm instanceof HTMLFormElement) {
     };
 
     planSelect?.addEventListener('change', () => updateOperation(true));
-    fidelityToggle?.addEventListener('change', updateFidelity);
-    fidelityToggle?.addEventListener('change', () => { fidelityToggle.dataset.manualTouched = '1'; });
-    retentionInput?.addEventListener('change', () => { retentionInput.dataset.manualTouched = '1'; });
+    fidelityToggle?.addEventListener('change', updateBenefitFields);
+    benefitFlags.forEach((input) => input.addEventListener('change', updateBenefitFields));
+    benefitInput?.addEventListener('input', updateBenefitFields);
+    otherBenefitInput?.addEventListener('input', updateBenefitFields);
+    otherBenefitValue?.addEventListener('input', updateBenefitFields);
     planSearch?.addEventListener('input', filterPlans);
-    manualWaiver?.querySelector('input')?.addEventListener('change', updateOperation);
     updateOperation();
-    updateFidelity();
+    updateBenefitFields();
 }
 
 document.querySelectorAll('form[data-prevent-double-submit]').forEach((form) => {
@@ -4051,6 +4083,19 @@ if (connectionChecker instanceof HTMLElement) {
     const ip = connectionChecker.querySelector('[data-connection-ip]');
     const checked = connectionChecker.querySelector('[data-connection-checked]');
     const offlineException = document.querySelector('[data-offline-exception]');
+    const continueButton = document.querySelector('[data-continue-finalization]');
+    const overrideInput = offlineException?.querySelector('input[name="offline_override"]');
+    const overrideJustification = offlineException?.querySelector('textarea[name="offline_justification"]');
+    let connectionOnline = connectionChecker.dataset.connectionInitialOnline === '1';
+    const updateContinueState = () => {
+        if (!(continueButton instanceof HTMLButtonElement)) return;
+        const authorizedException = overrideInput instanceof HTMLInputElement
+            && overrideInput.checked
+            && overrideJustification instanceof HTMLTextAreaElement
+            && overrideJustification.value.trim() !== '';
+        continueButton.disabled = !(connectionOnline || authorizedException);
+        continueButton.setAttribute('aria-disabled', continueButton.disabled ? 'true' : 'false');
+    };
     const checkConnection = async () => {
         const endpoint = connectionChecker.dataset.connectionUrl || '';
         if (!endpoint || !(checkButton instanceof HTMLButtonElement)) return;
@@ -4067,6 +4112,7 @@ if (connectionChecker instanceof HTMLElement) {
             const payload = await response.json();
             if (!response.ok || payload.status !== 'success') throw new Error(payload.message || 'Consulta indisponível.');
             const online = payload.online === true;
+            connectionOnline = online;
             if (status instanceof HTMLElement) status.textContent = online ? 'PPPoE online' : 'PPPoE offline ou indisponível';
             if (ip instanceof HTMLElement) {
                 ip.hidden = !online;
@@ -4078,17 +4124,74 @@ if (connectionChecker instanceof HTMLElement) {
                 checked.textContent = `${online ? 'Verificado' : 'Última verificação'} às ${time} · origem: Radius MkAuth`;
             }
             if (offlineException instanceof HTMLElement) offlineException.hidden = online;
+            updateContinueState();
         } catch (error) {
+            connectionOnline = false;
             if (status instanceof HTMLElement) status.textContent = 'PPPoE offline ou indisponível';
             if (checked instanceof HTMLElement) checked.textContent = error instanceof Error ? error.message : 'Não foi possível consultar agora.';
             if (offlineException instanceof HTMLElement) offlineException.hidden = false;
+            updateContinueState();
         } finally {
             checkButton.disabled = false;
             checkButton.textContent = originalLabel || 'Verificar conexão agora';
         }
     };
     checkButton?.addEventListener('click', checkConnection);
+    overrideInput?.addEventListener('change', updateContinueState);
+    overrideJustification?.addEventListener('input', updateContinueState);
+    updateContinueState();
 }
+
+document.querySelectorAll('[data-migration-evidence-uploader]').forEach((uploader) => {
+    if (!(uploader instanceof HTMLElement)) return;
+    const inputs = Array.from(uploader.querySelectorAll('[data-migration-evidence-input]'))
+        .filter((input) => input instanceof HTMLInputElement);
+    const preview = uploader.querySelector('[data-migration-evidence-preview]');
+    let previewUrls = [];
+    const renderEvidencePreview = () => {
+        if (!(preview instanceof HTMLElement)) return;
+        previewUrls.forEach((url) => URL.revokeObjectURL(url));
+        previewUrls = [];
+        preview.replaceChildren();
+        inputs.forEach((input, inputIndex) => {
+            Array.from(input.files || []).forEach((file, fileIndex) => {
+                const card = document.createElement('article');
+                card.className = 'migration-evidence-preview__item';
+                if (file.type.startsWith('image/')) {
+                    const image = document.createElement('img');
+                    const url = URL.createObjectURL(file);
+                    previewUrls.push(url);
+                    image.src = url;
+                    image.alt = `Prévia de ${file.name}`;
+                    card.append(image);
+                } else {
+                    const fileType = document.createElement('span');
+                    fileType.className = 'migration-evidence-preview__file';
+                    fileType.textContent = 'PDF';
+                    card.append(fileType);
+                }
+                const name = document.createElement('small');
+                name.textContent = file.name;
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'button button--ghost button--small';
+                remove.textContent = 'Remover';
+                remove.addEventListener('click', () => {
+                    const transfer = new DataTransfer();
+                    Array.from(input.files || []).forEach((candidate, candidateIndex) => {
+                        if (candidateIndex !== fileIndex) transfer.items.add(candidate);
+                    });
+                    input.files = transfer.files;
+                    renderEvidencePreview();
+                });
+                card.append(name, remove);
+                card.dataset.source = `${inputIndex}:${fileIndex}`;
+                preview.append(card);
+            });
+        });
+    };
+    inputs.forEach((input) => input.addEventListener('change', renderEvidencePreview));
+});
 
 const contractScanner = document.querySelector('[data-contract-scanner]');
 if (contractScanner instanceof HTMLFormElement) {

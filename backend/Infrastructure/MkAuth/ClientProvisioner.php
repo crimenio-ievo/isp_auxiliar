@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\MkAuth;
 
+use App\Services\Clients\ClientCompletionValidator;
+
 /**
  * Cria/atualiza o cliente e só conclui após confirmar o plano por releitura.
  */
@@ -13,12 +15,15 @@ final class ClientProvisioner
         private ClientPayloadMapper $mapper,
         private ClientGateway $client,
         private ClientPlanConfirmationService $planConfirmation,
-        private ?string $auditLogPath = null
+        private ?string $auditLogPath = null,
+        private ?ClientCompletionValidator $completionValidator = null
     ) {
     }
 
     public function provision(array $formData): array
     {
+        // Última barreira antes de qualquer leitura de plano ou escrita externa.
+        $formData = ($this->completionValidator ?? new ClientCompletionValidator())->assertComplete($formData);
         $requestId = trim((string) ($formData['provision_request_id'] ?? ''));
         if ($requestId === '') {
             $requestId = bin2hex(random_bytes(16));
