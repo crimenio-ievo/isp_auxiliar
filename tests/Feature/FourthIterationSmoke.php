@@ -305,7 +305,7 @@ try {
     $controllerReflection->getProperty('config')->setValue($controller, $app->config());
     $check(24, empty($disabledBenefit['flags']['adhesion_waiver']) && (float) ($disabledBenefit['value'] ?? -1) === 0.0, 'configuração desabilitada não aplica isenção');
 
-    $check(25, str_contains($upgradeHtml, 'Condição comercial de retenção') && str_contains($upgradeHtml, '<legend>Fidelidade</legend>'), 'retenção permanece separada da operação e fidelidade');
+    $check(25, str_contains($upgradeHtml, 'Condição de retenção') && str_contains($upgradeHtml, '<legend>Fidelidade</legend>'), 'retenção permanece separada da operação e fidelidade');
     $fidelityOffHtml = $view->render('clients/upgrade', ['pageTitle' => 'Nova condição', 'currentPath' => '/clientes/upgrade', 'basePath' => '', 'appName' => 'ISP Auxiliar', 'user' => ['name' => 'Gestor', 'role' => 'manager'], 'flash' => null, 'context' => $upgradeContext, 'form' => array_replace($upgradeData, ['apply_fidelity' => false]), 'errors' => [], 'csrfToken' => 'csrf']);
     $check(26, preg_match('/name="fidelity_benefit_description"[^>]*disabled/', $fidelityOffHtml) === 1 && preg_match('/name="fidelidade_meses"[^>]*disabled/', $fidelityOffHtml) === 1, 'fidelidade desativada não envia campos ocultos');
     $fidelityErrors = $validateUpgrade->invoke($controller, array_replace($upgradeData, ['apply_fidelity' => true, 'valor_beneficio' => 0, 'fidelity_benefit_description' => '', 'fidelidade_meses' => 12]), $upgradeContext);
@@ -342,7 +342,7 @@ try {
     $check(32, trim((string) ($oldRevisionAcceptance['revoked_at'] ?? '')) !== '', 'correção revoga o token anterior');
     $acceptedWorkspace = $renderMigration($view, $acceptedProcess, $acceptedContract, $acceptedAcceptance, 'migration_data');
     $check(33, str_contains($acceptedWorkspace, 'Esta condição já foi aceita')
-        && str_contains($acceptedWorkspace, 'Substituir condição')
+        && str_contains($acceptedWorkspace, 'Corrigir nova condição')
         && str_contains($acceptedWorkspace, 'name="_csrf"')
         && str_contains($clientControllerSource, "Csrf::verify(\$request, 'client_upgrade_correct:' . \$contractId)"), 'aceite confirmado exige substituição protegida por CSRF');
     $newContractId = (int) $contracts->create($contractData($login, 'upgrade_migracao', ['revision_number' => 2]));

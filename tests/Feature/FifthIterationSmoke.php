@@ -67,11 +67,11 @@ $check(1, (int) $projection['active_stage'] === 1, 'iniciar deve abrir a etapa 1
 $check(2, (string) $projection['active']['key'] === 'condition', 'etapa 1 não pode ser pulada');
 $check(3, count((array) $projection['visible_steps']) === 4, 'quatro etapas devem permanecer visíveis');
 $check(4, count((array) $projection['technical_steps']) === 11, 'onze etapas internas devem ser preservadas');
-$check(5, str_contains($upgradeView, 'Condições aplicadas automaticamente'), 'condições automáticas devem ser explicitadas');
+$check(5, str_contains($upgradeView, 'Benefícios e condições') && str_contains($upgradeView, 'benefit_flags[]'), 'benefícios automáticos devem permanecer visíveis por checkbox');
 $check(6, str_contains($clientController, "'benefit_original_value'") && str_contains($upgradeView, 'benefitValue'), 'benefício deve ser preenchido pelo fluxo');
 $check(7, str_contains($clientController, "'benefit_adjustment_reason'") && str_contains($upgradeView, 'Justificativa do ajuste'), 'ajuste de benefício deve ser auditável');
 $check(8, str_contains($clientController, 'fidelidade_automatica_migracao') && str_contains($clientController, 'fidelidade_automatica_upgrade'), 'fidelidade automática deve ser configurável');
-$check(9, str_contains($upgradeView, 'Ajustar condições'), 'condições avançadas devem ser recolhidas');
+$check(9, str_contains($upgradeView, 'Ajustar benefício'), 'ajustes comerciais devem ser recolhidos');
 $check(10, str_contains($upgradeView, 'data-plan-technology') && str_contains($upgradeView, 'Troca de tecnologia'), 'tecnologia deve ser simplificada');
 $check(11, str_contains($migrationView, 'Contatos usados no aceite (somente leitura)') && str_contains($migrationView, 'type="hidden" name="phone"'), 'contatos do aceite devem ser somente leitura');
 $check(12, str_contains($migrationView, 'Corrigir contato no cadastro') && str_contains($processController, 'updateMigrationContacts'), 'correção controlada deve retornar ao mesmo processo');

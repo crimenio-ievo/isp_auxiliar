@@ -8,6 +8,7 @@ use App\Infrastructure\MkAuth\ClientPlanConfirmationService;
 use App\Infrastructure\MkAuth\ClientPlanNotConfirmedException;
 use App\Infrastructure\MkAuth\ClientPlanReadRepository;
 use App\Infrastructure\MkAuth\ClientProvisioner;
+use App\Services\Clients\ClientCompletionValidationException;
 
 require dirname(__DIR__, 2) . '/backend/bootstrap/autoload.php';
 
@@ -110,8 +111,22 @@ $assert = static function (bool $condition, string $message) use (&$assertions):
 $form = static fn (array $overrides = []): array => array_replace([
     'nome_completo' => 'Cliente sintético',
     'login' => 'cliente.teste',
-    'cpf_cnpj' => '12345678901',
+    'pessoa' => 'fisica',
+    'cpf_cnpj' => '529.982.247-25',
+    'celular' => '(31) 99999-9999',
     'plano' => 'PLAN-UUID-FIBRA-100',
+    'endereco' => 'Rua de Teste',
+    'numero' => '10',
+    'bairro' => 'Centro',
+    'cidade' => 'Coimbra',
+    'estado' => 'MG',
+    'vencimento' => '10',
+    'tipo_instalacao' => 'fibra',
+    'local_dici' => 'r',
+    'coordenadas' => '-20.850552,-42.803886',
+    'tipo_adesao' => 'cheia',
+    'parcelas_adesao' => '1',
+    'fidelidade_meses' => '12',
 ], $overrides);
 $makeProvisioner = static function (FakeClientPlanBackend $backend, ?string $log = null): ClientProvisioner {
     return new ClientProvisioner(
@@ -202,5 +217,27 @@ $logContents = (string) file_get_contents($logPath);
 @unlink($logPath);
 $assert(str_contains($logContents, 'request_id') && str_contains($logContents, 'plan_confirmed'), 'Log seguro não registrou correlação e resultado.');
 $assert(!str_contains($logContents, 'SEGREDO-NAO-LOGAR') && !str_contains($logContents, 'TOKEN-NAO-LOGAR'), 'Log expôs credenciais ou payload sensível.');
+
+// Barreira final: dados incompletos ou documento inválido não chegam ao gateway.
+$invalidDocument = new FakeClientPlanBackend();
+$blockedErrors = [];
+try {
+    $makeProvisioner($invalidDocument)->provision($form(['cpf_cnpj' => '111.111.111-11']));
+} catch (ClientCompletionValidationException $exception) {
+    $blockedErrors = $exception->errors();
+}
+$assert(isset($blockedErrors['cpf_cnpj']) && $invalidDocument->createCalls === 0 && $invalidDocument->updateCalls === 0, 'CPF inválido alcançou uma escrita no gateway.');
+
+$missingDocument = new FakeClientPlanBackend();
+$missingErrors = [];
+try {
+    $makeProvisioner($missingDocument)->provision($form(['cpf_cnpj' => '', 'pessoa' => 'fisica']));
+} catch (ClientCompletionValidationException $exception) {
+    $missingErrors = $exception->errors();
+}
+$assert(isset($missingErrors['cpf_cnpj']) && $missingDocument->createCalls === 0, 'POST direto sem CPF alcançou o MkAuth.');
+
+$normalizedDocument = $makeProvisioner(new FakeClientPlanBackend())->provision($form());
+$assert((string) ($normalizedDocument['payload']['cpf_cnpj'] ?? '') === '52998224725', 'Documento válido não foi normalizado antes do payload.');
 
 echo 'ClientPlanConfirmationSmoke OK - ' . $assertions . " assertions\n";
