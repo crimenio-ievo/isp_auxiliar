@@ -270,26 +270,36 @@ ob_start();
         <div class="field--span-2">
             <?php
             $migrationActionBar = [
+                'back' => [
+                    'label' => 'Voltar ao cliente',
+                    'href' => Url::to('/clientes/detalhe?login=' . rawurlencode($login)),
+                ],
                 'primary' => [
                     'tag' => 'button',
                     'type' => 'submit',
                     'name' => 'next_action',
-                    'value' => 'stay',
-                    'label' => $correctionOf > 0 ? 'Corrigir nova condição' : 'Salvar nova condição',
+                    'value' => 'continue',
+                    'label' => 'Continuar para o aceite',
                     'attrs' => ['data-submit-label' => 'Salvando...'],
                 ],
-                'navigation' => [
-                    ['label' => 'Voltar ao cliente', 'href' => Url::to('/clientes/detalhe?login=' . rawurlencode($login)), 'class' => 'button--ghost', 'align' => 'start'],
+                'more' => array_values(array_filter([
+                    $correctionOf > 0 ? [
+                        'tag' => 'button',
+                        'type' => 'submit',
+                        'name' => 'next_action',
+                        'value' => 'stay',
+                        'label' => 'Corrigir nova condição',
+                        'attrs' => ['data-submit-label' => 'Salvando...'],
+                    ] : null,
                     ['tag' => 'button', 'type' => 'submit', 'name' => 'next_action', 'value' => 'later', 'label' => 'Salvar e sair', 'class' => 'button--ghost', 'attrs' => ['data-submit-label' => 'Salvando...']],
-                    ['tag' => 'button', 'type' => 'submit', 'name' => 'next_action', 'value' => 'continue', 'label' => 'Continuar para o aceite', 'attrs' => ['data-submit-label' => 'Salvando...']],
-                ],
-                'more' => $processId > 0 ? [[
+                    $processId > 0 ? [
                     'tag' => 'button',
                     'type' => 'button',
                     'label' => 'Cancelar processo',
                     'class' => 'button--danger',
                     'attrs' => ['data-open-migration-cancel' => true],
-                ]] : [],
+                    ] : null,
+                ], 'is_array')),
             ];
             require __DIR__ . '/../components/migration_actions.php';
             ?>

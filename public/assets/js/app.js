@@ -4057,6 +4057,37 @@ document.querySelectorAll('form[data-prevent-double-submit]').forEach((form) => 
     });
 });
 
+const migrationActionMenus = Array.from(document.querySelectorAll('details[data-migration-actions-menu]'));
+migrationActionMenus.forEach((menu) => {
+    if (!(menu instanceof HTMLDetailsElement)) return;
+    const summary = menu.querySelector('summary');
+    const syncExpandedState = () => summary?.setAttribute('aria-expanded', menu.open ? 'true' : 'false');
+    menu.addEventListener('toggle', () => {
+        if (menu.open) {
+            migrationActionMenus.forEach((candidate) => {
+                if (candidate instanceof HTMLDetailsElement && candidate !== menu) candidate.open = false;
+            });
+        }
+        syncExpandedState();
+    });
+    menu.querySelector('[role="menu"]')?.addEventListener('click', () => {
+        menu.open = false;
+    });
+    syncExpandedState();
+});
+document.addEventListener('pointerdown', (event) => {
+    migrationActionMenus.forEach((menu) => {
+        if (menu instanceof HTMLDetailsElement && menu.open && !menu.contains(event.target)) menu.open = false;
+    });
+});
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const openMenu = migrationActionMenus.find((menu) => menu instanceof HTMLDetailsElement && menu.open);
+    if (!(openMenu instanceof HTMLDetailsElement)) return;
+    openMenu.open = false;
+    openMenu.querySelector('summary')?.focus();
+});
+
 const migrationAcceptanceForm = document.querySelector('[data-migration-acceptance-form]');
 if (migrationAcceptanceForm instanceof HTMLFormElement) {
     const absentToggle = migrationAcceptanceForm.querySelector('[data-client-absent]');
@@ -4083,19 +4114,6 @@ if (connectionChecker instanceof HTMLElement) {
     const ip = connectionChecker.querySelector('[data-connection-ip]');
     const checked = connectionChecker.querySelector('[data-connection-checked]');
     const offlineException = document.querySelector('[data-offline-exception]');
-    const continueButton = document.querySelector('[data-continue-finalization]');
-    const overrideInput = offlineException?.querySelector('input[name="offline_override"]');
-    const overrideJustification = offlineException?.querySelector('textarea[name="offline_justification"]');
-    let connectionOnline = connectionChecker.dataset.connectionInitialOnline === '1';
-    const updateContinueState = () => {
-        if (!(continueButton instanceof HTMLButtonElement)) return;
-        const authorizedException = overrideInput instanceof HTMLInputElement
-            && overrideInput.checked
-            && overrideJustification instanceof HTMLTextAreaElement
-            && overrideJustification.value.trim() !== '';
-        continueButton.disabled = !(connectionOnline || authorizedException);
-        continueButton.setAttribute('aria-disabled', continueButton.disabled ? 'true' : 'false');
-    };
     const checkConnection = async () => {
         const endpoint = connectionChecker.dataset.connectionUrl || '';
         if (!endpoint || !(checkButton instanceof HTMLButtonElement)) return;
@@ -4112,7 +4130,6 @@ if (connectionChecker instanceof HTMLElement) {
             const payload = await response.json();
             if (!response.ok || payload.status !== 'success') throw new Error(payload.message || 'Consulta indisponível.');
             const online = payload.online === true;
-            connectionOnline = online;
             if (status instanceof HTMLElement) status.textContent = online ? 'PPPoE online' : 'PPPoE offline ou indisponível';
             if (ip instanceof HTMLElement) {
                 ip.hidden = !online;
@@ -4124,22 +4141,16 @@ if (connectionChecker instanceof HTMLElement) {
                 checked.textContent = `${online ? 'Verificado' : 'Última verificação'} às ${time} · origem: Radius MkAuth`;
             }
             if (offlineException instanceof HTMLElement) offlineException.hidden = online;
-            updateContinueState();
         } catch (error) {
-            connectionOnline = false;
             if (status instanceof HTMLElement) status.textContent = 'PPPoE offline ou indisponível';
             if (checked instanceof HTMLElement) checked.textContent = error instanceof Error ? error.message : 'Não foi possível consultar agora.';
             if (offlineException instanceof HTMLElement) offlineException.hidden = false;
-            updateContinueState();
         } finally {
             checkButton.disabled = false;
             checkButton.textContent = originalLabel || 'Verificar conexão agora';
         }
     };
     checkButton?.addEventListener('click', checkConnection);
-    overrideInput?.addEventListener('change', updateContinueState);
-    overrideJustification?.addEventListener('input', updateContinueState);
-    updateContinueState();
 }
 
 document.querySelectorAll('[data-migration-evidence-uploader]').forEach((uploader) => {

@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * Rodapé compartilhado das quatro etapas da migração.
  *
- * Espera $migrationActionBar com primary, navigation e more. Cada ação aceita:
+ * Espera $migrationActionBar com back, primary e more. Cada ação aceita:
  * label, tag (a|button), href, type, name, value, class, disabled, hidden,
  * attrs e help.
  */
@@ -43,25 +43,28 @@ $renderMigrationAction = static function (array $action, string $extraClass = ''
 <?php };
 
 $primaryAction = is_array($migrationActionBar['primary'] ?? null) ? $migrationActionBar['primary'] : [];
-$navigationActions = array_values(array_filter((array) ($migrationActionBar['navigation'] ?? []), 'is_array'));
+$backAction = is_array($migrationActionBar['back'] ?? null) ? $migrationActionBar['back'] : [];
 $moreActions = array_values(array_filter((array) ($migrationActionBar['more'] ?? []), 'is_array'));
 ?>
 <section class="migration-actions" aria-label="Ações da etapa">
-    <?php if ($primaryAction !== []): ?>
-        <div class="migration-actions__primary">
-            <?php $renderMigrationAction($primaryAction, 'migration-actions__primary-button'); ?>
+    <?php if ($backAction !== []): ?>
+        <div class="migration-actions__back">
+            <?php $renderMigrationAction($backAction, 'button--ghost'); ?>
         </div>
     <?php endif; ?>
-    <div class="migration-actions__navigation">
-        <?php foreach ($navigationActions as $navigationAction): ?>
-            <div class="migration-actions__navigation-item migration-actions__navigation-item--<?= $escapeAction($navigationAction['align'] ?? 'end'); ?>">
-                <?php $renderMigrationAction($navigationAction); ?>
+    <div class="migration-actions__right">
+        <?php if ($primaryAction !== []): ?>
+            <div class="migration-actions__primary">
+                <?php $renderMigrationAction($primaryAction, 'migration-actions__primary-button'); ?>
             </div>
-        <?php endforeach; ?>
+        <?php endif; ?>
         <?php if ($moreActions !== []): ?>
-            <details class="migration-actions__more">
-                <summary>Mais ações</summary>
-                <div><?php foreach ($moreActions as $moreAction): ?><?php $renderMigrationAction($moreAction, 'button--ghost'); ?><?php endforeach; ?></div>
+            <details class="migration-actions__more" data-migration-actions-menu>
+                <summary aria-haspopup="menu" aria-expanded="false">Mais ações</summary>
+                <div role="menu"><?php foreach ($moreActions as $moreAction): ?><?php
+                    $moreAction['attrs'] = array_merge((array) ($moreAction['attrs'] ?? []), ['role' => 'menuitem']);
+                    $renderMigrationAction($moreAction, str_contains((string) ($moreAction['class'] ?? ''), 'button--danger') ? '' : 'button--ghost');
+                ?><?php endforeach; ?></div>
             </details>
         <?php endif; ?>
     </div>

@@ -15,6 +15,7 @@ $connection = is_array($connection ?? null) ? $connection : [];
 $dryRun = is_array($dryRun ?? null) ? $dryRun : null;
 $editContact = !empty($editContact);
 $notificationDryRun = is_array($notificationDryRun ?? null) ? $notificationDryRun : ['whatsapp' => true, 'email' => true];
+$externalOperationsBlocked = !isset($externalOperationsBlocked) || (bool) $externalOperationsBlocked;
 $journey = is_array($journey ?? null) ? $journey : [];
 $visibleStages = array_values((array) ($journey['visible_steps'] ?? []));
 $steps = array_values((array) ($process['steps'] ?? []));
@@ -231,11 +232,11 @@ ob_start();
                         <input type="hidden" name="process_id" value="<?= $processId; ?>">
                         <label class="field field--span-2"><span>Motivo da substituição</span><textarea name="correction_reason" rows="2" required></textarea></label>
                         <div class="field--span-2"><?php $renderMigrationActions([
-                            'primary' => ['tag' => 'button', 'type' => 'submit', 'label' => 'Corrigir nova condição', 'attrs' => ['data-submit-label' => 'Preparando...']],
-                            'navigation' => [
-                                ['label' => 'Voltar ao cliente', 'href' => $clientUrl, 'class' => 'button--ghost', 'align' => 'start'],
+                            'back' => ['label' => 'Voltar ao cliente', 'href' => $clientUrl],
+                            'primary' => ['label' => 'Continuar para o aceite', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')],
+                            'more' => [
+                                ['tag' => 'button', 'type' => 'submit', 'label' => 'Corrigir nova condição', 'attrs' => ['data-submit-label' => 'Preparando...']],
                                 ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
-                                ['label' => 'Continuar para o aceite', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')],
                             ],
                         ]); ?></div>
                     </form>
@@ -244,14 +245,14 @@ ob_start();
                 <?php endif; ?>
                 <?php if (!$acceptanceAccepted): ?>
                     <?php $renderMigrationActions([
-                        'primary' => [
-                            'label' => 'Corrigir nova condição',
-                            'href' => Url::to('/clientes/upgrade?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')) . '&correction_of=' . (int) ($contract['id'] ?? 0) . '&process_id=' . $processId),
-                        ],
-                        'navigation' => [
-                            ['label' => 'Voltar ao cliente', 'href' => $clientUrl, 'class' => 'button--ghost', 'align' => 'start'],
+                        'back' => ['label' => 'Voltar ao cliente', 'href' => $clientUrl],
+                        'primary' => ['label' => 'Continuar para o aceite', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')],
+                        'more' => [
+                            [
+                                'label' => 'Corrigir nova condição',
+                                'href' => Url::to('/clientes/upgrade?login=' . rawurlencode((string) ($process['mkauth_login'] ?? '')) . '&correction_of=' . (int) ($contract['id'] ?? 0) . '&process_id=' . $processId),
+                            ],
                             ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
-                            ['label' => 'Continuar para o aceite', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')],
                         ],
                     ]); ?>
                 <?php endif; ?>
@@ -272,11 +273,10 @@ ob_start();
                             <label class="field field--span-2"><span>Motivo da correção</span><textarea name="reason" rows="2" required></textarea></label>
                             <p class="field-help field--span-2">A correção atualiza o cadastro local do processo e o mesmo aceite. Nenhum contato do MkAuth é alterado por esta ação.</p>
                             <div class="field--span-2"><?php $renderMigrationActions([
-                                'primary' => ['tag' => 'button', 'type' => 'submit', 'label' => 'Salvar e voltar ao aceite', 'attrs' => ['data-submit-label' => 'Salvando...']],
-                                'navigation' => [
-                                    ['label' => 'Voltar sem alterar', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance'), 'class' => 'button--ghost', 'align' => 'start'],
+                                'back' => ['label' => 'Voltar sem alterar', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')],
+                                'primary' => ['tag' => 'button', 'type' => 'submit', 'label' => 'Continuar', 'attrs' => ['data-submit-label' => 'Salvando...']],
+                                'more' => [
                                     ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
-                                    ['tag' => 'button', 'type' => 'button', 'label' => 'Continuar para execução', 'disabled' => true, 'help' => 'A confirmação do titular ainda está pendente.'],
                                 ],
                             ]); ?></div>
                         </form>
@@ -285,8 +285,7 @@ ob_start();
                         <input type="hidden" name="_csrf" value="<?= $h($csrfToken ?? ''); ?>">
                         <input type="hidden" name="process_id" value="<?= $processId; ?>">
                         <?php if ($acceptanceSent): ?>
-                            <input type="hidden" name="resend_only" value="1">
-                            <p class="field-help">O reenvio reutiliza o mesmo aceite e o mesmo token. Nenhuma nova assinatura será criada.</p>
+                            <p class="field-help">Continuar consulta o estado atual sem reenviar. O reenvio manual reutiliza o mesmo aceite e token.</p>
                         <?php else: ?>
                             <label class="checkbox-field"><input type="checkbox" name="client_absent" value="1" data-client-absent <?= trim((string) ($acceptance['remote_signature_reason'] ?? '')) !== '' ? 'checked' : ''; ?>><span><strong>Solicitar assinatura remota</strong><small>O titular assinará e confirmará o aceite no próprio aparelho.</small></span></label>
                             <label class="field" data-remote-reason hidden><span>Motivo da assinatura remota</span><select name="remote_signature_reason"><option value="">Selecione o motivo</option><?php foreach (['Titular indisponível', 'Atendimento acompanhado por terceiro', 'Solicitação do cliente', 'Assinatura posterior', 'Outro motivo'] as $remoteReasonOption): ?><option value="<?= $h($remoteReasonOption); ?>" <?= strcasecmp(trim((string) ($acceptance['remote_signature_reason'] ?? '')), $remoteReasonOption) === 0 ? 'selected' : ''; ?>><?= $h($remoteReasonOption); ?></option><?php endforeach; ?></select></label>
@@ -302,39 +301,50 @@ ob_start();
                             <input type="hidden" name="phone" value="<?= $h($phone); ?>">
                             <input type="hidden" name="email" value="<?= $h($email); ?>">
                         </div>
-                        <a class="button button--ghost" href="<?= $h(Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance&edit_contact=1')); ?>">Corrigir contato no cadastro</a>
                         <?php if (!empty($notificationDryRun['whatsapp']) && !empty($notificationDryRun['email'])): ?>
                             <p class="alert alert--warning">Homologação: os canais permanecem em dry-run; nenhum envio real será feito.</p>
                         <?php else: ?>
                             <p class="alert alert--warning">Atenção: ao continuar, os canais habilitados fora de dry-run poderão enviar uma mensagem real.</p>
                         <?php endif; ?>
                         <?php $renderMigrationActions([
-                            'primary' => $acceptanceSent
-                                ? ['label' => 'Atualizar confirmação', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')]
-                                : ['tag' => 'button', 'type' => 'submit', 'label' => 'Enviar confirmação', 'attrs' => ['data-submit-label' => 'Enviando...']],
-                            'navigation' => array_values(array_filter([
-                                ['label' => 'Voltar para nova condição', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=migration_data'), 'class' => 'button--ghost', 'align' => 'start'],
+                            'back' => ['label' => 'Voltar para nova condição', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=migration_data')],
+                            'primary' => [
+                                'tag' => 'button',
+                                'type' => 'submit',
+                                'name' => 'acceptance_action',
+                                'value' => 'continue',
+                                'label' => 'Continuar',
+                                'help' => $acceptanceSent
+                                    ? 'Consulta a confirmação sem reenviar e permanece aqui enquanto estiver pendente.'
+                                    : 'Prepara o primeiro envio e permanece aqui aguardando a confirmação do cliente.',
+                                'attrs' => ['data-submit-label' => $acceptanceSent ? 'Verificando...' : 'Enviando...'],
+                            ],
+                            'more' => array_values(array_filter([
+                                $acceptanceSent ? ['tag' => 'button', 'type' => 'submit', 'name' => 'acceptance_action', 'value' => 'verify', 'label' => 'Verificar confirmação', 'attrs' => ['data-submit-label' => 'Verificando...']] : null,
+                                $acceptanceSent ? ['tag' => 'button', 'type' => 'submit', 'name' => 'acceptance_action', 'value' => 'resend', 'label' => 'Reenviar confirmação', 'attrs' => ['data-submit-label' => 'Reenviando...']] : null,
+                                ['label' => 'Corrigir contato no cadastro', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance&edit_contact=1')],
                                 ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
-                                $acceptanceSent ? ['tag' => 'button', 'type' => 'submit', 'label' => 'Reenviar confirmação', 'class' => 'button--ghost', 'attrs' => ['data-submit-label' => 'Reenviando...']] : null,
-                                [
-                                    'tag' => 'button',
-                                    'type' => 'button',
-                                    'label' => 'Continuar para execução',
-                                    'disabled' => true,
-                                    'help' => 'A confirmação do titular ainda está pendente.',
-                                ],
                             ], 'is_array')),
                         ]); ?>
                     </form>
                     <?php endif; ?>
                 <?php else: ?>
-                    <?php $renderMigrationActions([
-                        'primary' => ['label' => 'Continuar para execução', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution')],
-                        'navigation' => array_values(array_filter([
-                            $canOverride ? ['label' => 'Voltar para nova condição', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=migration_data'), 'class' => 'button--ghost', 'align' => 'start'] : null,
-                            ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
-                        ], 'is_array')),
-                    ]); ?>
+                    <form class="migration-acceptance-compact" method="post" action="<?= $h(Url::to('/clientes/migracao/aceite-preparar')); ?>" data-prevent-double-submit>
+                        <input type="hidden" name="_csrf" value="<?= $h($csrfToken ?? ''); ?>">
+                        <input type="hidden" name="process_id" value="<?= $processId; ?>">
+                        <?php $renderMigrationActions([
+                            'back' => ['label' => 'Voltar para nova condição', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=migration_data')],
+                            'primary' => [
+                                'label' => 'Continuar',
+                                'href' => Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution'),
+                                'help' => 'Abre a execução técnica porque o aceite já está confirmado.',
+                            ],
+                            'more' => [
+                                ['tag' => 'button', 'type' => 'submit', 'name' => 'acceptance_action', 'value' => 'verify', 'label' => 'Verificar confirmação', 'attrs' => ['data-submit-label' => 'Verificando...']],
+                                ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
+                            ],
+                        ]); ?>
+                    </form>
                 <?php endif; ?>
             <?php elseif ($currentPhase === 4): ?>
                 <?php $renderCondition(); ?>
@@ -355,17 +365,22 @@ ob_start();
                 <?php if (is_array($dryRun)): ?><section class="process-dry-run"><p><?= $h($dryRun['message'] ?? ''); ?></p><div class="summary-grid"><div class="summary-item"><span>Antes</span><strong><?= $h($dryRun['before']['plan'] ?? '-'); ?></strong></div><div class="summary-item"><span>Depois</span><strong><?= $h($dryRun['after']['plan'] ?? '-'); ?></strong></div><div class="summary-item"><span>Escrita externa</span><strong><?= !empty($dryRun['write_enabled']) ? 'Habilitada' : 'Bloqueada'; ?></strong></div></div></section><?php endif; ?>
                 <form method="post" action="<?= $h(Url::to('/processos/migracao/finalizar-tecnico')); ?>" class="migration-active-form" data-prevent-double-submit>
                     <input type="hidden" name="_csrf" value="<?= $h($csrfToken ?? ''); ?>"><input type="hidden" name="process_id" value="<?= $processId; ?>"><input type="hidden" name="request_id" value="<?= $h(bin2hex(random_bytes(16))); ?>">
-                    <p class="alert alert--warning">Ambiente de testes: escritas externas, notificações e chamado real permanecem bloqueados. Dry-runs não serão registrados como execução real.</p>
+                    <?php if ($externalOperationsBlocked): ?><p class="alert alert--warning">As escritas externas desta release estão bloqueadas. Dry-runs não serão registrados como execução real.</p><?php endif; ?>
                     <p class="page-description">A tentativa retoma da primeira subetapa pendente. Ações já concluídas não são repetidas.</p>
                     <?php $renderMigrationActions([
+                        'back' => ['label' => 'Voltar para execução técnica', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution')],
                         'primary' => [
                             'tag' => 'button',
                             'type' => 'submit',
-                            'label' => $finalizationPending === [] ? 'Finalizar atendimento técnico' : 'Atualizar verificações',
-                            'attrs' => ['data-submit-label' => $finalizationPending === [] ? 'Finalizando atendimento...' : 'Atualizando verificações...'],
+                            'name' => 'finalization_action',
+                            'value' => 'complete',
+                            'label' => 'Concluir migração',
+                            'disabled' => $finalizationPending !== [],
+                            'help' => $finalizationPending !== [] ? 'Existem pendências que impedem a conclusão.' : '',
+                            'attrs' => ['data-submit-label' => 'Concluindo migração...'],
                         ],
-                        'navigation' => [
-                            ['label' => 'Voltar para execução técnica', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=technical_execution'), 'class' => 'button--ghost', 'align' => 'start'],
+                        'more' => [
+                            ['tag' => 'button', 'type' => 'submit', 'name' => 'finalization_action', 'value' => 'refresh', 'label' => 'Atualizar verificações', 'attrs' => ['data-submit-label' => 'Atualizando verificações...']],
                             ['label' => 'Salvar e sair', 'href' => $clientUrl, 'class' => 'button--ghost'],
                         ],
                     ]); ?>
@@ -396,27 +411,25 @@ ob_start();
                         <label class="field field--span-2"><span>Observação técnica (opcional)</span><textarea name="observation" rows="3"><?= $h($technicalExecutionStep['observation'] ?? ''); ?></textarea></label>
                         <?php if (!empty($canOverride)): ?>
                             <div class="field--span-2" data-offline-exception <?= !empty($connection['online']) ? 'hidden' : ''; ?>>
-                                <label class="checkbox-field"><input type="checkbox" name="offline_override" value="1"><span><strong>Continuar com PPPoE offline</strong><small>Exceção gerencial; exige justificativa e permanece visível na Finalização.</small></span></label>
+                                <label class="checkbox-field"><input type="checkbox" name="offline_override" value="1"><span><strong>Autorizar exceção de PPPoE na finalização</strong><small>Sem a exceção, a execução pode avançar, mas a conexão permanece como pendência obrigatória.</small></span></label>
                                 <label class="field"><span>Justificativa da exceção</span><textarea name="offline_justification" rows="2"></textarea></label>
                             </div>
                         <?php endif; ?>
                     </div>
                     <details class="migration-pending-details"><summary>Ficou algo pendente?</summary><div class="form-grid"><label class="field field--span-2"><span>Motivo</span><textarea name="pending_reason" rows="2"></textarea></label><label class="field"><span>Próxima ação</span><input name="next_action"></label><label class="field"><span>Responsável</span><input name="responsible_login"></label><label class="field"><span>Prazo</span><input type="date" name="pending_due_date"></label></div></details>
                     <?php $renderMigrationActions([
-                        'primary' => ['tag' => 'button', 'type' => 'button', 'label' => 'Verificar conexão agora', 'attrs' => ['data-check-connection' => true]],
-                        'navigation' => [
-                            ['label' => 'Voltar para o aceite', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance'), 'class' => 'button--ghost', 'align' => 'start'],
+                        'back' => ['label' => 'Voltar para o aceite', 'href' => Url::to('/processos/migracao?id=' . $processId . '&step=confirm_acceptance')],
+                        'primary' => [
+                            'tag' => 'button',
+                            'type' => 'submit',
+                            'name' => 'continue_to',
+                            'value' => 'finalization',
+                            'label' => 'Continuar para finalização',
+                            'attrs' => ['data-submit-label' => 'Salvando execução...'],
+                        ],
+                        'more' => [
+                            ['tag' => 'button', 'type' => 'button', 'label' => 'Verificar conexão agora', 'attrs' => ['data-check-connection' => true]],
                             ['tag' => 'button', 'type' => 'submit', 'name' => 'continue_to', 'value' => 'exit', 'label' => 'Salvar e sair', 'class' => 'button--ghost', 'attrs' => ['formnovalidate' => true, 'data-submit-label' => 'Salvando...']],
-                            [
-                                'tag' => 'button',
-                                'type' => 'submit',
-                                'name' => 'continue_to',
-                                'value' => 'finalization',
-                                'label' => 'Continuar para finalização',
-                                'disabled' => empty($connection['online']),
-                                'attrs' => ['data-continue-finalization' => true, 'data-submit-label' => 'Concluindo...'],
-                                'help' => empty($connection['online']) ? 'Verifique a conexão ou registre uma exceção autorizada com justificativa.' : '',
-                            ],
                         ],
                     ]); ?>
                 </form>

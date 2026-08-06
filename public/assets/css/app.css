@@ -3700,9 +3700,23 @@ body.client-panel-open {
 
 .migration-actions {
     display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
     gap: 10px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
+}
+
+.migration-actions__back {
+    justify-self: start;
+}
+
+.migration-actions__right {
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
 }
 
 .migration-actions__primary {
@@ -3711,31 +3725,9 @@ body.client-panel-open {
 }
 
 .migration-actions__primary-button {
-    width: 100%;
     min-height: 42px;
     justify-content: center;
     font-weight: 800;
-}
-
-.migration-actions__navigation {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.migration-actions__navigation-item--start {
-    margin-right: auto;
-}
-
-.migration-actions__navigation-item--end,
-.migration-actions__more {
-    margin-left: 0;
-}
-
-.migration-actions__navigation-item {
-    display: grid;
-    gap: 3px;
 }
 
 .migration-actions__help {
@@ -4152,17 +4144,17 @@ body.client-panel-open {
         position: sticky;
         z-index: 5;
         bottom: -12px;
+        grid-template-columns: 1fr;
         margin: 0 -12px -12px;
         padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
         background: rgb(255 255 255 / 96%);
         box-shadow: 0 -8px 22px rgb(15 23 42 / 8%);
     }
-    .migration-actions__navigation { display: grid; grid-template-columns: 1fr 1fr; }
-    .migration-actions__navigation-item,
-    .migration-actions__navigation-item .button,
+    .migration-actions__right { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    .migration-actions__primary,
+    .migration-actions__primary .button,
     .migration-actions__more,
     .migration-actions__more summary { width: 100%; }
-    .migration-actions__navigation-item--start { margin-right: 0; }
     .migration-actions__more[open] > div { position: static; margin-top: 6px; }
     .acceptance-channels-grid,
     .benefit-checkbox-grid,
