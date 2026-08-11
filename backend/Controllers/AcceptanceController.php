@@ -18,6 +18,7 @@ use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
+use App\Services\Clients\ClientPlanSnapshotService;
 use App\Services\Processes\OperationalProcessService;
 
 /**
@@ -496,18 +497,28 @@ final class AcceptanceController
 
         $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
         $planSnapshot = $this->resolvePlanSnapshot((string) (
-            $checkpointData['plano']
+            $checkpointData['plan_uuid']
+            ?? $checkpointData['plan_code']
+            ?? $checkpointData['plan_name']
             ?? $registration['plan_name']
+            ?? $clientProfile['plano_uuid']
             ?? $clientProfile['plano_nome']
             ?? $clientProfile['plano']
+            ?? $checkpointData['plano']
             ?? $contract['plan_name']
             ?? ''
-        ));
+        ), $checkpointData);
         $documentDigits = $this->documentValidationDigits();
         $documentRaw = preg_replace('/\D+/', '', (string) ($registration['cpf_cnpj'] ?? $checkpointData['cpf_cnpj'] ?? ($clientProfile['cpf_cnpj'] ?? ''))) ?? '';
         $documentMasked = $this->maskDocument($documentRaw);
         $documentAvailable = $documentRaw !== '';
         $publicDetails = $this->buildPublicDetails($contract, $registration, $checkpointData, $planSnapshot, $documentMasked, is_array($clientProfile) ? $clientProfile : [], $upgradeSnapshot);
+        $acceptedDisplayedData = $status === 'aceito' ? $this->loadAcceptedDisplayedData($acceptance) : null;
+        if (is_array($acceptedDisplayedData)) {
+            // O documento aceito permanece ancorado na evidência que o cliente
+            // efetivamente viu; o catálogo atual não reescreve esse histórico.
+            $publicDetails = $acceptedDisplayedData;
+        }
         $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
         if ($signaturePath !== null) {
             $publicDetails['assinatura_path'] = $signaturePath;
@@ -1200,14 +1211,14 @@ final class AcceptanceController
         ]);
     }
 
-    private function resolvePlanSnapshot(string $planName): array
+    private function resolvePlanSnapshot(string $planIdentity, array $captured = []): array
     {
-        $planName = trim($planName);
+        $planIdentity = trim($planIdentity);
 
-        if ($planName === '') {
+        if ($planIdentity === '') {
             return [
                 'name' => '',
-                'label' => '-',
+                'label' => 'Plano não localizado no catálogo atual',
                 'value' => null,
                 'source' => 'unknown',
             ];
@@ -1222,37 +1233,41 @@ final class AcceptanceController
             $planRows = [];
         }
 
-        foreach ($planRows as $plan) {
-            $name = trim((string) ($plan['nome'] ?? ''));
-            if ($name === '') {
-                continue;
-            }
-
-            if (strcasecmp($name, $planName) !== 0) {
-                continue;
-            }
-
-            $value = trim((string) ($plan['valor'] ?? ''));
-
+        $resolved = (new ClientPlanSnapshotService())->capture(
+            array_replace($captured, ['plano' => $planIdentity]),
+            $planRows
+        );
+        $name = trim((string) ($resolved['plan_name'] ?? ''));
+        $value = trim((string) ($resolved['plan_value'] ?? ''));
+        if ($name !== '') {
             return [
                 'name' => $name,
-                'label' => $name . ($value !== '' ? ' - R$ ' . number_format((float) str_replace(',', '.', $value), 2, ',', '.') : ''),
+                'label' => $name,
                 'value' => $value !== '' ? (float) str_replace(',', '.', $value) : null,
-                'source' => 'mkauth',
+                'uuid' => (string) ($resolved['plan_uuid'] ?? ''),
+                'code' => (string) ($resolved['plan_code'] ?? ''),
+                'technology' => (string) ($resolved['plan_technology'] ?? ''),
+                'download' => (string) ($resolved['plan_download'] ?? ''),
+                'upload' => (string) ($resolved['plan_upload'] ?? ''),
+                'source' => (string) (($resolved['plan_resolution_status'] ?? '') === 'resolved' ? 'mkauth' : 'snapshot'),
             ];
         }
 
         return [
-            'name' => $planName,
-            'label' => $planName,
+            'name' => '',
+            'label' => 'Plano não localizado no catálogo atual',
             'value' => null,
-            'source' => 'fallback',
+            'source' => 'unknown',
         ];
     }
 
     private function buildPublicDetails(array $contract, ?array $registration, array $checkpointData, array $planSnapshot, string $maskedDocument, array $clientProfile = [], array $upgradeSnapshot = []): array
     {
         $isUpgrade = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
+        $planDisplayName = trim((string) ($planSnapshot['name'] ?? ''));
+        if ($planDisplayName === '') {
+            $planDisplayName = 'Plano não localizado no catálogo atual';
+        }
         $clientProfile = is_array($clientProfile) ? $clientProfile : [];
         $customerName = trim((string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? $registration['client_name'] ?? '-'));
         $customerLogin = trim((string) ($clientProfile['login'] ?? $contract['mkauth_login'] ?? $registration['mkauth_login'] ?? '-'));
@@ -1299,8 +1314,8 @@ final class AcceptanceController
             ],
             'plano' => [
                 'nome' => $isUpgrade
-                    ? (string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'))
-                    : (string) ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'),
+                    ? (string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? $planDisplayName)
+                    : $planDisplayName,
                 'valor_mensal' => $isUpgrade
                     ? (($upgradeSnapshot['new_monthly_value'] ?? null) !== null ? (float) $upgradeSnapshot['new_monthly_value'] : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null))
                     : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null),
@@ -1327,6 +1342,29 @@ final class AcceptanceController
             'upgrade' => $isUpgrade ? $this->normalizeUpgradeSnapshotForDisplay($upgradeSnapshot) : [],
             'termo_versao' => (string) ($contract['termo_versao'] ?? $this->config->get('contracts.term_version', '2026.1')),
         ];
+    }
+
+    private function loadAcceptedDisplayedData(?array $acceptance): ?array
+    {
+        if (!is_array($acceptance) || (string) ($acceptance['status'] ?? '') !== 'aceito') {
+            return null;
+        }
+
+        $relativePath = trim((string) ($acceptance['evidence_json_path'] ?? ''));
+        if ($relativePath === '') {
+            return null;
+        }
+
+        $root = realpath($this->projectRootPath());
+        $path = realpath($this->projectRootPath() . '/' . ltrim($relativePath, '/'));
+        if ($root === false || $path === false || !str_starts_with($path, $root . DIRECTORY_SEPARATOR) || !is_file($path)) {
+            return null;
+        }
+
+        $payload = json_decode((string) file_get_contents($path), true);
+        $displayedData = is_array($payload) ? ($payload['displayed_data'] ?? null) : null;
+
+        return is_array($displayedData) ? $displayedData : null;
     }
 
     private function resolveExistingSignaturePath(?array $acceptance, ?array $registration = null, array $checkpointData = []): ?string

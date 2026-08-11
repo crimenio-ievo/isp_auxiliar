@@ -222,6 +222,9 @@ ob_start();
                     <?php endforeach; ?>
                 </select>
                 <small class="field-help" data-plan-help>Mostrando apenas planos ativos e compatíveis com tipo de instalação e Local DICI.</small>
+                <?php if (trim((string) ($form['plan_resolution_warning'] ?? '')) !== ''): ?>
+                    <small class="field-error"><?= htmlspecialchars((string) $form['plan_resolution_warning'], ENT_QUOTES, 'UTF-8'); ?></small>
+                <?php endif; ?>
                 <?= $fieldError('plano'); ?>
             </label>
 

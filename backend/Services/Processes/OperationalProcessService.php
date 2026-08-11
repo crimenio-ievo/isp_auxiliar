@@ -278,18 +278,22 @@ final class OperationalProcessService
                     );
                 }
             }
+            $documentPayload = [
+                'contract' => $this->contractSnapshot($contract),
+                'process_type' => $processType,
+                'document_version' => $documentVersion,
+                'term_hash' => (string) ($acceptance['termo_hash'] ?? ''),
+                'prepared_at' => (string) ($acceptance['created_at'] ?? date('Y-m-d H:i:s')),
+            ];
+            if (is_array($context['plan_snapshot'] ?? null) && $context['plan_snapshot'] !== []) {
+                $documentPayload['plan'] = $context['plan_snapshot'];
+            }
             $documentId = $this->processRepository->upsertDocument(
                 $processId,
                 $contractId,
                 $documentType,
                 $documentVersion !== '' ? $documentVersion : '2026.1',
-                [
-                    'contract' => $this->contractSnapshot($contract),
-                    'process_type' => $processType,
-                    'document_version' => $documentVersion,
-                    'term_hash' => (string) ($acceptance['termo_hash'] ?? ''),
-                    'prepared_at' => (string) ($acceptance['created_at'] ?? date('Y-m-d H:i:s')),
-                ],
+                $documentPayload,
                 $acceptanceId
             );
             if ($documentId > 0) {
@@ -1201,6 +1205,11 @@ final class OperationalProcessService
         }
         if ($snapshot !== []) {
             $metadata['migration'] = $snapshot;
+        }
+
+        $planSnapshot = $context['plan_snapshot'] ?? null;
+        if (is_array($planSnapshot) && $planSnapshot !== []) {
+            $metadata['plan'] = $planSnapshot;
         }
 
         return $metadata;

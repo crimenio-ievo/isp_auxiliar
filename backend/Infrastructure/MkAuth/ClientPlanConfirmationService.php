@@ -48,6 +48,9 @@ final class ClientPlanConfirmationService
                     'code' => $code,
                     'name' => $name,
                     'value' => trim((string) ($plan['valor'] ?? '')),
+                    'technology' => trim((string) ($plan['tecnologia'] ?? '')),
+                    'download' => trim((string) ($plan['veldown'] ?? '')),
+                    'upload' => trim((string) ($plan['velup'] ?? '')),
                     // A API nativa desta versão recebe o nome oficial; a
                     // confirmação posterior usa UUID quando ele está disponível.
                     'payload_value' => $name,

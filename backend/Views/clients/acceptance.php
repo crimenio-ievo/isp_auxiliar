@@ -10,7 +10,13 @@ $clientLogin = (string) ($draft['login'] ?? '');
 $clientCpf = (string) ($draft['cpf_cnpj'] ?? '');
 $clientCity = (string) ($draft['cidade'] ?? '');
 $clientState = (string) ($draft['estado'] ?? '');
-$clientPlan = (string) ($draft['plano'] ?? '');
+$clientPlan = trim((string) ($draft['plan_name'] ?? ''));
+$clientPlan = $clientPlan !== '' ? $clientPlan : 'Plano não localizado no catálogo atual';
+$clientPlanValue = trim((string) ($draft['plan_value'] ?? ''));
+$clientPlanValueLabel = $clientPlanValue !== ''
+    ? 'R$ ' . number_format((float) str_replace(',', '.', $clientPlanValue), 2, ',', '.') . '/mês'
+    : '';
+$clientPlanWarning = trim((string) ($draft['plan_resolution_warning'] ?? ''));
 $clientAddress = trim((string) ($draft['endereco'] ?? '') . ' ' . (string) ($draft['numero'] ?? ''));
 $clientNeighborhood = (string) ($draft['bairro'] ?? '');
 $clientCep = (string) ($draft['cep'] ?? '');
@@ -94,6 +100,9 @@ ob_start();
             <div class="summary-item">
                 <span>Plano</span>
                 <strong><?= htmlspecialchars($clientPlan, ENT_QUOTES, 'UTF-8'); ?></strong>
+                <?php if ($clientPlanValueLabel !== ''): ?>
+                    <small><?= htmlspecialchars($clientPlanValueLabel, ENT_QUOTES, 'UTF-8'); ?></small>
+                <?php endif; ?>
             </div>
             <div class="summary-item">
                 <span>CEP</span>
@@ -108,6 +117,13 @@ ob_start();
                 <strong><?= htmlspecialchars(trim($clientAddress . ' - ' . $clientNeighborhood), ENT_QUOTES, 'UTF-8'); ?></strong>
             </div>
         </div>
+
+        <?php if ($clientPlanWarning !== ''): ?>
+            <div class="status-card status-card--warning" style="margin-top: 16px;">
+                <strong>Plano requer conferência técnica</strong>
+                <small><?= htmlspecialchars($clientPlanWarning, ENT_QUOTES, 'UTF-8'); ?></small>
+            </div>
+        <?php endif; ?>
 
         <div class="acceptance-term">
             <p class="section-heading__eyebrow">Termo de aceite</p>

@@ -30,6 +30,7 @@ use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\Contracts\AcceptanceEvidenceService;
 use App\Services\Commercial\UpgradeBenefitService;
 use App\Services\Clients\ClientCompletionValidator;
+use App\Services\Clients\ClientPlanSnapshotService;
 use App\Services\Processes\OperationalProcessService;
 use App\Services\Notifications\NotificationTemplateService;
 
@@ -1249,12 +1250,14 @@ final class ClientController
         }
 
         $cities = $this->loadCities();
+        $plans = $this->loadPlans();
         $draftId = trim((string) $request->query('draft', ''));
         $checkpointToken = trim((string) $request->query('token', ''));
         $formData = $this->loadFormDraft();
         $formErrors = is_array($_SESSION['client_create_errors'] ?? null) ? $_SESSION['client_create_errors'] : [];
         unset($_SESSION['client_create_errors']);
         $draftMedia = [];
+        $draftRecord = null;
 
         if ($draftId !== '') {
             $draftRecord = $this->loadDraftRecord($draftId);
@@ -1274,6 +1277,14 @@ final class ClientController
                 }
                 $draftId = $checkpointToken;
             }
+        }
+
+        if ($formData !== []) {
+            $resolvedFormData = $this->captureClientPlanSnapshot($formData, $plans);
+            if (is_array($draftRecord) && $resolvedFormData !== $formData) {
+                $this->saveDraft($resolvedFormData, $draftId, $checkpointToken !== '' ? $checkpointToken : null);
+            }
+            $formData = $resolvedFormData;
         }
 
         $dueDays = $this->loadDueDays();
@@ -1297,7 +1308,7 @@ final class ClientController
             'draftKey' => $draftKey,
             'clearDraftKeys' => $clearDraftKeys,
             'skipDraftRestore' => $skipDraftRestore,
-            'plans' => $this->loadPlans(),
+            'plans' => $plans,
             'dueDays' => $dueDays,
             'defaultDueDay' => $this->suggestDueDay($dueDays),
             'defaultPassword' => '13v0',
@@ -1334,7 +1345,8 @@ final class ClientController
 
         $uploadedPhotoCount = $this->countUploadedPhotos($request);
         $hasExistingPhotos = $existingDraftPhotos > 0 || ($editingCheckpoint && $this->hasStoredEvidencePhotos((string) ($originalCheckpoint['evidence_ref'] ?? '')));
-        $data = $this->collectFormData($request);
+        $plans = $this->loadPlans();
+        $data = $this->captureClientPlanSnapshot($this->collectFormData($request), $plans);
         $this->saveFormDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
         $errors = $this->validateDraft($data, $request, $originalFormData, $editingCheckpoint, $hasExistingPhotos);
 
@@ -1400,6 +1412,11 @@ final class ClientController
             Flash::set('error', 'Nao foi possivel localizar os dados iniciais do cliente.');
             return Response::redirect('/clientes/novo');
         }
+        $resolvedDraft = $this->captureClientPlanSnapshot($draft, $this->loadPlans());
+        if ($resolvedDraft !== $draft && is_array($draftRecord)) {
+            $this->saveDraft($resolvedDraft, $draftId, (string) ($draftRecord['checkpoint_token'] ?? ''));
+        }
+        $draft = $resolvedDraft;
         $checkpointToken = '';
         $detectedEmail = strtolower(trim((string) ($draft['email_original'] ?? $draft['email'] ?? '')));
         $hasRealEmail = $detectedEmail !== '' && $detectedEmail !== 'cliente@ievo.com.br';
@@ -1453,6 +1470,7 @@ final class ClientController
             Flash::set('error', 'A sessão do aceite expirou. Refaça o cadastro inicial.');
             return Response::redirect('/clientes/novo');
         }
+        $draft = $this->captureClientPlanSnapshot($draft, $this->loadPlans());
 
         $acceptanceData = $this->collectAcceptanceData($request);
         $data = array_merge($draft, $acceptanceData);
@@ -1612,8 +1630,15 @@ final class ClientController
                 'status' => 'awaiting_connection',
                 'login' => (string) ($payload['login'] ?? ''),
                 'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
-                'plan' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
-                'form_data' => $draft,
+                'plan' => (string) ($data['plan_name'] ?? $payload['plano'] ?? ''),
+                'plan_uuid' => (string) ($data['plan_uuid'] ?? ''),
+                'plan_code' => (string) ($data['plan_code'] ?? ''),
+                'plan_name' => (string) ($data['plan_name'] ?? ''),
+                'plan_value' => (string) ($data['plan_value'] ?? ''),
+                'plan_technology' => (string) ($data['plan_technology'] ?? ''),
+                'plan_download' => (string) ($data['plan_download'] ?? ''),
+                'plan_upload' => (string) ($data['plan_upload'] ?? ''),
+                'form_data' => $data,
                 'telefone_original' => (string) ($data['telefone_original'] ?? $data['celular'] ?? ''),
                 'telefone_cliente' => (string) ($data['telefone_cliente'] ?? $data['celular'] ?? ''),
                 'email_original' => (string) ($data['email_original'] ?? ''),
@@ -3610,6 +3635,16 @@ final class ClientController
         return new ClientCompletionValidator();
     }
 
+    private function captureClientPlanSnapshot(array $data, ?array $plans = null): array
+    {
+        return (new ClientPlanSnapshotService())->capture($data, $plans ?? $this->loadPlans());
+    }
+
+    private function clientPlanSnapshot(array $data): array
+    {
+        return (new ClientPlanSnapshotService())->snapshot($data);
+    }
+
     private function collectAcceptanceData(Request $request): array
     {
         return [
@@ -3645,6 +3680,7 @@ final class ClientController
         $normalized = array_map(function (array $plan): array {
             $name = trim((string) ($plan['nome'] ?? ''));
             $uuid = trim((string) ($plan['uuid_plano'] ?? ''));
+            $code = trim((string) ($plan['codigo'] ?? $plan['id'] ?? ''));
             $value = trim((string) ($plan['valor'] ?? ''));
             $technologyCode = trim((string) ($plan['tecnologia'] ?? ''));
             $technology = $this->technologyMapper->describe($technologyCode);
@@ -3672,6 +3708,8 @@ final class ClientController
 
             return [
                 'id' => $uuid !== '' ? $uuid : $name,
+                'uuid' => $uuid,
+                'code' => $code,
                 'name' => $name,
                 'label' => $label,
                 'value' => $value,
@@ -4160,6 +4198,7 @@ final class ClientController
                 'cidade' => $data['cidade'] ?? '',
                 'estado' => $data['estado'] ?? '',
             ],
+            'plan' => $this->clientPlanSnapshot($data),
             'accepted_at' => date('Y-m-d H:i:s'),
             'accepted_by' => $this->resolveUser()['name'] ?? 'Operador',
             'ip' => (string) $request->server('REMOTE_ADDR', ''),
@@ -4951,7 +4990,7 @@ final class ClientController
                 'mkauth_login' => (string) ($payload['login'] ?? $data['login'] ?? ''),
                 'client_name' => (string) ($payload['nome'] ?? $data['nome_completo'] ?? ''),
                 'cpf_cnpj' => (string) ($payload['cpf_cnpj'] ?? $data['cpf_cnpj'] ?? ''),
-                'plan_name' => (string) ($payload['plano'] ?? $data['plano'] ?? ''),
+                'plan_name' => (string) ($data['plan_name'] ?? $payload['plano'] ?? ''),
                 'status' => 'awaiting_connection',
                 'evidence_ref' => (string) ($data['evidence_ref'] ?? ''),
                 'evidence_url' => (string) ($data['evidence_url'] ?? ''),
@@ -5117,6 +5156,7 @@ final class ClientController
                         'email' => (string) ($data['email_original'] ?? $data['email'] ?? ''),
                         'registration_id' => $registrationId,
                         'signature_mode' => $this->normalizeBoolean((string) ($data['assinatura_remota'] ?? '0')) ? 'remote' : 'local',
+                        'plan_snapshot' => $this->clientPlanSnapshot($data),
                     ],
                     $this->resolveUser()
                 );
