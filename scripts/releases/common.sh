@@ -208,7 +208,10 @@ release_apply_migrations() {
     local target="$1"
     local pending=()
     mapfile -t pending < <(release_pending_migrations "${target}")
-    [[ ${#pending[@]} -gt 0 ]] || return
+    if [[ ${#pending[@]} -eq 0 ]]; then
+        release_log "aplicação de migrations: nenhuma migration pendente"
+        return 0
+    fi
     [[ "${CONFIRM_MIGRATIONS}" == true ]] || release_die "migrations pendentes sem confirmação"
     release_run php "${target}/scripts/apply_migrations.php"
 }
