@@ -16,10 +16,15 @@ VALUES
 ON DUPLICATE KEY UPDATE label = VALUES(label), available = VALUES(available), adapter_key = VALUES(adapter_key), updated_at = NOW();
 
 ALTER TABLE message_templates ADD COLUMN description VARCHAR(255) NULL AFTER purpose;
+
+-- Coexistência temporária: a Stable legada ainda insere sem provider_id.
+-- O NOT NULL e a remoção da chave (name, channel) só podem ocorrer depois que
+-- nenhum código legado estiver escrevendo no banco compartilhado.
 ALTER TABLE message_templates ADD COLUMN provider_id BIGINT UNSIGNED NULL AFTER id;
-UPDATE message_templates SET provider_id = (SELECT MIN(id) FROM providers) WHERE provider_id IS NULL;
-ALTER TABLE message_templates MODIFY provider_id BIGINT UNSIGNED NOT NULL;
-ALTER TABLE message_templates DROP INDEX message_templates_name_channel;
+UPDATE message_templates
+SET provider_id = (SELECT MIN(id) FROM providers)
+WHERE provider_id IS NULL
+  AND (SELECT COUNT(*) FROM providers) = 1;
 ALTER TABLE message_templates ADD UNIQUE KEY message_templates_provider_name_channel (provider_id, name, channel);
 ALTER TABLE message_templates ADD CONSTRAINT fk_message_templates_provider FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE RESTRICT;
 ALTER TABLE message_templates ADD COLUMN subject VARCHAR(255) NULL AFTER description;

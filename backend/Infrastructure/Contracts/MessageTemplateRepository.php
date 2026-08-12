@@ -39,7 +39,10 @@ final class MessageTemplateRepository
     public function findById(int $id): ?array
     {
         return $this->database->fetchOne(
-            'SELECT * FROM message_templates WHERE id = :id AND provider_id = :provider_id LIMIT 1',
+            'SELECT * FROM message_templates
+             WHERE id = :id AND (provider_id = :provider_id OR provider_id IS NULL)
+             ORDER BY provider_id IS NULL ASC
+             LIMIT 1',
             ['id' => $id, 'provider_id' => $this->providerId()]
         );
     }
@@ -47,7 +50,12 @@ final class MessageTemplateRepository
     public function findByPurpose(string $purpose, string $channel = 'whatsapp'): ?array
     {
         return $this->database->fetchOne(
-            'SELECT * FROM message_templates WHERE provider_id = :provider_id AND purpose = :purpose AND channel = :channel LIMIT 1',
+            'SELECT * FROM message_templates
+             WHERE (provider_id = :provider_id OR provider_id IS NULL)
+               AND purpose = :purpose
+               AND channel = :channel
+             ORDER BY provider_id IS NULL ASC, id ASC
+             LIMIT 1',
             [
                 'provider_id' => $this->providerId(),
                 'purpose' => trim($purpose),
@@ -59,7 +67,12 @@ final class MessageTemplateRepository
     public function findByName(string $name, string $channel = 'whatsapp'): ?array
     {
         return $this->database->fetchOne(
-            'SELECT * FROM message_templates WHERE provider_id = :provider_id AND name = :name AND channel = :channel LIMIT 1',
+            'SELECT * FROM message_templates
+             WHERE (provider_id = :provider_id OR provider_id IS NULL)
+               AND name = :name
+               AND channel = :channel
+             ORDER BY provider_id IS NULL ASC, id ASC
+             LIMIT 1',
             [
                 'provider_id' => $this->providerId(),
                 'name' => trim($name),
@@ -90,7 +103,7 @@ final class MessageTemplateRepository
                      updated_by_user_id = :updated_by_user_id,
                      updated_by_login = :updated_by_login,
                      updated_at = NOW()
-                 WHERE id = :id AND provider_id = :provider_id',
+                 WHERE id = :id AND (provider_id = :provider_id OR provider_id IS NULL)',
                 array_merge(
                     ['id' => (int) $existing['id']],
                     $this->normalizeData(array_merge($data, ['name' => $name, 'channel' => $channel]), false)
@@ -130,13 +143,17 @@ final class MessageTemplateRepository
     {
         if ($channel === null || trim($channel) === '') {
             return $this->database->fetchAll(
-                'SELECT * FROM message_templates WHERE provider_id = :provider_id AND active = 1 ORDER BY name ASC',
+                'SELECT * FROM message_templates
+                 WHERE (provider_id = :provider_id OR provider_id IS NULL) AND active = 1
+                 ORDER BY name ASC',
                 ['provider_id' => $this->providerId()]
             );
         }
 
         return $this->database->fetchAll(
-            'SELECT * FROM message_templates WHERE provider_id = :provider_id AND active = 1 AND channel = :channel ORDER BY name ASC',
+            'SELECT * FROM message_templates
+             WHERE (provider_id = :provider_id OR provider_id IS NULL) AND active = 1 AND channel = :channel
+             ORDER BY name ASC',
             ['provider_id' => $this->providerId(), 'channel' => trim($channel)]
         );
     }
@@ -159,7 +176,7 @@ final class MessageTemplateRepository
                  updated_by_user_id = :updated_by_user_id,
                  updated_by_login = :updated_by_login,
                  updated_at = NOW()
-             WHERE provider_id = :provider_id AND name = :name AND channel = :channel',
+             WHERE (provider_id = :provider_id OR provider_id IS NULL) AND name = :name AND channel = :channel',
             array_merge(
                 [
                     'name' => trim($name),
@@ -174,7 +191,9 @@ final class MessageTemplateRepository
     public function listAll(): array
     {
         return $this->database->fetchAll(
-            'SELECT * FROM message_templates WHERE provider_id = :provider_id ORDER BY purpose, channel, name',
+            'SELECT * FROM message_templates
+             WHERE provider_id = :provider_id OR provider_id IS NULL
+             ORDER BY purpose, channel, name',
             ['provider_id' => $this->providerId()]
         );
     }
@@ -212,7 +231,7 @@ final class MessageTemplateRepository
              SET subject = :subject, body = :body, enabled_channels_json = :enabled_channels_json,
                  active = :active, version = :version, updated_by_user_id = :updated_by_user_id,
                  updated_by_login = :updated_by_login, updated_at = NOW()
-             WHERE id = :id AND provider_id = :provider_id',
+             WHERE id = :id AND (provider_id = :provider_id OR provider_id IS NULL)',
             [
                 'id' => $id,
                 'provider_id' => $this->providerId(),
