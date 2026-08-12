@@ -30,6 +30,7 @@ foreach ($scripts as $script) {
 }
 
 $common = (string) file_get_contents($root . '/scripts/releases/common.sh');
+$migrationAuditor = (string) file_get_contents($root . '/scripts/releases/migration_auditor.php');
 $deploy = (string) file_get_contents($root . '/scripts/releases/deploy_beta.sh');
 $promote = (string) file_get_contents($root . '/scripts/releases/promote_beta_to_stable.sh');
 $rollbackBeta = (string) file_get_contents($root . '/scripts/releases/rollback_beta.sh');
@@ -39,6 +40,8 @@ $health = (string) file_get_contents($root . '/scripts/releases/release_health_c
 $assert(str_contains($common, 'release_acquire_lock') && str_contains($common, 'flock -n'), 'Lock exclusivo não foi implementado.');
 $assert(str_contains($common, 'release_backup_database') && str_contains($common, '--single-transaction'), 'Backup transacional não foi implementado.');
 $assert(str_contains($common, 'release_audit_migrations') && str_contains($common, 'release_run_tests'), 'Auditoria de migrations ou testes ausentes.');
+$assert(str_contains($common, 'release_migration_is_compatible') && str_contains($common, 'migration_auditor.php'), 'Auditor compartilhado de SQL executável não foi integrado.');
+$assert(str_contains($migrationAuditor, 'release_sql_executable_statements') && str_contains($migrationAuditor, 'release_migration_policy_violations'), 'Normalização SQL ou política destrutiva ausente.');
 $assert(str_contains($common, 'release_atomic_switch') && str_contains($common, 'mv -Tf'), 'Troca atômica de symlink ausente.');
 $assert(str_contains($common, 'EU_CONFIRM_REAL_OPERATIONS') && str_contains($common, 'MKAUTH_WRITE_ENABLED false'), 'Operações reais não exigem dupla confirmação ou não são seguras por padrão.');
 $assert(str_contains($common, 'release_seal_immutable_code') && str_contains($common, 'chmod 444'), 'Release de código não é selada como imutável.');

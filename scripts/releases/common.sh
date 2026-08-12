@@ -8,6 +8,7 @@ ENABLE_REAL_OPERATIONS=false
 REAL_OPERATIONS_CONFIRMATION=""
 RELEASE_LOG_FILE=""
 RELEASE_LOCK_FD=9
+RELEASE_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 release_log() {
     local line
@@ -149,6 +150,11 @@ release_pending_migrations() {
     ' "${target}"
 }
 
+release_migration_is_compatible() {
+    local file="$1"
+    php "${RELEASE_COMMON_DIR}/migration_auditor.php" "${file}"
+}
+
 release_audit_migrations() {
     local target="$1"
     local pending=()
@@ -160,7 +166,7 @@ release_audit_migrations() {
     local file
     for file in "${pending[@]}"; do
         [[ -f "${file}" ]] || release_die "migration pendente não localizada"
-        if grep -Eiq '\b(DROP|TRUNCATE|RENAME)\b|ALTER[[:space:]]+TABLE.*\b(CHANGE|MODIFY)\b|ADD[[:space:]]+COLUMN[^;]*(NOT[[:space:]]+NULL)([^;]*DEFAULT[[:space:]]+NULL)?' "${file}"; then
+        if ! release_migration_is_compatible "${file}"; then
             release_die "migration pendente incompatível detectada: $(basename "${file}")"
         fi
         release_log "migration pendente classificada como aditiva para revisão: $(basename "${file}")"
