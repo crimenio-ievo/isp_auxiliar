@@ -42,6 +42,13 @@ $assert(str_contains($common, 'release_backup_database') && str_contains($common
 $assert(str_contains($common, 'release_audit_migrations') && str_contains($common, 'release_run_tests'), 'Auditoria de migrations ou testes ausentes.');
 $assert(str_contains($common, 'release_migration_is_compatible') && str_contains($common, 'migration_auditor.php'), 'Auditor compartilhado de SQL executável não foi integrado.');
 $assert(str_contains($migrationAuditor, 'release_sql_executable_statements') && str_contains($migrationAuditor, 'release_migration_policy_violations'), 'Normalização SQL ou política destrutiva ausente.');
+$assert(str_contains($common, 'release_run_smoke_test')
+    && str_contains($common, 'release_prepare_smoke_sandbox')
+    && str_contains($common, 'release_cleanup_smoke_sandbox')
+    && str_contains($common, 'APP_ENV=test')
+    && str_contains($common, 'MKAUTH_WRITE_ENABLED=false')
+    && str_contains($common, 'AI_REAL_CALLS_ENABLED=false'), 'Runner não isola processo e filesystem dos Smoke Tests.');
+$assert(substr_count($common, 'release_write_env_setting "${target_env}" AI_') === 3, 'Preparo da release não desliga todas as formas de IA.');
 $assert(str_contains($common, 'release_atomic_switch') && str_contains($common, 'mv -Tf'), 'Troca atômica de symlink ausente.');
 $assert(str_contains($common, 'EU_CONFIRM_REAL_OPERATIONS') && str_contains($common, 'MKAUTH_WRITE_ENABLED false'), 'Operações reais não exigem dupla confirmação ou não são seguras por padrão.');
 $assert(str_contains($common, 'release_seal_immutable_code') && str_contains($common, 'chmod 444'), 'Release de código não é selada como imutável.');

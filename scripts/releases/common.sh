@@ -126,13 +126,14 @@ release_prepare_env() {
     release_write_env_setting "${target_env}" APP_RELEASE_ID "${release_id}"
     release_write_env_setting "${target_env}" APP_RELEASE_COMMIT "${commit}"
     release_write_env_setting "${target_env}" APP_RELEASE_BUILD_DATE "$(date -u +%FT%TZ)"
+    release_write_env_setting "${target_env}" AI_ENABLED false
+    release_write_env_setting "${target_env}" AI_ACTIONS_ENABLED false
+    release_write_env_setting "${target_env}" AI_REAL_CALLS_ENABLED false
     if [[ "${ENABLE_REAL_OPERATIONS}" == false ]]; then
         release_write_env_setting "${target_env}" MKAUTH_WRITE_ENABLED false
         release_write_env_setting "${target_env}" EVOTRIX_DRY_RUN true
         release_write_env_setting "${target_env}" EMAIL_DRY_RUN true
         release_write_env_setting "${target_env}" MKAUTH_TICKET_DRY_RUN true
-        release_write_env_setting "${target_env}" AI_ENABLED false
-        release_write_env_setting "${target_env}" AI_ACTIONS_ENABLED false
     fi
 }
 
@@ -240,10 +241,99 @@ release_backup_current() {
 
 release_run_tests() {
     local target="$1"
+    local validation_target="${target}"
+    local smoke_root=""
+    local status=0
+
+    if [[ "${DRY_RUN}" == false ]]; then
+        smoke_root="$(mktemp -d /tmp/isp-auxiliar-release-smoke-XXXXXX)"
+        chmod 700 "${smoke_root}"
+        trap 'release_cleanup_smoke_sandbox "${smoke_root}"' RETURN
+        release_prepare_smoke_sandbox "${target}" "${smoke_root}"
+        validation_target="${smoke_root}"
+    fi
+
     local test
     while IFS= read -r test; do
-        release_run php "${test}"
-    done < <(find "${target}/tests/Feature" -maxdepth 1 -type f -name '*Smoke.php' | sort)
+        if release_run_smoke_test "${test}"; then
+            continue
+        else
+            status=$?
+            break
+        fi
+    done < <(find "${validation_target}/tests/Feature" -maxdepth 1 -type f -name '*Smoke.php' | sort)
+
+    if [[ -n "${smoke_root}" ]]; then
+        release_cleanup_smoke_sandbox "${smoke_root}"
+        smoke_root=""
+        trap - RETURN
+    fi
+
+    return "${status}"
+}
+
+release_prepare_smoke_sandbox() {
+    local source="$1"
+    local sandbox="$2"
+    release_require_safe_dir "${source}"
+    release_require_safe_dir "${sandbox}"
+    release_require_command tar
+    release_log "preparando sandbox efêmero e local para os Smoke Tests"
+
+    tar \
+        --exclude='./.env' \
+        --exclude='./storage/contracts' \
+        --exclude='./storage/uploads' \
+        --exclude='./storage/installations' \
+        --exclude='./storage/sessions' \
+        --exclude='./storage/cache' \
+        --exclude='./logs' \
+        --exclude='./tmp' \
+        -C "${source}" -cf - . | tar -C "${sandbox}" -xf -
+
+    install -d -m 700 \
+        "${sandbox}/storage/contracts" \
+        "${sandbox}/storage/uploads" \
+        "${sandbox}/storage/installations" \
+        "${sandbox}/storage/sessions" \
+        "${sandbox}/storage/cache" \
+        "${sandbox}/logs" \
+        "${sandbox}/tmp"
+    [[ -f "${source}/.env" ]] && install -m 600 "${source}/.env" "${sandbox}/.env"
+
+    local config_file
+    for config_file in config.json config.example.json; do
+        if [[ -f "${source}/storage/contracts/${config_file}" ]]; then
+            install -m 600 \
+                "${source}/storage/contracts/${config_file}" \
+                "${sandbox}/storage/contracts/${config_file}"
+        fi
+    done
+}
+
+release_cleanup_smoke_sandbox() {
+    local sandbox="${1:-}"
+    [[ "${sandbox}" == /tmp/isp-auxiliar-release-smoke-* ]] \
+        || release_die "sandbox Smoke fora do padrão seguro"
+    [[ -d "${sandbox}" ]] || return
+    rm -rf -- "${sandbox}"
+}
+
+release_run_smoke_test() {
+    local test="$1"
+    release_log "smoke isolado: php ${test}"
+    if [[ "${DRY_RUN}" == false ]]; then
+        env \
+            APP_ENV=test \
+            MKAUTH_WRITE_ENABLED=false \
+            EVOTRIX_DRY_RUN=true \
+            EMAIL_DRY_RUN=true \
+            MKAUTH_TICKET_DRY_RUN=true \
+            AI_ENABLED=false \
+            AI_ACTIONS_ENABLED=false \
+            AI_REAL_CALLS_ENABLED=false \
+            php "${test}"
+    fi
 }
 
 release_prepare_storage_links() {
