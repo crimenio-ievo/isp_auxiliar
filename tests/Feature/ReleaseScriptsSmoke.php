@@ -36,6 +36,8 @@ $promote = (string) file_get_contents($root . '/scripts/releases/promote_beta_to
 $rollbackBeta = (string) file_get_contents($root . '/scripts/releases/rollback_beta.sh');
 $rollbackStable = (string) file_get_contents($root . '/scripts/releases/rollback_stable.sh');
 $health = (string) file_get_contents($root . '/scripts/releases/release_health_check.sh');
+$diagnosticPath = $root . '/scripts/releases/release_smoke_diagnostic.sh';
+$diagnostic = (string) file_get_contents($diagnosticPath);
 
 $assert(str_contains($common, 'release_acquire_lock') && str_contains($common, 'flock -n'), 'Lock exclusivo não foi implementado.');
 $assert(str_contains($common, 'release_backup_database') && str_contains($common, '--single-transaction'), 'Backup transacional não foi implementado.');
@@ -63,6 +65,15 @@ $assert(str_contains($promote, 'release_validate_manifest_channel "${BETA_RELEAS
 $assert(!str_contains($rollbackBeta, 'apply_migrations.php') && !str_contains($rollbackStable, 'apply_migrations.php'), 'Rollback tenta reverter ou aplicar banco automaticamente.');
 $assert(str_contains($rollbackBeta, 'canal Beta') && str_contains($rollbackStable, 'canal Stable'), 'Rollback não restringe o canal alvo.');
 $assert(str_contains($health, '/api/health') && str_contains($health, '/api/release') && str_contains($health, 'external_writes_enabled'), 'Health check não valida aplicação, release e bloqueio externo.');
+$assert(is_file($diagnosticPath) && is_executable($diagnosticPath), 'Runner diagnóstico ausente ou não executável.');
+$assert(str_contains($diagnostic, 'for test in "${tests[@]}"')
+    && str_contains($diagnostic, 'resultado')
+    && !str_contains($deploy, 'release_smoke_diagnostic'), 'Runner diagnóstico não continua após falhas ou foi acoplado ao deploy real.');
+$assert(str_contains($common, 'status=$?') && str_contains($common, 'break'), 'Runner real deixou de operar em modo fail-fast.');
+$diagnosticOutput = [];
+$diagnosticStatus = 0;
+exec('bash -n ' . escapeshellarg($diagnosticPath) . ' 2>&1', $diagnosticOutput, $diagnosticStatus);
+$assert($diagnosticStatus === 0, 'Sintaxe Bash inválida no runner diagnóstico.');
 
 $runBash = static function (string $script, array $arguments = []): array {
     $command = 'bash -c ' . escapeshellarg($script) . ' --';

@@ -27,6 +27,20 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 $rootPath = dirname(__DIR__, 2);
 $app = bootstrapApplication();
+$configuredAdhesion = 1375.50;
+$configItems = $app->config()->all();
+$configItems['contracts']['commercial'] = array_replace(
+    (array) ($configItems['contracts']['commercial'] ?? []),
+    [
+        'valor_adesao_padrao' => $configuredAdhesion,
+        'modo_isencao_adesao_migracao_radio_fibra' => 'automatic',
+        'isentar_adesao_migracao_radio_fibra' => true,
+        'fidelidade_automatica_migracao' => true,
+        'fidelidade_automatica_upgrade' => false,
+        'fidelidade_meses_padrao' => 12,
+    ]
+);
+$testConfig = new Config($configItems);
 $database = new Database($app->config());
 $pdo = $database->pdo();
 $local = new LocalRepository($database, (string) Env::get('APP_PROVIDER_KEY', 'default'));
@@ -50,7 +64,7 @@ $check = static function (int $number, bool $condition, string $message) use (&$
     $checks[$number] = $message;
 };
 
-$contractData = static function (string $login, string $type = 'upgrade_migracao', array $overrides = []): array {
+$contractData = static function (string $login, string $type = 'upgrade_migracao', array $overrides = []) use ($configuredAdhesion): array {
     return array_replace([
         'client_id' => null,
         'mkauth_login' => $login,
@@ -80,9 +94,9 @@ $contractData = static function (string $login, string $type = 'upgrade_migracao
             'new_technology' => 'Fibra até o imóvel (FTTH)',
             'new_technology_family' => 'fibra',
             'new_monthly_value' => 100,
-            'adhesion_default_value' => 1200,
+            'adhesion_default_value' => $configuredAdhesion,
             'adhesion_charged_value' => 0,
-            'benefit_value' => 1200,
+            'benefit_value' => $configuredAdhesion,
             'fidelity_months' => 0,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
         'status_financeiro' => 'dispensado',
@@ -259,14 +273,14 @@ try {
     $controllerReflection = new ReflectionClass(ClientController::class);
     $controllerReflection->getProperty('technologyMapper')->setValue($controller, new TechnologyMapper());
     $controllerReflection->getProperty('localRepository')->setValue($controller, $local);
-    $controllerReflection->getProperty('config')->setValue($controller, $app->config());
+    $controllerReflection->getProperty('config')->setValue($controller, $testConfig);
     $plans = [
         ['id' => 'UUID-R10', 'name' => 'Rádio 10', 'label' => 'Rádio 10 — 10 Mbps — R$ 80,00', 'technology' => 'D', 'technology_label' => 'Rádio fixo (FWA)', 'install_type' => 'radio', 'speed_down' => '10M', 'value' => '80.00'],
         ['id' => 'UUID-R20', 'name' => 'Rádio 20', 'label' => 'Rádio 20 — 20 Mbps — R$ 90,00', 'technology' => 'D', 'technology_label' => 'Rádio fixo (FWA)', 'install_type' => 'radio', 'speed_down' => '20M', 'value' => '90.00'],
         ['id' => 'UUID-F100', 'name' => 'Fibra 100', 'label' => 'Fibra 100 — 100 Mbps — R$ 100,00', 'technology' => 'H', 'technology_label' => 'Fibra até o imóvel (FTTH)', 'install_type' => 'fibra', 'speed_down' => '100M', 'value' => '100.00'],
     ];
-    $upgradeContext = ['login' => $login, 'clientProfile' => ['nome' => 'Cliente Teste'], 'current_plan' => 'UUID-R10', 'current_technology' => 'Rádio fixo (FWA)', 'current_technology_family' => 'radio', 'current_monthly_value' => 80, 'planOptions' => $plans, 'adhesion_default_value' => 1200, 'adhesion_waiver_mode' => 'automatic'];
-    $upgradeData = ['operation_type' => 'migration', 'plano_atual' => 'UUID-R10', 'current_plan_id' => 'UUID-R10', 'current_plan_name' => 'Rádio 10', 'tecnologia_atual' => 'Rádio fixo (FWA)', 'novo_plano' => 'UUID-F100', 'new_plan_id' => 'UUID-F100', 'new_plan_name' => 'Fibra 100', 'nova_tecnologia' => 'Fibra até o imóvel (FTTH)', 'novo_valor_mensal' => 100, 'valor_mensal_atual' => 80, 'benefit_flags' => ['radio_to_fiber' => true, 'adhesion_waiver' => true], 'valor_beneficio' => 1200, 'beneficio_outro_text' => '', 'retention_condition' => false, 'apply_fidelity' => false, 'fidelity_benefit_description' => '', 'fidelidade_meses' => 0, 'observacao' => ''];
+    $upgradeContext = ['login' => $login, 'clientProfile' => ['nome' => 'Cliente Teste'], 'current_plan' => 'UUID-R10', 'current_technology' => 'Rádio fixo (FWA)', 'current_technology_family' => 'radio', 'current_monthly_value' => 80, 'planOptions' => $plans, 'adhesion_default_value' => $configuredAdhesion, 'adhesion_waiver_mode' => 'automatic'];
+    $upgradeData = ['operation_type' => 'migration', 'plano_atual' => 'UUID-R10', 'current_plan_id' => 'UUID-R10', 'current_plan_name' => 'Rádio 10', 'tecnologia_atual' => 'Rádio fixo (FWA)', 'novo_plano' => 'UUID-F100', 'new_plan_id' => 'UUID-F100', 'new_plan_name' => 'Fibra 100', 'nova_tecnologia' => 'Fibra até o imóvel (FTTH)', 'novo_valor_mensal' => 100, 'valor_mensal_atual' => 80, 'benefit_flags' => ['radio_to_fiber' => true, 'adhesion_waiver' => true], 'valor_beneficio' => $configuredAdhesion, 'beneficio_outro_text' => '', 'retention_condition' => false, 'apply_fidelity' => false, 'fidelity_benefit_description' => '', 'fidelidade_meses' => 0, 'observacao' => ''];
     $validateUpgrade = new ReflectionMethod(ClientController::class, 'validateUpgrade');
     $validUpgradeErrors = $validateUpgrade->invoke($controller, $upgradeData, $upgradeContext);
     $upgradeHtml = $view->render('clients/upgrade', ['pageTitle' => 'Nova condição', 'currentPath' => '/clientes/upgrade', 'basePath' => '', 'appName' => 'ISP Auxiliar', 'user' => ['name' => 'Gestor', 'role' => 'manager'], 'flash' => null, 'context' => $upgradeContext, 'form' => $upgradeData, 'errors' => [], 'csrfToken' => 'csrf']);
@@ -285,7 +299,6 @@ try {
     $check(18, preg_match('/<option value="UUID-F100"[^>]*selected/', $upgradeErrorHtml) === 1, 'formulário preserva plano após erro');
     $check(19, str_contains($upgradeErrorHtml, 'data-focus-field'), 'erro define foco lógico no campo inválido');
 
-    $configuredAdhesion = (float) $app->config()->get('contracts.commercial.valor_adesao_padrao', 0);
     $benefitDefaultsMethod = new ReflectionMethod(ClientController::class, 'resolveUpgradeBenefitDefaults');
     $benefitDefaults = $benefitDefaultsMethod->invoke($controller, 'Rádio fixo (FWA)', 'Fibra até o imóvel (FTTH)', 'Rádio 10', 'Fibra 100', 80.0, 100.0);
     $check(20, $configuredAdhesion > 0 && str_contains($upgradeHtml, 'data-adhesion-default="' . $configuredAdhesion . '"'), 'adesão vem da configuração');
@@ -302,7 +315,7 @@ try {
     $disabledConfig = new Config(['contracts' => ['commercial' => ['modo_isencao_adesao_migracao_radio_fibra' => 'disabled', 'valor_adesao_padrao' => $configuredAdhesion]]]);
     $controllerReflection->getProperty('config')->setValue($controller, $disabledConfig);
     $disabledBenefit = $benefitDefaultsMethod->invoke($controller, 'Rádio fixo (FWA)', 'Fibra até o imóvel (FTTH)', 'Rádio 10', 'Fibra 100', 80.0, 100.0);
-    $controllerReflection->getProperty('config')->setValue($controller, $app->config());
+    $controllerReflection->getProperty('config')->setValue($controller, $testConfig);
     $check(24, empty($disabledBenefit['flags']['adhesion_waiver']) && (float) ($disabledBenefit['value'] ?? -1) === 0.0, 'configuração desabilitada não aplica isenção');
 
     $check(25, str_contains($upgradeHtml, 'Condição de retenção') && str_contains($upgradeHtml, '<legend>Fidelidade</legend>'), 'retenção permanece separada da operação e fidelidade');

@@ -90,14 +90,17 @@ $assert(str_contains($provisioner, 'throwPartial') && str_contains($provisioner,
 $assert(str_contains($clientController, 'external_created_local_pending') && str_contains($provisioner, 'create_recovered_by_readback'), 'Retry não preserva UUID/request_id para evitar duplicidade.');
 
 // Benefícios.
+$configuredAdhesion = 1375.50;
 $benefits = new UpgradeBenefitService(new Config(['contracts' => ['commercial' => [
-    'valor_adesao_padrao' => 1200,
+    'valor_adesao_padrao' => $configuredAdhesion,
     'modo_isencao_adesao_migracao_radio_fibra' => 'automatic',
     'fidelidade_automatica_migracao' => true,
     'fidelidade_automatica_upgrade' => false,
 ]]]));
 $radioToFiber = $benefits->calculate('Rádio', 'Fibra', 'Rádio 10 Mbps', 'Fibra 100 Mbps', 80, 149.90);
-$assert(!empty($radioToFiber['flags']['radio_to_fiber']) && !empty($radioToFiber['flags']['adhesion_waiver']), 'Rádio para Fibra não calcula migração e isenção.');
+$assert(!empty($radioToFiber['flags']['radio_to_fiber'])
+    && !empty($radioToFiber['flags']['adhesion_waiver'])
+    && abs((float) $radioToFiber['value'] - $configuredAdhesion) < 0.01, 'Rádio para Fibra não calcula migração e isenção a partir da configuração.');
 $sameTechnology = $benefits->calculate('Rádio', 'Rádio', 'Rádio 10 Mbps', 'Rádio 20 Mbps', 80, 100);
 $assert(!empty($sameTechnology['flags']['plan_upgrade']) && empty($sameTechnology['flags']['adhesion_waiver']) && (float) $sameTechnology['value'] === 0.0, 'Upgrade herdou benefício de migração.');
 $assert(str_contains($upgradeView, 'Descrição do outro benefício') && str_contains($clientController, 'beneficio_outro_text'), 'Outro benefício não exige descrição no backend.');

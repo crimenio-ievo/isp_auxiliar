@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Controllers\ClientController;
+use App\Core\Config;
 use App\Core\Env;
 use App\Core\View;
 use App\Infrastructure\Contracts\MessageTemplateRepository;
@@ -26,6 +27,20 @@ $database = new Database($app->config());
 $local = new LocalRepository($database, (string) Env::get('APP_PROVIDER_KEY', 'default'));
 $templates = new MessageTemplateRepository($database, $local);
 $templateService = new NotificationTemplateService($templates);
+$configuredAdhesion = 1375.50;
+$configItems = $app->config()->all();
+$configItems['contracts']['commercial'] = array_replace(
+    (array) ($configItems['contracts']['commercial'] ?? []),
+    [
+        'valor_adesao_padrao' => $configuredAdhesion,
+        'modo_isencao_adesao_migracao_radio_fibra' => 'automatic',
+        'isentar_adesao_migracao_radio_fibra' => true,
+        'fidelidade_automatica_migracao' => true,
+        'fidelidade_automatica_upgrade' => false,
+        'fidelidade_meses_padrao' => 12,
+    ]
+);
+$testConfig = new Config($configItems);
 $assertions = 0;
 $assert = static function (bool $condition, string $message) use (&$assertions): void {
     if (!$condition) throw new RuntimeException($message);
@@ -43,7 +58,7 @@ try {
     $controllerReflection = new ReflectionClass(ClientController::class);
     $controllerReflection->getProperty('technologyMapper')->setValue($controller, $mapper);
     $controllerReflection->getProperty('localRepository')->setValue($controller, $local);
-    $controllerReflection->getProperty('config')->setValue($controller, $app->config());
+    $controllerReflection->getProperty('config')->setValue($controller, $testConfig);
     $_SESSION['user'] = ['login' => 'teste.manager', 'role' => 'manager', 'name' => 'Teste'];
     $quickActions = new ReflectionMethod(ClientController::class, 'buildClientQuickActions');
     $actions = $quickActions->invoke($controller, [
@@ -77,7 +92,6 @@ try {
     $validFidelity = $validate->invoke($controller, array_replace($base, ['valor_beneficio' => 300, 'fidelity_benefit_description' => 'Instalação isenta', 'fidelidade_meses' => 12]), ['current_plan' => 'r10', 'current_monthly_value' => 80, 'planOptions' => $plans]);
     $assert($validFidelity === [], 'Fidelidade válida foi bloqueada: ' . implode(' ', $validFidelity));
     $benefitDefaults = (new ReflectionMethod(ClientController::class, 'resolveUpgradeBenefitDefaults'))->invoke($controller, 'Rádio fixo (FWA)', 'Fibra até o imóvel (FTTH)', 'R10', 'F100', 80.0, 100.0);
-    $configuredAdhesion = (float) $app->config()->get('contracts.commercial.valor_adesao_padrao', 0);
     $assert(!empty($benefitDefaults['flags']['radio_to_fiber']) && !empty($benefitDefaults['flags']['adhesion_waiver']), 'Migração rádio-fibra não aplicou a regra automática configurada.');
     $assert(abs((float) ($benefitDefaults['value'] ?? 0) - $configuredAdhesion) < 0.01, 'Benefício da migração não corresponde à adesão configurada.');
     $term = (new ReflectionMethod(ClientController::class, 'buildContractTermBody'))->invoke($controller, [

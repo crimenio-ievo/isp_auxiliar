@@ -51,8 +51,9 @@ foreach (['nome_completo', 'login', 'plano', 'celular', 'endereco', 'bairro', 'c
     $assert(isset($validator->validate(array_replace($valid, [$field => '']))[$field]), "Campo obrigatório {$field} não foi bloqueado.");
 }
 
+$configuredAdhesion = 1375.50;
 $benefits = new UpgradeBenefitService(new Config(['contracts' => ['commercial' => [
-    'valor_adesao_padrao' => 1200,
+    'valor_adesao_padrao' => $configuredAdhesion,
     'modo_isencao_adesao_migracao_radio_fibra' => 'automatic',
     'fidelidade_automatica_migracao' => true,
     'fidelidade_automatica_upgrade' => false,
@@ -60,7 +61,7 @@ $benefits = new UpgradeBenefitService(new Config(['contracts' => ['commercial' =
 $migration = $benefits->calculate('Rádio fixo', 'Fibra FTTH', 'Rádio 10 Mbps', 'Fibra 100 Mbps', 80, 149.90);
 $assert(!empty($migration['flags']['radio_to_fiber']) && !empty($migration['flags']['adhesion_waiver']), 'Rádio para fibra não marcou migração e isenção.');
 $assert(!empty($migration['flags']['plan_upgrade']), 'Migração com aumento não marcou também o upgrade.');
-$assert((float) $migration['value'] === 1200.0 && !empty($migration['automatic_fidelity']), 'Benefício configurado não sustentou fidelidade automática.');
+$assert(abs((float) $migration['value'] - $configuredAdhesion) < 0.01 && !empty($migration['automatic_fidelity']), 'Benefício configurado não sustentou fidelidade automática.');
 $sameTechnology = $benefits->calculate('Rádio', 'Rádio', 'Rádio 10 Mbps', 'Rádio 20 Mbps', 80, 100);
 $assert(!empty($sameTechnology['flags']['plan_upgrade']) && empty($sameTechnology['flags']['adhesion_waiver']) && (float) $sameTechnology['value'] === 0.0, 'Upgrade na mesma tecnologia herdou a isenção da migração.');
 $assert($benefits->normalizeFlags(['radio_to_fiber', 'other_benefit'])['other_benefit'], 'Lista de checkboxes não foi normalizada no servidor.');
