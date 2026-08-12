@@ -48,6 +48,11 @@ $assert(str_contains($common, 'release_run_smoke_test')
     && str_contains($common, 'APP_ENV=test')
     && str_contains($common, 'MKAUTH_WRITE_ENABLED=false')
     && str_contains($common, 'AI_REAL_CALLS_ENABLED=false'), 'Runner não isola processo e filesystem dos Smoke Tests.');
+$assert(str_contains($common, 'release_read_env_setting')
+    && str_contains($common, 'APP_RELEASE_CHANNEL')
+    && str_contains($common, 'APP_STABLE_BASE_URL')
+    && str_contains($common, 'APP_BETA_BASE_URL')
+    && str_contains($common, 'release_run_smoke_test "${test}" "${target}/.env"'), 'Runner não preserva o contexto da release nos Smoke Tests.');
 $assert(substr_count($common, 'release_write_env_setting "${target_env}" AI_') === 3, 'Preparo da release não desliga todas as formas de IA.');
 $assert(str_contains($common, 'release_atomic_switch') && str_contains($common, 'mv -Tf'), 'Troca atômica de symlink ausente.');
 $assert(str_contains($common, 'EU_CONFIRM_REAL_OPERATIONS') && str_contains($common, 'MKAUTH_WRITE_ENABLED false'), 'Operações reais não exigem dupla confirmação ou não são seguras por padrão.');

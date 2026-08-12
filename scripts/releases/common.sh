@@ -110,6 +110,35 @@ release_write_env_setting() {
     fi
 }
 
+release_read_env_setting() {
+    local env_file="$1"
+    local key="$2"
+    php -r '
+        $lines = @file($argv[1], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            exit(2);
+        }
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if ($trimmed === "" || str_starts_with($trimmed, "#")) {
+                continue;
+            }
+            [$name, $value] = array_pad(explode("=", $trimmed, 2), 2, "");
+            if (trim($name) !== $argv[2]) {
+                continue;
+            }
+            $value = trim($value);
+            if ((str_starts_with($value, "\"") && str_ends_with($value, "\""))
+                || (str_starts_with($value, "\047") && str_ends_with($value, "\047"))) {
+                $value = substr($value, 1, -1);
+            }
+            fwrite(STDOUT, $value);
+            exit(0);
+        }
+        exit(3);
+    ' "${env_file}" "${key}"
+}
+
 release_prepare_env() {
     local source_env="$1"
     local target_env="$2"
@@ -255,7 +284,7 @@ release_run_tests() {
 
     local test
     while IFS= read -r test; do
-        if release_run_smoke_test "${test}"; then
+        if release_run_smoke_test "${test}" "${target}/.env"; then
             continue
         else
             status=$?
@@ -321,9 +350,39 @@ release_cleanup_smoke_sandbox() {
 
 release_run_smoke_test() {
     local test="$1"
+    local release_env="${2:-}"
+    local context_keys=(
+        APP_RELEASE_CHANNEL
+        APP_RELEASE_ID
+        APP_RELEASE_COMMIT
+        APP_RELEASE_BUILD_DATE
+        APP_URL
+        APP_STABLE_BASE_URL
+        APP_BETA_BASE_URL
+    )
+    local context_unset_args=()
+    local context_env_args=()
+    local key value
+
+    if [[ -z "${release_env}" ]]; then
+        local test_dir
+        test_dir="$(cd "$(dirname "${test}")" && pwd -P)"
+        [[ -f "${test_dir}/../../.env" ]] && release_env="${test_dir}/../../.env"
+    fi
+
+    for key in "${context_keys[@]}"; do
+        context_unset_args+=(-u "${key}")
+        if [[ -n "${release_env}" && -f "${release_env}" ]] \
+            && value="$(release_read_env_setting "${release_env}" "${key}")"; then
+            context_env_args+=("${key}=${value}")
+        fi
+    done
+
     release_log "smoke isolado: php ${test}"
     if [[ "${DRY_RUN}" == false ]]; then
         env \
+            "${context_unset_args[@]}" \
+            "${context_env_args[@]}" \
             APP_ENV=test \
             MKAUTH_WRITE_ENABLED=false \
             EVOTRIX_DRY_RUN=true \
