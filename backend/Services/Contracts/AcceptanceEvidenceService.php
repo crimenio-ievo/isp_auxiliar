@@ -9,6 +9,9 @@ namespace App\Services\Contracts;
  */
 final class AcceptanceEvidenceService
 {
+    /** Diretório alternativo, usado somente por testes automatizados. */
+    private ?string $storageDirectoryOverride = null;
+
     public function saveSignature(int $acceptanceId, string $dataUrl, string $origin = 'local'): string
     {
         if ($acceptanceId <= 0 || preg_match('#^data:image/(png|jpeg);base64,(.+)$#i', trim($dataUrl), $matches) !== 1) {
@@ -63,7 +66,7 @@ final class AcceptanceEvidenceService
 
     private function storageDirectory(): string
     {
-        $directory = dirname(__DIR__, 3) . '/storage/contracts/acceptances';
+        $directory = $this->storageDirectoryOverride ?? (dirname(__DIR__, 3) . '/storage/contracts/acceptances');
         if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
             throw new \RuntimeException('Storage de aceites indisponível.');
         }

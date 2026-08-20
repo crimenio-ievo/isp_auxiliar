@@ -19,6 +19,7 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Services\Clients\ClientPlanSnapshotService;
+use App\Services\Contracts\AcceptanceEvidenceService;
 use App\Services\Processes\OperationalProcessService;
 
 /**
@@ -39,7 +40,8 @@ final class AcceptanceController
         private LocalRepository $localRepository,
         private MkAuthClient $mkauthClient,
         private MkAuthDatabase $mkauthDatabase,
-        private OperationalProcessService $operationalProcessService
+        private OperationalProcessService $operationalProcessService,
+        private AcceptanceEvidenceService $acceptanceEvidenceService
     ) {
     }
 
@@ -283,10 +285,7 @@ final class AcceptanceController
 
             $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
             if ($signatureRequired) {
-                $signaturePath = $this->saveSignatureFile($acceptanceId, $signatureDataUrl);
-                if ($signaturePath === null) {
-                    throw new \RuntimeException('A assinatura informada nao pôde ser salva.');
-                }
+                $signaturePath = $this->acceptanceEvidenceService->saveSignature($acceptanceId, $signatureDataUrl, 'remote');
             }
 
         $validationMatched = null;
@@ -345,7 +344,7 @@ final class AcceptanceController
 
         $evidencePath = null;
         try {
-            $evidencePath = $this->saveEvidenceJson($acceptanceId, $evidence);
+            $evidencePath = $this->acceptanceEvidenceService->saveEvidence($acceptanceId, $evidence, 'acceptance');
         } catch (\Throwable $exception) {
             $this->localRepository->log(
                 null,
@@ -1409,59 +1408,6 @@ final class AcceptanceController
         return dirname(__DIR__, 2);
     }
 
-    private function saveSignatureFile(int $acceptanceId, string $signatureDataUrl): ?string
-    {
-        $signatureDataUrl = trim($signatureDataUrl);
-
-        if ($signatureDataUrl === '') {
-            return null;
-        }
-
-        $binary = $this->decodeDataUrl($signatureDataUrl);
-        if ($binary === null) {
-            throw new \RuntimeException('A assinatura informada não pôde ser processada.');
-        }
-        if (strlen($binary) > 5 * 1024 * 1024) {
-            throw new \RuntimeException('A assinatura excede o limite de 5 MB.');
-        }
-        $imageInfo = @getimagesizefromstring($binary);
-        if (!is_array($imageInfo)
-            || !in_array((int) ($imageInfo[2] ?? 0), [IMAGETYPE_PNG, IMAGETYPE_JPEG], true)
-            || (int) ($imageInfo[0] ?? 0) <= 0
-            || (int) ($imageInfo[1] ?? 0) <= 0
-            || (int) ($imageInfo[0] ?? 0) > 8000
-            || (int) ($imageInfo[1] ?? 0) > 8000
-        ) {
-            throw new \RuntimeException('O arquivo da assinatura não é uma imagem PNG/JPEG válida.');
-        }
-
-        $rootPath = dirname(__DIR__, 2);
-        $directory = $rootPath . '/storage/contracts/acceptances';
-        if (!is_dir($directory)) {
-            @mkdir($directory, 0775, true);
-        }
-
-        $fileName = 'signature_' . $acceptanceId . '_' . date('Ymd_His') . '.png';
-        $path = $directory . '/' . $fileName;
-
-        if (file_put_contents($path, $binary) === false) {
-            throw new \RuntimeException('Nao foi possivel salvar a assinatura.');
-        }
-
-        return 'storage/contracts/acceptances/' . $fileName;
-    }
-
-    private function decodeDataUrl(string $dataUrl): ?string
-    {
-        if (!preg_match('#^data:image/([a-zA-Z0-9.+-]+);base64,(.+)$#', $dataUrl, $matches)) {
-            return null;
-        }
-
-        $decoded = base64_decode($matches[2], true);
-
-        return $decoded === false ? null : $decoded;
-    }
-
     private function documentValidationRequired(): bool
     {
         return (bool) $this->config->get('contracts.commercial.exigir_validacao_cpf_aceite', true);
@@ -1488,30 +1434,6 @@ final class AcceptanceController
         } catch (\Throwable) {
             // Log administrativo nao pode impedir o aceite.
         }
-    }
-
-    private function saveEvidenceJson(int $acceptanceId, array $evidence): string
-    {
-        $rootPath = dirname(__DIR__, 2);
-        $directory = $rootPath . '/storage/contracts/acceptances';
-
-        if (!is_dir($directory)) {
-            @mkdir($directory, 0775, true);
-        }
-
-        $fileName = 'acceptance_' . $acceptanceId . '_' . date('Ymd_His') . '.json';
-        $path = $directory . '/' . $fileName;
-
-        $written = file_put_contents(
-            $path,
-            json_encode($evidence, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}'
-        );
-
-        if ($written === false) {
-            throw new \RuntimeException('Nao foi possivel salvar a evidência do aceite.');
-        }
-
-        return 'storage/contracts/acceptances/' . $fileName;
     }
 
     private function csrfScope(string $token): string
