@@ -69,4 +69,19 @@ final class AcceptanceWorkflowService
             'evidence_json_path' => null,
         ];
     }
+
+    /**
+     * Gera somente os campos que devem mudar quando um link expirado é reenviado.
+     */
+    public function renewExpiredToken(array $acceptance): array
+    {
+        $ttlHours = max(1, (int) $this->config->get('contracts.acceptance_ttl_hours', 48));
+
+        return [
+            'token' => bin2hex(random_bytes(16)),
+            'token_expires_at' => (new \DateTimeImmutable())
+                ->modify('+' . $ttlHours . ' hours')
+                ->format('Y-m-d H:i:s'),
+        ];
+    }
 }

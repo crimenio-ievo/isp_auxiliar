@@ -42,7 +42,7 @@ $isAccepted = $status === 'aceito';
 $remoteSignatureReason = trim((string) ($acceptance['remote_signature_reason'] ?? ''));
 $signatureRequired = $status === 'assinatura_pendente';
 $remoteSignatureRequired = $signatureRequired && $remoteSignatureReason !== '';
-$isExpired = str_contains((string) ($context['error'] ?? ''), 'expirou');
+$isExpired = (string) ($context['unavailableReason'] ?? '') === 'expired';
 $hasError = !empty($context['error']) || !empty($errorMessage);
 $acceptedAt = trim((string) ($acceptance['accepted_at'] ?? ''));
 $protocol = trim((string) ($acceptance['token_hash'] ?? ''));
@@ -74,14 +74,14 @@ $digitalSummary = $digitalPlan !== '' && $digitalPlan !== '-'
     : 'Assinatura do contrato digital vigente.';
 $hideFooter = $isAccepted;
 $alreadyAcceptedView = $isAccepted && empty($successMessage);
-$isUnavailable = (string) ($context['unavailableReason'] ?? '') === 'cancelled_or_superseded';
+$isUnavailable = !empty($context['error']);
 
 ob_start();
 ?>
 <?php if ($isUnavailable): ?>
 <section class="acceptance-success-screen">
     <article class="card acceptance-success-card">
-        <p class="page-description">Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.</p>
+        <p class="page-description"><?= htmlspecialchars((string) ($context['error'] ?? 'Este link não está mais válido.'), ENT_QUOTES, 'UTF-8'); ?></p>
     </article>
 </section>
 <?php elseif ($isAccepted): ?>

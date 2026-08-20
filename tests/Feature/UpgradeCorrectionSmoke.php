@@ -266,7 +266,7 @@ try {
     $contractRepositoryProperty->setValue($publicController, $contracts);
     $loadContext = new ReflectionMethod(AcceptanceController::class, 'loadContextByToken');
     $oldLinkContext = $loadContext->invoke($publicController, $pendingToken);
-    $friendlyMessage = 'Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.';
+    $friendlyMessage = 'Use o link mais recente enviado pela iEvo.';
     $assert(($oldLinkContext['error'] ?? '') === $friendlyMessage, 'Link antigo não retornou a mensagem amigável exata.');
     $assert(($oldLinkContext['unavailableReason'] ?? '') === 'cancelled_or_superseded', 'Link antigo não ativou a tela pública indisponível.');
 

@@ -39,6 +39,14 @@ final class ContractAcceptanceRepository
         );
     }
 
+    public function findByIdForUpdate(int $id): ?array
+    {
+        return $this->database->fetchOne(
+            'SELECT * FROM contract_acceptances WHERE id = :id LIMIT 1 FOR UPDATE',
+            ['id' => $id]
+        );
+    }
+
     public function findLatestByContractId(int $contractId): ?array
     {
         return $this->database->fetchOne(
@@ -49,9 +57,21 @@ final class ContractAcceptanceRepository
 
     public function findByTokenHash(string $tokenHash): ?array
     {
+        $tokenHash = trim($tokenHash);
+        $normalized = $this->normalizeTokenHash($tokenHash);
+
         return $this->database->fetchOne(
-            'SELECT * FROM contract_acceptances WHERE token_hash = :token_hash LIMIT 1',
-            ['token_hash' => $this->normalizeTokenHash($tokenHash)]
+            'SELECT * FROM contract_acceptances
+             WHERE token_hash = :token_hash
+                OR (:legacy_token_hash_present <> "" AND token_hash = :legacy_token_hash)
+             LIMIT 1',
+            [
+                'token_hash' => $normalized,
+                // Releases anteriores expunham o hash no link. Mantemos essa
+                // compatibilidade somente como credencial opaca de leitura.
+                'legacy_token_hash_present' => preg_match('/^[a-f0-9]{64}$/i', $tokenHash) === 1 ? strtolower($tokenHash) : '',
+                'legacy_token_hash' => preg_match('/^[a-f0-9]{64}$/i', $tokenHash) === 1 ? strtolower($tokenHash) : '',
+            ]
         );
     }
 

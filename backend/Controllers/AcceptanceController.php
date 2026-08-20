@@ -417,19 +417,19 @@ final class AcceptanceController
         $token = trim($token);
 
         if ($token === '') {
-            return ['error' => 'Token invalido.'];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $acceptance = $this->acceptanceRepository->findByTokenHash($token);
 
         if (!is_array($acceptance) || !isset($acceptance['id'])) {
-            return ['error' => 'Aceite nao localizado ou token invalido.'];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $contract = $this->contractRepository->findById((int) $acceptance['contract_id']);
 
         if (!is_array($contract)) {
-            return ['error' => 'Contrato vinculado nao encontrado.'];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $lifecycleStatus = (string) ($contract['lifecycle_status'] ?? 'active');
@@ -438,16 +438,14 @@ final class AcceptanceController
             || (string) ($acceptance['status'] ?? '') === 'cancelado'
         ) {
             return [
-                'error' => 'Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.',
+                'error' => 'Use o link mais recente enviado pela iEvo.',
                 'unavailableReason' => 'cancelled_or_superseded',
-                'acceptance' => $acceptance,
-                'contract' => $contract,
             ];
         }
 
         $status = (string) ($acceptance['status'] ?? '');
         if (!in_array($status, ['criado', 'enviado', 'assinatura_pendente', 'aceito'], true)) {
-            return ['error' => 'Este aceite nao esta disponivel para conclusao.', 'acceptance' => $acceptance, 'contract' => $contract];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $expiresAt = trim((string) ($acceptance['token_expires_at'] ?? ''));
@@ -456,10 +454,13 @@ final class AcceptanceController
             try {
                 $tokenExpired = new \DateTimeImmutable($expiresAt) < new \DateTimeImmutable();
                 if ($tokenExpired && $status !== 'aceito') {
-                    return ['error' => 'Este link de aceite expirou. Solicite novo envio.'];
+                    return [
+                        'error' => 'Este link não está mais válido. Solicite um novo envio à equipe iEvo.',
+                        'unavailableReason' => 'expired',
+                    ];
                 }
             } catch (\Throwable) {
-                return ['error' => 'Nao foi possivel validar a validade do link.'];
+                return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
             }
         }
 

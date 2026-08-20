@@ -104,14 +104,14 @@ return [
         'aceite_nova_instalacao' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_nova_instalacao',
-            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
-            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas', 'central_assinante_url'],
+            'body' => "Olá, {cliente_nome}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {link_aceite}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'link_aceite'],
         ],
         'aceite_regularizacao_contrato' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_regularizacao_contrato',
-            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
-            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas', 'central_assinante_url'],
+            'body' => "Olá, {cliente_nome}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {link_aceite}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'link_aceite'],
         ],
     ],
 ];
