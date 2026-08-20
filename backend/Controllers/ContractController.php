@@ -20,6 +20,7 @@ use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
 use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\Notifications\NotificationTemplateService;
 
 /**
  * Primeira interface visual do modulo Contratos e Aceites.
@@ -49,7 +50,8 @@ final class ContractController
         private EvotrixService $evotrixService,
         private MkAuthTicketService $mkAuthTicketService,
         private EmailService $emailService,
-        private AcceptanceWorkflowService $acceptanceWorkflowService
+        private AcceptanceWorkflowService $acceptanceWorkflowService,
+        private NotificationTemplateService $notificationTemplateService
     ) {
     }
 
@@ -1607,6 +1609,15 @@ final class ContractController
         $name = (string) ($variables['{cliente_nome}'] ?? ($contract['nome_cliente'] ?? 'Cliente'));
         $link = trim((string) ($variables['{link_aceite}'] ?? $this->buildSimulatedAcceptanceLink($detail)));
 
+        $template = $this->findActiveAcceptanceTemplate($contract, 'whatsapp');
+        if ($template !== null) {
+            $rendered = $this->notificationTemplateService->render($template, $this->buildTemplateValues($detail));
+            $body = trim((string) $rendered['body']);
+            if ($body !== '') {
+                return [$body];
+            }
+        }
+
         $messageOne = "Olá, {$name}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {$link}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.";
 
         return [$messageOne];
@@ -1618,6 +1629,21 @@ final class ContractController
         $variables = $this->buildAcceptanceMessageVariables($detail);
         $link = (string) ($variables['{link_aceite}'] ?? $this->buildSimulatedAcceptanceLink($detail));
         $name = (string) ($variables['{cliente_nome}'] ?? ($contract['nome_cliente'] ?? 'Cliente'));
+
+        $template = $this->findActiveAcceptanceTemplate($contract, 'email');
+        if ($template !== null) {
+            $rendered = $this->notificationTemplateService->render($template, $this->buildTemplateValues($detail));
+            $text = trim((string) $rendered['body']);
+            if ($text !== '') {
+                $subject = trim((string) $rendered['subject']) !== ''
+                    ? (string) $rendered['subject']
+                    : 'Aceite digital do contrato - ' . $this->resolveProviderDisplayName();
+                $html = '<p>' . nl2br(htmlspecialchars($text, ENT_QUOTES, 'UTF-8')) . '</p>';
+
+                return [$subject, $html, $text];
+            }
+        }
+
         $subject = 'Aceite digital do contrato - iEvo Technology';
         $text = "Olá, {$name}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {$link}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.";
         $html = '<p>Olá, <strong>' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</strong>!</p>'
@@ -1626,6 +1652,75 @@ final class ContractController
             . '<p>Se tiver alguma dúvida, fale conosco antes de confirmar.</p>';
 
         return [$subject, $html, $text];
+    }
+
+    /**
+     * Busca um template configurável ativo (mesmo mecanismo usado pelo
+     * ClientController) para o canal informado. Retorna null quando não há
+     * template ativo com o canal habilitado, sinalizando que o chamador deve
+     * usar o texto padrão embutido.
+     */
+    private function findActiveAcceptanceTemplate(array $contract, string $channel): ?array
+    {
+        $purpose = $this->resolveAcceptanceTemplatePurpose($contract);
+        if ($purpose === '') {
+            return null;
+        }
+
+        try {
+            $this->notificationTemplateService->seedDefaults();
+        } catch (\Throwable) {
+            // Mantém compatibilidade com bancos ainda sem a migration 017.
+        }
+
+        try {
+            $template = $this->messageTemplateRepository->findByPurpose($purpose, $channel);
+        } catch (\Throwable) {
+            // Tabela de templates indisponível: cai no texto padrão embutido.
+            return null;
+        }
+
+        if (!is_array($template) || empty($template['active'])) {
+            return null;
+        }
+
+        $enabledChannels = json_decode((string) ($template['enabled_channels_json'] ?? '[]'), true);
+        if (!is_array($enabledChannels) || !in_array($channel, $enabledChannels, true)) {
+            return null;
+        }
+
+        return $template;
+    }
+
+    /**
+     * Valores no formato %variavel% esperado por NotificationTemplateService,
+     * reaproveitando os dados já resolvidos para o texto padrão embutido.
+     */
+    private function buildTemplateValues(array $detail): array
+    {
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $legacy = $this->buildAcceptanceMessageVariables($detail);
+
+        return [
+            'nomecliente' => (string) ($legacy['{cliente_nome}'] ?? ''),
+            'nomeresumido' => '',
+            'documentocliente' => '',
+            'logincliente' => (string) ($contract['mkauth_login'] ?? ''),
+            'telefonecliente' => '',
+            'emailcliente' => '',
+            'planoatual' => '',
+            'novoplano' => '',
+            'valoratual' => '',
+            'novovalor' => '',
+            'tecnologiaatual' => '',
+            'novatecnologia' => '',
+            'beneficio' => '',
+            'fidelidade' => '',
+            'linkaceite' => (string) ($legacy['{link_aceite}'] ?? ''),
+            'data' => date('d/m/Y'),
+            'nomeprovedor' => (string) ($legacy['{empresa_nome}'] ?? ''),
+            'protocoloprocesso' => 'CTR-' . str_pad((string) ((int) ($contract['id'] ?? 0)), 6, '0', STR_PAD_LEFT),
+        ];
     }
 
     private function buildAcceptanceMessageVariables(array $detail): array
@@ -1725,13 +1820,17 @@ final class ContractController
         return $url !== '' ? $url : 'https://sistema.ievo.com.br/central';
     }
 
-    private function resolveAcceptanceTemplatePurpose(string $tipoAceite): string
+    /**
+     * Usa o mesmo esquema de purposes que ClientController::dispatchAcceptanceChannels
+     * já grava e lê de fato (via NotificationTemplateService/MessageTemplateRepository).
+     * Toda chamada aqui é um reenvio manual pelo painel de Contratos.
+     */
+    private function resolveAcceptanceTemplatePurpose(array $contract): string
     {
-        $tipoAceite = trim($tipoAceite);
-
-        return match ($tipoAceite) {
-            'regularizacao_contrato' => 'aceite_regularizacao_contrato',
-            default => 'aceite_nova_instalacao',
+        return match ((string) ($contract['tipo_aceite'] ?? '')) {
+            'upgrade_migracao' => 'migracao_reenviar_aceite',
+            'contrato_digital' => 'assinatura_avulsa_reenviar',
+            default => 'instalacao_reenviar_aceite',
         };
     }
 
