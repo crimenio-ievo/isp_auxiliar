@@ -405,27 +405,30 @@ release_prepare_storage_links() {
     local seed_root="${4:-}"
     release_require_safe_dir "${release_dir}"
     release_require_safe_dir "${shared_root}"
+    local web_group="${RELEASE_WEB_GROUP:-www-data}"
+    getent group "${web_group}" >/dev/null 2>&1 || release_die "grupo web obrigatório não localizado: ${web_group}"
     local persistent=(contracts uploads installations)
-    local runtime=(sessions cache)
+    local runtime=(sessions cache logs tmp)
     local name
     for name in "${persistent[@]}"; do
         if [[ ! -d "${shared_root}/permanent/${name}" && -n "${seed_root}" && -d "${seed_root}/storage/${name}" ]]; then
-            release_run install -d -m 770 "${shared_root}/permanent/${name}"
+            release_run install -d -o root -g "${web_group}" -m 2770 "${shared_root}/permanent/${name}"
             release_run cp -a "${seed_root}/storage/${name}/." "${shared_root}/permanent/${name}/"
         fi
-        release_run install -d -m 770 "${shared_root}/permanent/${name}"
+        release_run install -d -o root -g "${web_group}" -m 2770 "${shared_root}/permanent/${name}"
         release_run rm -rf "${release_dir}/storage/${name}"
         release_run ln -s "${shared_root}/permanent/${name}" "${release_dir}/storage/${name}"
     done
     for name in "${runtime[@]}"; do
-        release_run install -d -m 770 "${shared_root}/runtime/${channel}/${name}"
-        release_run rm -rf "${release_dir}/storage/${name}"
-        release_run ln -s "${shared_root}/runtime/${channel}/${name}" "${release_dir}/storage/${name}"
+        release_run install -d -o root -g "${web_group}" -m 2770 "${shared_root}/runtime/${channel}/${name}"
+        if [[ "${name}" == "logs" || "${name}" == "tmp" ]]; then
+            release_run rm -rf "${release_dir}/${name}"
+            release_run ln -s "${shared_root}/runtime/${channel}/${name}" "${release_dir}/${name}"
+        else
+            release_run rm -rf "${release_dir}/storage/${name}"
+            release_run ln -s "${shared_root}/runtime/${channel}/${name}" "${release_dir}/storage/${name}"
+        fi
     done
-    release_run install -d -m 770 "${shared_root}/runtime/${channel}/logs" "${shared_root}/runtime/${channel}/tmp"
-    release_run rm -rf "${release_dir}/logs" "${release_dir}/tmp"
-    release_run ln -s "${shared_root}/runtime/${channel}/logs" "${release_dir}/logs"
-    release_run ln -s "${shared_root}/runtime/${channel}/tmp" "${release_dir}/tmp"
 }
 
 release_schema_version() {

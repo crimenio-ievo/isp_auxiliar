@@ -59,6 +59,9 @@ $assert(substr_count($common, 'release_write_env_setting "${target_env}" AI_') =
 $assert(str_contains($common, 'release_atomic_switch') && str_contains($common, 'mv -Tf'), 'Troca atômica de symlink ausente.');
 $assert(str_contains($common, 'EU_CONFIRM_REAL_OPERATIONS') && str_contains($common, 'MKAUTH_WRITE_ENABLED false'), 'Operações reais não exigem dupla confirmação ou não são seguras por padrão.');
 $assert(str_contains($common, 'release_seal_immutable_code') && str_contains($common, 'chmod 444'), 'Release de código não é selada como imutável.');
+$assert(str_contains($common, 'RELEASE_WEB_GROUP:-www-data')
+    && str_contains($common, 'getent group')
+    && str_contains($common, '-o root -g "${web_group}" -m 2770'), 'Diretórios graváveis da release não definem owner, grupo web e setgid permanentemente.');
 $assert(str_contains($deploy, '/isp_auxiliar_beta_current') && !str_contains($deploy, 'isp_auxiliar_stable_current'), 'Deploy Beta pode atingir o symlink Stable.');
 $assert(str_contains($deploy, 'git -C "${SOURCE_DIR}" archive') && str_contains($deploy, '.release-manifest'), 'Deploy não usa o commit exato ou não cria manifesto.');
 $assert(str_contains($promote, 'release_validate_manifest_channel "${BETA_RELEASE}" beta') && str_contains($promote, 'cp -a "${BETA_RELEASE}"'), 'Promoção não reutiliza a release Beta homologada.');
@@ -103,7 +106,7 @@ if (!mkdir($fixtureScripts, 0700, true) || !mkdir($fixtureMigrations, 0700, true
 }
 
 $cleanupTree = static function (string $path) use (&$cleanupTree, $temporaryPrefix): void {
-    if (!str_starts_with($path, $temporaryPrefix) || !file_exists($path)) {
+    if (!str_starts_with($path, $temporaryPrefix) || (!file_exists($path) && !is_link($path))) {
         return;
     }
 
@@ -119,6 +122,25 @@ $cleanupTree = static function (string $path) use (&$cleanupTree, $temporaryPref
 };
 
 try {
+    $permissionsRoot = $temporaryRoot . '/permissions';
+    $permissionsRelease = $permissionsRoot . '/release';
+    $permissionsShared = $permissionsRoot . '/shared';
+    mkdir($permissionsRelease . '/storage', 0700, true);
+    $permissions = $runBash(
+        <<<'BASH'
+set -Eeuo pipefail
+source "$1"
+release_prepare_storage_links "$2" beta "$3"
+for path in "$3"/permanent/{contracts,uploads,installations} "$3"/runtime/beta/{sessions,cache,logs,tmp}; do
+    stat -c '%U:%G:%a' "$path"
+done
+BASH,
+        [$commonPath, $permissionsRelease, $permissionsShared]
+    );
+    $assert($permissions['status'] === 0, 'Preparo dos diretórios graváveis da release falhou.');
+    $permissionLines = array_filter(explode("\n", $permissions['output']), static fn (string $line): bool => preg_match('/^root:www-data:2770$/', $line) === 1);
+    $assert(count($permissionLines) === 7, 'Deploy/update não preserva root:www-data 2770 nos diretórios graváveis.');
+
     $zeroPendingMarker = $temporaryRoot . '/zero-pending-reached';
     $zeroPending = $runBash(
         <<<'BASH'
