@@ -53,6 +53,9 @@ final class ContractController
     ) {
     }
 
+    /** Caminho alternativo do arquivo de configurações, usado somente por testes automatizados. */
+    private ?string $moduleSettingsPathOverride = null;
+
     public function index(Request $request): Response
     {
         if (!$this->canAccessContracts()) {
@@ -1376,18 +1379,23 @@ final class ContractController
             throw new \RuntimeException('Diretorio de configuracoes sem permissão de escrita.');
         }
 
-        $written = file_put_contents(
-            $path,
-            json_encode([
-                'commercial' => $commercial,
-                'email' => $email,
-                'saved_at' => date('Y-m-d H:i:s'),
-                'saved_by' => (string) ($this->resolveUser()['login'] ?? ''),
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
-        );
+        $merged = $this->readStoredModuleSettings();
+        $merged['commercial'] = $commercial;
+        $merged['email'] = $email;
+        $merged['saved_at'] = date('Y-m-d H:i:s');
+        $merged['saved_by'] = (string) ($this->resolveUser()['login'] ?? '');
+
+        $payload = json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        $temporaryPath = $path . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+        $written = file_put_contents($temporaryPath, $payload);
 
         if ($written === false) {
             throw new \RuntimeException('Nao foi possivel escrever o arquivo de configuracoes.');
+        }
+
+        if (!@rename($temporaryPath, $path)) {
+            @unlink($temporaryPath);
+            throw new \RuntimeException('Nao foi possivel salvar o arquivo de configuracoes.');
         }
     }
 
@@ -1406,7 +1414,7 @@ final class ContractController
 
     private function contractSettingsPath(): string
     {
-        return $this->projectRootPath() . '/storage/contracts/config.json';
+        return $this->moduleSettingsPathOverride ?? ($this->projectRootPath() . '/storage/contracts/config.json');
     }
 
     private function projectRootPath(): string
