@@ -31,3 +31,11 @@ scripts/releases/deploy_beta.sh \
 ```
 
 Por padrão, MkAuth, notificações, chamados e IA ficam bloqueados. Operações reais exigem `--enable-real-operations` e a confirmação literal adicional documentada pelo `--help`.
+
+## Base pública em Alias ou symlink
+
+Quando o Apache expõe uma release por `Alias` ou symlink e o `SCRIPT_NAME` PHP
+passa a refletir o caminho físico, configure `APP_BASE_PATH` somente com o
+caminho público, por exemplo `/isp_auxiliar/public`. O valor não aceita URL,
+host, query string, fragmento nem segmentos `..`; vazio mantém a autodetecção
+legada.

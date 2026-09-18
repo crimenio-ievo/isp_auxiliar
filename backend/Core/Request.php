@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Core;
 
+use InvalidArgumentException;
+
 /**
  * Encapsula os dados principais da requisicao HTTP.
  */
@@ -26,7 +28,10 @@ final class Request
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
         $path = (string) parse_url($uri, PHP_URL_PATH);
         $scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
-        $basePath = self::detectBasePath($scriptName);
+        $configuredBasePath = Env::get('APP_BASE_PATH');
+        $basePath = $configuredBasePath === null
+            ? self::detectBasePath($scriptName)
+            : self::normalizeConfiguredBasePath($configuredBasePath);
         $normalizedPath = self::stripBasePath($path, $basePath);
 
         return new self(
@@ -145,6 +150,36 @@ final class Request
         }
 
         return rtrim($directory, '/');
+    }
+
+    private static function normalizeConfiguredBasePath(string $basePath): string
+    {
+        $basePath = trim($basePath);
+
+        if ($basePath === '' || $basePath === '/') {
+            return '';
+        }
+
+        if (
+            !str_starts_with($basePath, '/') ||
+            str_starts_with($basePath, '//') ||
+            str_contains($basePath, '://') ||
+            str_contains($basePath, '?') ||
+            str_contains($basePath, '#')
+        ) {
+            throw new InvalidArgumentException('APP_BASE_PATH deve conter somente um caminho público absoluto.');
+        }
+
+        $basePath = preg_replace('#/+#', '/', $basePath) ?? '';
+        $segments = explode('/', trim($basePath, '/'));
+
+        foreach ($segments as $segment) {
+            if (rawurldecode($segment) === '..') {
+                throw new InvalidArgumentException('APP_BASE_PATH não pode conter segmentos de travessia.');
+            }
+        }
+
+        return rtrim($basePath, '/');
     }
 
     private static function stripBasePath(string $path, string $basePath): string
