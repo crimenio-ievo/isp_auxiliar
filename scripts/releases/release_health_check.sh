@@ -7,9 +7,10 @@ COOKIE_FILE=""
 EXPECTED_CHANNEL=""
 EXPECTED_COMMIT=""
 DRY_RUN=false
+ALLOW_HTTP=false
 
 usage() {
-    echo "Uso: $0 --url URL [--cookie-file COOKIE_ADMIN] [--expected-channel stable|beta] [--expected-commit HASH] [--dry-run]"
+    echo "Uso: $0 --url URL [--allow-http] [--cookie-file COOKIE_ADMIN] [--expected-channel stable|beta] [--expected-commit HASH] [--dry-run]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
         --cookie-file) COOKIE_FILE="$2"; shift ;;
         --expected-channel) EXPECTED_CHANNEL="$2"; shift ;;
         --expected-commit) EXPECTED_COMMIT="$2"; shift ;;
+        --allow-http) ALLOW_HTTP=true ;;
         --dry-run) DRY_RUN=true ;;
         -h|--help) usage; exit 0 ;;
         *) usage; exit 2 ;;
@@ -25,7 +27,11 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-[[ "${BASE_URL}" =~ ^https://[^[:space:]]+$ ]] || { echo "ERRO: URL HTTPS obrigatória." >&2; exit 2; }
+if [[ "${ALLOW_HTTP}" == true ]]; then
+    [[ "${BASE_URL}" =~ ^http://[^[:space:]]+$ ]] || { echo "ERRO: --allow-http exige URL HTTP." >&2; exit 2; }
+else
+    [[ "${BASE_URL}" =~ ^https://[^[:space:]]+$ ]] || { echo "ERRO: URL HTTPS obrigatória." >&2; exit 2; }
+fi
 [[ -z "${EXPECTED_CHANNEL}" || "${EXPECTED_CHANNEL}" =~ ^(stable|beta)$ ]] || { echo "ERRO: canal esperado inválido." >&2; exit 2; }
 [[ -z "${EXPECTED_COMMIT}" || "${EXPECTED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "ERRO: commit esperado inválido." >&2; exit 2; }
 if [[ -n "${COOKIE_FILE}" ]]; then

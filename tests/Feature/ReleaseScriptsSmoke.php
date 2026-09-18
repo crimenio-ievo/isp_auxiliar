@@ -63,6 +63,7 @@ $assert(str_contains($common, 'RELEASE_WEB_GROUP:-www-data')
     && str_contains($common, 'getent group')
     && str_contains($common, '-o root -g "${web_group}" -m 2770'), 'Diretórios graváveis da release não definem owner, grupo web e setgid permanentemente.');
 $assert(str_contains($deploy, '/isp_auxiliar_beta_current') && !str_contains($deploy, 'isp_auxiliar_stable_current'), 'Deploy Beta pode atingir o symlink Stable.');
+$assert(str_contains($deploy, '--allow-http-health') && str_contains($rollbackBeta, '--allow-http-health'), 'Health HTTP explícito não está restrito aos fluxos Beta.');
 $assert(str_contains($deploy, 'git -C "${SOURCE_DIR}" archive') && str_contains($deploy, '.release-manifest'), 'Deploy não usa o commit exato ou não cria manifesto.');
 $assert(str_contains($promote, 'release_validate_manifest_channel "${BETA_RELEASE}" beta') && str_contains($promote, 'cp -a "${BETA_RELEASE}"'), 'Promoção não reutiliza a release Beta homologada.');
 $assert(!str_contains($rollbackBeta, 'apply_migrations.php') && !str_contains($rollbackStable, 'apply_migrations.php'), 'Rollback tenta reverter ou aplicar banco automaticamente.');
@@ -93,6 +94,11 @@ $runBash = static function (string $script, array $arguments = []): array {
         'output' => implode("\n", $output),
     ];
 };
+
+$httpHealthDenied = $runBash($health, ['--url', 'http://127.0.0.1/app', '--dry-run']);
+$assert($httpHealthDenied['status'] === 2, 'Health HTTP foi aceito sem autorização explícita.');
+$httpHealthAllowed = $runBash($health, ['--url', 'http://127.0.0.1/app', '--allow-http', '--dry-run']);
+$assert($httpHealthAllowed['status'] === 0, 'Health HTTP explícito foi recusado.');
 
 $temporaryPrefix = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . '/isp-auxiliar-release-migrations-';
 $temporaryRoot = $temporaryPrefix . bin2hex(random_bytes(8));

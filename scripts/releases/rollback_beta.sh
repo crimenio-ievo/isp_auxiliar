@@ -13,9 +13,10 @@ BACKUP_ROOT="/var/backups/isp_auxiliar_releases"
 LOG_ROOT="/var/log/isp_auxiliar"
 HEALTH_URL=""
 COOKIE_FILE=""
+ALLOW_HTTP_HEALTH=false
 
 usage() {
-    echo "Uso: $0 --release-id ID --commit HASH_COMPLETO --health-url URL [--to-release DIRETORIO] [--dry-run]"
+    echo "Uso: $0 --release-id ID --commit HASH_COMPLETO --health-url URL [--allow-http-health] [--to-release DIRETORIO] [--dry-run]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -29,6 +30,7 @@ while [[ $# -gt 0 ]]; do
         --log-root) LOG_ROOT="$2"; shift ;;
         --health-url) HEALTH_URL="$2"; shift ;;
         --cookie-file) COOKIE_FILE="$2"; shift ;;
+        --allow-http-health) ALLOW_HTTP_HEALTH=true ;;
         --dry-run) DRY_RUN=true ;;
         -h|--help) usage; exit 0 ;;
         *) usage; release_die "opção inválida: $1" ;;
@@ -46,7 +48,11 @@ release_require_safe_dir "${RELEASE_ROOT}"
 release_require_safe_dir "${CURRENT_LINK}"
 release_require_safe_dir "${BACKUP_ROOT}"
 release_require_release_id "${RELEASE_ID}"
-release_require_https_url "${HEALTH_URL}"
+if [[ "${ALLOW_HTTP_HEALTH}" == true ]]; then
+    release_require_http_url "${HEALTH_URL}"
+else
+    release_require_https_url "${HEALTH_URL}"
+fi
 case "$(readlink -f "${TARGET_RELEASE}")" in
     "$(readlink -m "${RELEASE_ROOT}/beta")"/*) ;;
     *) release_die "release alvo não pertence ao canal Beta" ;;
@@ -63,6 +69,7 @@ release_cli_health_check "${TARGET_RELEASE}" beta "${COMMIT}"
 release_atomic_switch "${CURRENT_LINK}" "${TARGET_RELEASE}"
 
 health_args=(--url "${HEALTH_URL}" --expected-channel beta --expected-commit "${COMMIT}")
+[[ "${ALLOW_HTTP_HEALTH}" == true ]] && health_args+=(--allow-http)
 [[ -n "${COOKIE_FILE}" ]] && health_args+=(--cookie-file "${COOKIE_FILE}")
 [[ "${DRY_RUN}" == true ]] && health_args+=(--dry-run)
 "${SCRIPT_DIR}/release_health_check.sh" "${health_args[@]}"

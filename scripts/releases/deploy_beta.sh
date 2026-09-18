@@ -15,9 +15,10 @@ BACKUP_ROOT="/var/backups/isp_auxiliar_releases"
 LOG_ROOT="/var/log/isp_auxiliar"
 HEALTH_URL=""
 COOKIE_FILE=""
+ALLOW_HTTP_HEALTH=false
 
 usage() {
-    echo "Uso: $0 --source CHECKOUT --commit HASH_COMPLETO --release-id ID --env-file ARQUIVO --health-url URL [--dry-run] [--confirm-migrations] [--enable-real-operations --confirm-real-operations EU_CONFIRM_REAL_OPERATIONS]"
+    echo "Uso: $0 --source CHECKOUT --commit HASH_COMPLETO --release-id ID --env-file ARQUIVO --health-url URL [--allow-http-health] [--dry-run] [--confirm-migrations] [--enable-real-operations --confirm-real-operations EU_CONFIRM_REAL_OPERATIONS]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -33,6 +34,7 @@ while [[ $# -gt 0 ]]; do
         --log-root) LOG_ROOT="$2"; shift ;;
         --health-url) HEALTH_URL="$2"; shift ;;
         --cookie-file) COOKIE_FILE="$2"; shift ;;
+        --allow-http-health) ALLOW_HTTP_HEALTH=true ;;
         --confirm-migrations) CONFIRM_MIGRATIONS=true ;;
         --enable-real-operations) ENABLE_REAL_OPERATIONS=true ;;
         --confirm-real-operations) REAL_OPERATIONS_CONFIRMATION="$2"; shift ;;
@@ -51,7 +53,11 @@ release_require_safe_dir "${RELEASE_ROOT}"
 release_require_safe_dir "${CURRENT_LINK}"
 release_require_safe_dir "${SHARED_ROOT}"
 release_require_safe_dir "${BACKUP_ROOT}"
-release_require_https_url "${HEALTH_URL}"
+if [[ "${ALLOW_HTTP_HEALTH}" == true ]]; then
+    release_require_http_url "${HEALTH_URL}"
+else
+    release_require_https_url "${HEALTH_URL}"
+fi
 [[ -f "${ENV_FILE}" ]] || release_die "arquivo .env Beta não localizado"
 [[ "${CURRENT_LINK}" != *stable* ]] || release_die "deploy Beta recebeu symlink da Stable"
 release_require_safe_operations
@@ -98,6 +104,7 @@ release_seal_immutable_code "${RELEASE_DIR}"
 release_atomic_switch "${CURRENT_LINK}" "${RELEASE_DIR}"
 
 health_args=(--url "${HEALTH_URL}" --expected-channel beta --expected-commit "${COMMIT}")
+[[ "${ALLOW_HTTP_HEALTH}" == true ]] && health_args+=(--allow-http)
 [[ -n "${COOKIE_FILE}" ]] && health_args+=(--cookie-file "${COOKIE_FILE}")
 [[ "${DRY_RUN}" == true ]] && health_args+=(--dry-run)
 "${SCRIPT_DIR}/release_health_check.sh" "${health_args[@]}"

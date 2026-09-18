@@ -68,6 +68,10 @@ release_require_https_url() {
     [[ "${1:-}" =~ ^https://[^[:space:]]+$ ]] || release_die "URL HTTPS obrigatória"
 }
 
+release_require_http_url() {
+    [[ "${1:-}" =~ ^http://[^[:space:]]+$ ]] || release_die "URL HTTP obrigatória"
+}
+
 release_set_log() {
     local log_root="$1"
     local channel="$2"

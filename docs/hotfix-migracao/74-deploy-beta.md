@@ -30,6 +30,10 @@ scripts/releases/deploy_beta.sh \
   --dry-run
 ```
 
+Em uma rede interna que use HTTP por IP e não possua TLS válido para esse IP,
+somente o deploy/rollback Beta pode receber `--allow-http-health`; a URL deve
+ser `http://` e a opção nunca flexibiliza os fluxos Stable.
+
 Por padrão, MkAuth, notificações, chamados e IA ficam bloqueados. Operações reais exigem `--enable-real-operations` e a confirmação literal adicional documentada pelo `--help`.
 
 ## Base pública em Alias ou symlink
