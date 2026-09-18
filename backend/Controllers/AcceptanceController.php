@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Config;
+use App\Core\Csrf;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
@@ -17,6 +18,9 @@ use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
+use App\Services\Clients\ClientPlanSnapshotService;
+use App\Services\Contracts\AcceptanceEvidenceService;
+use App\Services\Processes\OperationalProcessService;
 
 /**
  * Controla a rota publica de aceite digital.
@@ -35,7 +39,9 @@ final class AcceptanceController
         private Database $database,
         private LocalRepository $localRepository,
         private MkAuthClient $mkauthClient,
-        private MkAuthDatabase $mkauthDatabase
+        private MkAuthDatabase $mkauthDatabase,
+        private OperationalProcessService $operationalProcessService,
+        private AcceptanceEvidenceService $acceptanceEvidenceService
     ) {
     }
 
@@ -68,6 +74,7 @@ final class AcceptanceController
             'documentValidationRequired' => (bool) ($context['documentValidationRequired'] ?? false),
             'documentValidationDigits' => (int) ($context['documentValidationDigits'] ?? 3),
             'documentValidationPossible' => (bool) ($context['documentValidationPossible'] ?? false),
+            'csrfToken' => Csrf::token($this->csrfScope($token)),
             'errorMessage' => $flash['error'] ?? null,
             'successMessage' => $flash['success'] ?? null,
         ]);
@@ -78,6 +85,10 @@ final class AcceptanceController
     public function term(Request $request): Response
     {
         $token = trim((string) $request->route('token', ''));
+        if ($request->method() === 'POST' && !Csrf::verify($request, $this->csrfScope($token))) {
+            Flash::set('error', 'A sessão de segurança expirou. Reabra o termo e tente novamente.');
+            return Response::redirect('/aceite/' . rawurlencode($token) . '/termo');
+        }
         $context = $this->loadContextByToken($token);
         $acceptance = is_array($context['acceptance'] ?? null) ? $context['acceptance'] : [];
 
@@ -154,6 +165,7 @@ final class AcceptanceController
             'termAttemptsRemaining' => $termAttemptsRemaining,
             'termValidationError' => $termValidationError,
             'termValidationDigits' => $documentDigits,
+            'csrfToken' => Csrf::token($this->csrfScope($token)),
         ]);
 
         return Response::html($html);
@@ -162,6 +174,10 @@ final class AcceptanceController
     public function confirm(Request $request): Response
     {
         $token = trim((string) $request->route('token', ''));
+        if (!Csrf::verify($request, $this->csrfScope($token))) {
+            Flash::set('error', 'A sessão de segurança expirou. Reabra o aceite e tente novamente.');
+            return Response::redirect('/aceite/' . rawurlencode($token));
+        }
         $context = $this->loadContextByToken($token);
 
         if (!empty($context['error'])) {
@@ -269,10 +285,7 @@ final class AcceptanceController
 
             $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
             if ($signatureRequired) {
-                $signaturePath = $this->saveSignatureFile($acceptanceId, $signatureDataUrl);
-                if ($signaturePath === null) {
-                    throw new \RuntimeException('A assinatura informada nao pôde ser salva.');
-                }
+                $signaturePath = $this->acceptanceEvidenceService->saveSignature($acceptanceId, $signatureDataUrl, 'remote');
             }
 
         $validationMatched = null;
@@ -331,7 +344,7 @@ final class AcceptanceController
 
         $evidencePath = null;
         try {
-            $evidencePath = $this->saveEvidenceJson($acceptanceId, $evidence);
+            $evidencePath = $this->acceptanceEvidenceService->saveEvidence($acceptanceId, $evidence, 'acceptance');
         } catch (\Throwable $exception) {
             $this->localRepository->log(
                 null,
@@ -379,6 +392,7 @@ final class AcceptanceController
         if ((string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao') {
             $this->queueUpgradeOperationalTask($contract, $acceptance, $acceptanceId, $request);
         }
+        $this->operationalProcessService->synchronizeAcceptance($acceptanceId);
 
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -402,19 +416,19 @@ final class AcceptanceController
         $token = trim($token);
 
         if ($token === '') {
-            return ['error' => 'Token invalido.'];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $acceptance = $this->acceptanceRepository->findByTokenHash($token);
 
         if (!is_array($acceptance) || !isset($acceptance['id'])) {
-            return ['error' => 'Aceite nao localizado ou token invalido.'];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $contract = $this->contractRepository->findById((int) $acceptance['contract_id']);
 
         if (!is_array($contract)) {
-            return ['error' => 'Contrato vinculado nao encontrado.'];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $lifecycleStatus = (string) ($contract['lifecycle_status'] ?? 'active');
@@ -423,16 +437,14 @@ final class AcceptanceController
             || (string) ($acceptance['status'] ?? '') === 'cancelado'
         ) {
             return [
-                'error' => 'Esta solicitação foi cancelada e não está mais disponível. Utilize a nova solicitação enviada pela iEvo Technology.',
+                'error' => 'Use o link mais recente enviado pela iEvo.',
                 'unavailableReason' => 'cancelled_or_superseded',
-                'acceptance' => $acceptance,
-                'contract' => $contract,
             ];
         }
 
         $status = (string) ($acceptance['status'] ?? '');
         if (!in_array($status, ['criado', 'enviado', 'assinatura_pendente', 'aceito'], true)) {
-            return ['error' => 'Este aceite nao esta disponivel para conclusao.', 'acceptance' => $acceptance, 'contract' => $contract];
+            return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
         $expiresAt = trim((string) ($acceptance['token_expires_at'] ?? ''));
@@ -441,10 +453,13 @@ final class AcceptanceController
             try {
                 $tokenExpired = new \DateTimeImmutable($expiresAt) < new \DateTimeImmutable();
                 if ($tokenExpired && $status !== 'aceito') {
-                    return ['error' => 'Este link de aceite expirou. Solicite novo envio.'];
+                    return [
+                        'error' => 'Este link não está mais válido. Solicite um novo envio à equipe iEvo.',
+                        'unavailableReason' => 'expired',
+                    ];
                 }
             } catch (\Throwable) {
-                return ['error' => 'Nao foi possivel validar a validade do link.'];
+                return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
             }
         }
 
@@ -482,18 +497,28 @@ final class AcceptanceController
 
         $upgradeSnapshot = $this->extractUpgradeSnapshot($contract);
         $planSnapshot = $this->resolvePlanSnapshot((string) (
-            $checkpointData['plano']
+            $checkpointData['plan_uuid']
+            ?? $checkpointData['plan_code']
+            ?? $checkpointData['plan_name']
             ?? $registration['plan_name']
+            ?? $clientProfile['plano_uuid']
             ?? $clientProfile['plano_nome']
             ?? $clientProfile['plano']
+            ?? $checkpointData['plano']
             ?? $contract['plan_name']
             ?? ''
-        ));
+        ), $checkpointData);
         $documentDigits = $this->documentValidationDigits();
         $documentRaw = preg_replace('/\D+/', '', (string) ($registration['cpf_cnpj'] ?? $checkpointData['cpf_cnpj'] ?? ($clientProfile['cpf_cnpj'] ?? ''))) ?? '';
         $documentMasked = $this->maskDocument($documentRaw);
         $documentAvailable = $documentRaw !== '';
         $publicDetails = $this->buildPublicDetails($contract, $registration, $checkpointData, $planSnapshot, $documentMasked, is_array($clientProfile) ? $clientProfile : [], $upgradeSnapshot);
+        $acceptedDisplayedData = $status === 'aceito' ? $this->loadAcceptedDisplayedData($acceptance) : null;
+        if (is_array($acceptedDisplayedData)) {
+            // O documento aceito permanece ancorado na evidência que o cliente
+            // efetivamente viu; o catálogo atual não reescreve esse histórico.
+            $publicDetails = $acceptedDisplayedData;
+        }
         $signaturePath = $this->resolveExistingSignaturePath($acceptance, $registration, $checkpointData);
         if ($signaturePath !== null) {
             $publicDetails['assinatura_path'] = $signaturePath;
@@ -611,13 +636,14 @@ final class AcceptanceController
         $benefitFlags = $this->normalizeUpgradeBenefitFlags($upgradeSnapshot['benefit_flags'] ?? null);
         $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
         $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
-        $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+        $waiverApplied = !empty($benefitFlags['adhesion_waiver']);
+        $fidelityMonths = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
         $benefitSentence = $waiverApplied
             ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
             : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
-        $penaltySentence = $waiverApplied
-            ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
-            : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
+        $penaltySentence = $fidelityMonths > 0
+            ? 'A eventual multa observará o benefício registrado e o período restante, conforme as condições documentadas.'
+            : 'Nenhuma nova fidelidade ou multa vinculada a esta alteração foi aplicada.';
 
         $description = implode("\n", array_filter([
             'Upgrade / Migração aceito em aceite remoto.',
@@ -630,7 +656,8 @@ final class AcceptanceController
             'Tecnologia antiga: ' . ($currentTechnology !== '' ? $currentTechnology : '-'),
             'Tecnologia nova: ' . ($newTechnology !== '' ? $newTechnology : '-'),
             'Benefício: ' . ($benefitDescription !== '' ? $benefitDescription : '-'),
-            'Valor da taxa de adesão/instalação isentada: R$ ' . $benefitValue,
+            $waiverApplied ? 'Valor da taxa de adesão/instalação isentada: R$ ' . $benefitValue : null,
+            'Nova fidelidade: ' . ($fidelityMonths > 0 ? $fidelityMonths . ' meses' : 'não aplicada'),
             $originalContractReference !== '' ? 'Referência original: ' . $originalContractReference : null,
             $penaltySentence,
             'Necessário verificar financeiro/proporcionalidade.',
@@ -990,15 +1017,28 @@ final class AcceptanceController
             $benefitDescription = trim((string) ($upgradeSnapshot['benefit_description'] ?? ''));
             $benefitValue = number_format((float) ($upgradeSnapshot['benefit_value'] ?? 0), 2, ',', '.');
             $monthlyValue = number_format((float) ($upgradeSnapshot['new_monthly_value'] ?? 0), 2, ',', '.');
-            $fidelityMonths = max(1, (int) ($upgradeSnapshot['fidelity_months'] ?? $fidelidade));
+            $fidelityMonths = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
             $observation = trim((string) ($upgradeSnapshot['observacao'] ?? $observacao));
-            $waiverApplied = !empty($benefitFlags['radio_to_fiber']) || !empty($benefitFlags['adhesion_waiver']);
+            $waiverApplied = !empty($benefitFlags['adhesion_waiver']);
             $benefitSentence = $waiverApplied
                 ? 'Foi concedida a isenção da taxa de adesão/instalação, avaliada em R$ ' . $benefitValue . '.'
                 : 'Benefício comercial concedido: ' . ($benefitDescription !== '' ? $benefitDescription : '-');
-            $penaltySentence = $waiverApplied
-                ? 'A multa por rescisão antecipada é proporcional ao período restante e limitada ao valor da taxa de adesão/instalação isentada.'
-                : 'A multa por rescisão antecipada será proporcional ao período restante, conforme as condições comerciais do contrato, sem benefício financeiro específico.';
+            $fidelityBenefit = trim((string) ($upgradeSnapshot['fidelity_benefit_description'] ?? ''));
+            if ($fidelityBenefit === '') {
+                $fidelityBenefit = $benefitDescription;
+            }
+            $fidelityLines = $fidelityMonths > 0
+                ? [
+                    'Cláusula Segunda: nova fidelidade expressamente aceita',
+                    'Fidelidade: ' . $fidelityMonths . ' meses',
+                    'Benefício vinculado à fidelidade: ' . ($fidelityBenefit !== '' ? $fidelityBenefit : '-'),
+                    'A eventual multa observará o benefício registrado e o período restante, conforme as condições documentadas.',
+                ]
+                : [
+                    'Cláusula Segunda: fidelidade',
+                    'Nova fidelidade: não aplicada.',
+                    'Esta alteração não renova automaticamente prazo de permanência.',
+                ];
 
             return trim(implode("\n", [
                 'Termo Aditivo ao Contrato de Prestação de Serviço',
@@ -1016,10 +1056,8 @@ final class AcceptanceController
                 'Nova tecnologia: ' . ($newTechnology !== '' ? $newTechnology : '-'),
                 $benefitSentence,
                 'Novo valor mensal: R$ ' . $monthlyValue,
-                $penaltySentence,
                 '',
-                'Cláusula Segunda: renovação da fidelidade por 12 meses',
-                'Fidelidade: ' . $fidelityMonths . ' meses',
+                ...$fidelityLines,
                 'As demais condições comerciais permanecem válidas, exceto o que este aditivo alterar expressamente.',
                 '',
                 'Cláusula Terceira: disposições gerais',
@@ -1173,14 +1211,14 @@ final class AcceptanceController
         ]);
     }
 
-    private function resolvePlanSnapshot(string $planName): array
+    private function resolvePlanSnapshot(string $planIdentity, array $captured = []): array
     {
-        $planName = trim($planName);
+        $planIdentity = trim($planIdentity);
 
-        if ($planName === '') {
+        if ($planIdentity === '') {
             return [
                 'name' => '',
-                'label' => '-',
+                'label' => 'Plano não localizado no catálogo atual',
                 'value' => null,
                 'source' => 'unknown',
             ];
@@ -1195,37 +1233,41 @@ final class AcceptanceController
             $planRows = [];
         }
 
-        foreach ($planRows as $plan) {
-            $name = trim((string) ($plan['nome'] ?? ''));
-            if ($name === '') {
-                continue;
-            }
-
-            if (strcasecmp($name, $planName) !== 0) {
-                continue;
-            }
-
-            $value = trim((string) ($plan['valor'] ?? ''));
-
+        $resolved = (new ClientPlanSnapshotService())->capture(
+            array_replace($captured, ['plano' => $planIdentity]),
+            $planRows
+        );
+        $name = trim((string) ($resolved['plan_name'] ?? ''));
+        $value = trim((string) ($resolved['plan_value'] ?? ''));
+        if ($name !== '') {
             return [
                 'name' => $name,
-                'label' => $name . ($value !== '' ? ' - R$ ' . number_format((float) str_replace(',', '.', $value), 2, ',', '.') : ''),
+                'label' => $name,
                 'value' => $value !== '' ? (float) str_replace(',', '.', $value) : null,
-                'source' => 'mkauth',
+                'uuid' => (string) ($resolved['plan_uuid'] ?? ''),
+                'code' => (string) ($resolved['plan_code'] ?? ''),
+                'technology' => (string) ($resolved['plan_technology'] ?? ''),
+                'download' => (string) ($resolved['plan_download'] ?? ''),
+                'upload' => (string) ($resolved['plan_upload'] ?? ''),
+                'source' => (string) (($resolved['plan_resolution_status'] ?? '') === 'resolved' ? 'mkauth' : 'snapshot'),
             ];
         }
 
         return [
-            'name' => $planName,
-            'label' => $planName,
+            'name' => '',
+            'label' => 'Plano não localizado no catálogo atual',
             'value' => null,
-            'source' => 'fallback',
+            'source' => 'unknown',
         ];
     }
 
     private function buildPublicDetails(array $contract, ?array $registration, array $checkpointData, array $planSnapshot, string $maskedDocument, array $clientProfile = [], array $upgradeSnapshot = []): array
     {
         $isUpgrade = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
+        $planDisplayName = trim((string) ($planSnapshot['name'] ?? ''));
+        if ($planDisplayName === '') {
+            $planDisplayName = 'Plano não localizado no catálogo atual';
+        }
         $clientProfile = is_array($clientProfile) ? $clientProfile : [];
         $customerName = trim((string) ($clientProfile['nome'] ?? $contract['nome_cliente'] ?? $registration['client_name'] ?? '-'));
         $customerLogin = trim((string) ($clientProfile['login'] ?? $contract['mkauth_login'] ?? $registration['mkauth_login'] ?? '-'));
@@ -1272,8 +1314,8 @@ final class AcceptanceController
             ],
             'plano' => [
                 'nome' => $isUpgrade
-                    ? (string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'))
-                    : (string) ($planSnapshot['label'] ?? $contract['plan_name'] ?? '-'),
+                    ? (string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? $planDisplayName)
+                    : $planDisplayName,
                 'valor_mensal' => $isUpgrade
                     ? (($upgradeSnapshot['new_monthly_value'] ?? null) !== null ? (float) $upgradeSnapshot['new_monthly_value'] : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null))
                     : ($planSnapshot['value'] !== null ? (float) $planSnapshot['value'] : null),
@@ -1300,6 +1342,29 @@ final class AcceptanceController
             'upgrade' => $isUpgrade ? $this->normalizeUpgradeSnapshotForDisplay($upgradeSnapshot) : [],
             'termo_versao' => (string) ($contract['termo_versao'] ?? $this->config->get('contracts.term_version', '2026.1')),
         ];
+    }
+
+    private function loadAcceptedDisplayedData(?array $acceptance): ?array
+    {
+        if (!is_array($acceptance) || (string) ($acceptance['status'] ?? '') !== 'aceito') {
+            return null;
+        }
+
+        $relativePath = trim((string) ($acceptance['evidence_json_path'] ?? ''));
+        if ($relativePath === '') {
+            return null;
+        }
+
+        $root = realpath($this->projectRootPath());
+        $path = realpath($this->projectRootPath() . '/' . ltrim($relativePath, '/'));
+        if ($root === false || $path === false || !str_starts_with($path, $root . DIRECTORY_SEPARATOR) || !is_file($path)) {
+            return null;
+        }
+
+        $payload = json_decode((string) file_get_contents($path), true);
+        $displayedData = is_array($payload) ? ($payload['displayed_data'] ?? null) : null;
+
+        return is_array($displayedData) ? $displayedData : null;
     }
 
     private function resolveExistingSignaturePath(?array $acceptance, ?array $registration = null, array $checkpointData = []): ?string
@@ -1343,46 +1408,6 @@ final class AcceptanceController
         return dirname(__DIR__, 2);
     }
 
-    private function saveSignatureFile(int $acceptanceId, string $signatureDataUrl): ?string
-    {
-        $signatureDataUrl = trim($signatureDataUrl);
-
-        if ($signatureDataUrl === '') {
-            return null;
-        }
-
-        $binary = $this->decodeDataUrl($signatureDataUrl);
-        if ($binary === null) {
-            throw new \RuntimeException('A assinatura informada não pôde ser processada.');
-        }
-
-        $rootPath = dirname(__DIR__, 2);
-        $directory = $rootPath . '/storage/contracts/acceptances';
-        if (!is_dir($directory)) {
-            @mkdir($directory, 0775, true);
-        }
-
-        $fileName = 'signature_' . $acceptanceId . '_' . date('Ymd_His') . '.png';
-        $path = $directory . '/' . $fileName;
-
-        if (file_put_contents($path, $binary) === false) {
-            throw new \RuntimeException('Nao foi possivel salvar a assinatura.');
-        }
-
-        return 'storage/contracts/acceptances/' . $fileName;
-    }
-
-    private function decodeDataUrl(string $dataUrl): ?string
-    {
-        if (!preg_match('#^data:image/([a-zA-Z0-9.+-]+);base64,(.+)$#', $dataUrl, $matches)) {
-            return null;
-        }
-
-        $decoded = base64_decode($matches[2], true);
-
-        return $decoded === false ? null : $decoded;
-    }
-
     private function documentValidationRequired(): bool
     {
         return (bool) $this->config->get('contracts.commercial.exigir_validacao_cpf_aceite', true);
@@ -1411,27 +1436,8 @@ final class AcceptanceController
         }
     }
 
-    private function saveEvidenceJson(int $acceptanceId, array $evidence): string
+    private function csrfScope(string $token): string
     {
-        $rootPath = dirname(__DIR__, 2);
-        $directory = $rootPath . '/storage/contracts/acceptances';
-
-        if (!is_dir($directory)) {
-            @mkdir($directory, 0775, true);
-        }
-
-        $fileName = 'acceptance_' . $acceptanceId . '_' . date('Ymd_His') . '.json';
-        $path = $directory . '/' . $fileName;
-
-        $written = file_put_contents(
-            $path,
-            json_encode($evidence, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}'
-        );
-
-        if ($written === false) {
-            throw new \RuntimeException('Nao foi possivel salvar a evidência do aceite.');
-        }
-
-        return 'storage/contracts/acceptances/' . $fileName;
+        return 'public_acceptance:' . hash('sha256', $token);
     }
 }

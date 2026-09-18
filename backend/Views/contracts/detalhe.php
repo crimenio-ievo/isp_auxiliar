@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Core\Url;
+use App\Core\Csrf;
 
 $detail = is_array($detail ?? null) ? $detail : [];
 $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
@@ -49,7 +50,8 @@ $upgradeSnapshot = is_array($upgradeSnapshot) ? $upgradeSnapshot : [];
 $technicalCompleted = (string) ($upgradeSnapshot['technical_status'] ?? '') === 'concluido'
     || trim((string) ($upgradeSnapshot['technical_completed_at'] ?? '')) !== '';
 $upgradeBenefitFlags = is_array($upgradeSnapshot['benefit_flags'] ?? null) ? $upgradeSnapshot['benefit_flags'] : [];
-$upgradeHasWaiver = !empty($upgradeBenefitFlags['radio_to_fiber']) || !empty($upgradeBenefitFlags['adhesion_waiver']);
+$upgradeHasWaiver = !empty($upgradeBenefitFlags['adhesion_waiver']);
+$upgradeFidelity = max(0, min(12, (int) ($upgradeSnapshot['fidelity_months'] ?? 0)));
 $isUpgradeContract = (string) ($contract['tipo_aceite'] ?? '') === 'upgrade_migracao';
 $lifecycleLabel = match ($lifecycleStatus) {
     'correction_pending' => 'Correção em andamento',
@@ -116,6 +118,23 @@ $typeLabel = static function (string $value): string {
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
 $shortHash = static fn (string $value): string => $value !== '' ? substr($value, 0, 16) . '…' : '-';
+$auditLabel = static fn (string $action): string => match ($action) {
+    'contract.acceptance.accepted', 'contract.acceptance.confirmed' => 'Cliente confirmou o aceite.',
+    'contract.acceptance.created' => 'Aceite preparado.',
+    'contract.upgrade.operational_task.created' => 'Pendência operacional criada.',
+    'contract.financial_task.created' => 'Pendência financeira criada.',
+    'contract.financial_task.completed' => 'Pendência financeira concluída.',
+    'contract.financial_task.canceled' => 'Pendência financeira cancelada.',
+    'contract.financial.closed', 'financial_task.mkauth_ticket.closed' => 'Chamado financeiro encerrado.',
+    'contract.upgrade.created' => 'Nova condição de migração preparada.',
+    'contract.upgrade.pending_condition_revised' => 'Condição pendente corrigida.',
+    'contract.upgrade.correction_started' => 'Substituição da condição iniciada.',
+    'contract.upgrade.superseded' => 'Condição anterior substituída.',
+    'contract.upgrade.cancelled', 'operational_process.cancelled' => 'Migração cancelada.',
+    'operational_process.completed' => 'Migração concluída.',
+    'operational_process.migration.revised' => 'Condição da migração revisada.',
+    default => str_starts_with($action, 'operational_process.step.') ? 'Etapa operacional atualizada.' : 'Registro operacional atualizado.',
+};
 $summarizeProviderResponse = static function (mixed $value): string {
     if (is_array($value)) {
         $parts = [];
@@ -203,7 +222,7 @@ ob_start();
 
 <section class="card">
     <div class="section-heading">
-        <p class="section-heading__eyebrow">Resumo</p>
+        <p class="section-heading__eyebrow">Condição comercial</p>
         <h2><?= htmlspecialchars((string) ($contract['nome_cliente'] ?? 'Contrato'), ENT_QUOTES, 'UTF-8'); ?></h2>
     </div>
 
@@ -261,7 +280,7 @@ ob_start();
 
     <?php if ($typeLabel((string) ($contract['tipo_aceite'] ?? '')) === 'Upgrade / Migração' && $upgradeSnapshot !== []): ?>
         <div class="summary-grid" style="margin-top: 18px;">
-            <div class="summary-item"><span>Operação</span><strong><?= ($upgradeSnapshot['operation_type'] ?? 'upgrade') === 'migration' ? 'Migração de tecnologia' : 'Upgrade de plano'; ?></strong></div>
+            <div class="summary-item"><span>Operação</span><strong><?= htmlspecialchars(match ((string) ($upgradeSnapshot['operation_type'] ?? '')) { 'migration' => 'Migração de tecnologia', 'downgrade' => 'Downgrade', 'upgrade' => 'Upgrade', default => 'Não identificada' }, ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Plano atual</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['current_plan_name'] ?? $upgradeSnapshot['current_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Tecnologia atual</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['current_technology'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Novo plano</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['new_plan_name'] ?? $upgradeSnapshot['new_plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
@@ -269,18 +288,15 @@ ob_start();
             <div class="summary-item"><span>Benefício concedido</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['benefit_description'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Valor da taxa de adesão/instalação isentada</span><strong><?= htmlspecialchars($upgradeHasWaiver ? 'R$ ' . $formatMoney($upgradeSnapshot['benefit_value'] ?? 0) : 'Não se aplica', ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item"><span>Novo valor mensal</span><strong><?= htmlspecialchars('R$ ' . $formatMoney($upgradeSnapshot['new_monthly_value'] ?? 0), ENT_QUOTES, 'UTF-8'); ?></strong></div>
-            <div class="summary-item"><span>Fidelidade</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['fidelity_months'] ?? 12), ENT_QUOTES, 'UTF-8'); ?> meses</strong></div>
-            <div class="summary-item"><span>Multa proporcional</span><strong><?= htmlspecialchars($upgradeHasWaiver ? 'R$ ' . $formatMoney($upgradeSnapshot['multa_proporcional'] ?? 0) : 'Conforme contrato', ENT_QUOTES, 'UTF-8'); ?></strong></div>
+            <div class="summary-item"><span>Fidelidade</span><strong><?= $upgradeFidelity > 0 ? htmlspecialchars((string) $upgradeFidelity, ENT_QUOTES, 'UTF-8') . ' meses' : 'Não aplicada'; ?></strong></div>
+            <div class="summary-item"><span>Multa vinculada à nova fidelidade</span><strong><?= htmlspecialchars($upgradeFidelity > 0 ? 'Conforme benefício e condições documentadas' : 'Não se aplica nesta alteração', ENT_QUOTES, 'UTF-8'); ?></strong></div>
             <div class="summary-item summary-item--span-2"><span>Observação</span><strong><?= htmlspecialchars((string) ($upgradeSnapshot['observacao'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong></div>
         </div>
     <?php endif; ?>
 
     <div class="hero-actions" style="margin-top: 18px;">
         <a class="button button--ghost" href="#financeiro">Ver pendência financeira</a>
-        <a class="button button--ghost" href="#logs">Ver logs relacionados</a>
-        <?php if ($canManageSettings): ?>
-            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=contratos'), ENT_QUOTES, 'UTF-8'); ?>">Abrir configurações</a>
-        <?php endif; ?>
+        <a class="button button--ghost" href="#logs">Ver eventos</a>
         <?php if ($canCorrectUpgradeAction): ?>
             <button class="button button--ghost" type="button" data-upgrade-action-open="contract-upgrade-correct-modal"><?= $technicalCompleted ? 'Abrir processo corretivo' : 'Corrigir e reenviar'; ?></button>
         <?php endif; ?>
@@ -365,6 +381,7 @@ ob_start();
             </div>
             <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/corrigir'), ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="contract-send-modal__body">
+                    <?= Csrf::field('client_upgrade_correct:' . $contractId); ?>
                     <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="login" value="<?= htmlspecialchars((string) ($contract['mkauth_login'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="summary-grid">
@@ -390,6 +407,7 @@ ob_start();
             <div class="contract-send-modal__header"><div><p class="section-heading__eyebrow">Confirmação obrigatória</p><h2 id="contract-upgrade-cancel-title">Cancelar solicitação</h2></div><button class="button button--ghost button--small" type="button" data-upgrade-action-close>Cancelar</button></div>
             <form method="post" action="<?= htmlspecialchars(Url::to('/clientes/upgrade/cancelar'), ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="contract-send-modal__body">
+                    <?= Csrf::field('client_upgrade_cancel:' . $contractId); ?>
                     <input type="hidden" name="contract_id" value="<?= htmlspecialchars((string) $contractId, ENT_QUOTES, 'UTF-8'); ?>">
                     <input type="hidden" name="login" value="<?= htmlspecialchars((string) ($contract['mkauth_login'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                     <div class="summary-grid">
@@ -411,8 +429,8 @@ ob_start();
 
 <section class="card" style="margin-top: 20px;">
     <div class="section-heading">
-        <p class="section-heading__eyebrow">Integrações</p>
-        <h2>Histórico de integrações</h2>
+        <p class="section-heading__eyebrow">Aceite e documento</p>
+        <h2>Envios e integrações do documento</h2>
         <p class="page-description">Aqui você acompanha se a ação foi apenas simulada ou realmente disparada.</p>
     </div>
 
@@ -601,8 +619,8 @@ ob_start();
 
     <article class="card" id="logs">
             <div class="section-heading">
-                <p class="section-heading__eyebrow">Logs</p>
-                <h2>Notificações e auditoria</h2>
+                <p class="section-heading__eyebrow">Eventos</p>
+                <h2>Notificações e histórico</h2>
             </div>
 
             <div class="summary-grid" style="margin-bottom: 18px;">
@@ -657,12 +675,10 @@ ob_start();
                         $contextText = is_array($context) ? json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : (string) ($log['context_json'] ?? '');
                     ?>
                     <article class="log-list__item">
-                        <strong><?= htmlspecialchars((string) ($log['action'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <strong><?= htmlspecialchars($auditLabel((string) ($log['action'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></strong>
                         <p><?= htmlspecialchars((string) ($log['entity_type'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> #<?= htmlspecialchars((string) ($log['entity_id'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['actor_login'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
                         <p><?= htmlspecialchars((string) ($log['ip_address'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars((string) ($log['created_at'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></p>
-                        <?php if ($contextText !== ''): ?>
-                            <p><?= htmlspecialchars($contextText, ENT_QUOTES, 'UTF-8'); ?></p>
-                        <?php endif; ?>
+                        <?php if ($contextText !== ''): ?><details><summary>Detalhes administrativos</summary><p><?= htmlspecialchars($contextText, ENT_QUOTES, 'UTF-8'); ?></p><small><?= htmlspecialchars((string) ($log['action'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></small></details><?php endif; ?>
                     </article>
                 <?php endforeach; ?>
             <?php else: ?>

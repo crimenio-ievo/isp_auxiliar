@@ -34,9 +34,57 @@ $commercial = [
     ) ?? true,
     'quantidade_digitos_validacao_cpf' => max(1, (int) Env::get('CONTRACT_QTD_DIGITOS_VALIDACAO_CPF', '3')),
     'validade_link_aceite_horas' => max(1, (int) Env::get('CONTRACT_VALIDADE_LINK_ACEITE_HORAS', '48')),
+    'isentar_adesao_migracao_radio_fibra' => filter_var(
+        Env::get('CONTRACT_ISENTAR_ADESAO_MIGRACAO_RADIO_FIBRA', '0'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? false,
+    'modo_isencao_adesao_migracao_radio_fibra' => strtolower(trim((string) Env::get(
+        'CONTRACT_MODO_ISENCAO_ADESAO_MIGRACAO_RADIO_FIBRA',
+        (filter_var(Env::get('CONTRACT_ISENTAR_ADESAO_MIGRACAO_RADIO_FIBRA', '0'), FILTER_VALIDATE_BOOL) ? 'automatic' : 'disabled')
+    ))),
+    'fidelidade_automatica_migracao' => filter_var(
+        Env::get('CONTRACT_FIDELIDADE_AUTOMATICA_MIGRACAO', '1'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? true,
+    'fidelidade_automatica_upgrade' => filter_var(
+        Env::get('CONTRACT_FIDELIDADE_AUTOMATICA_UPGRADE', '0'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? false,
+    'sugerir_retencao_downgrade' => filter_var(
+        Env::get('CONTRACT_SUGERIR_RETENCAO_DOWNGRADE', '1'),
+        FILTER_VALIDATE_BOOL,
+        FILTER_NULL_ON_FAILURE
+    ) ?? true,
 ];
 
 $commercial = array_replace($commercial, array_intersect_key($commercialOverrides, $commercial));
+$commercial['modo_isencao_adesao_migracao_radio_fibra'] = in_array(
+    (string) ($commercial['modo_isencao_adesao_migracao_radio_fibra'] ?? ''),
+    ['automatic', 'disabled', 'manual'],
+    true
+) ? (string) $commercial['modo_isencao_adesao_migracao_radio_fibra'] : 'disabled';
+$commercial['isentar_adesao_migracao_radio_fibra'] = $commercial['modo_isencao_adesao_migracao_radio_fibra'] === 'automatic';
+
+$mkauthTicket = array_replace([
+    'enabled' => filter_var(Env::get('MKAUTH_TICKET_ENABLED', '0'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false,
+    'dry_run' => filter_var(Env::get('MKAUTH_TICKET_DRY_RUN', '1'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true,
+    'auto_create' => filter_var(Env::get('CONTRACT_AUTO_CREATE_FINANCIAL_TICKET', '0'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false,
+    'endpoint' => Env::get('MKAUTH_TICKET_ENDPOINT', '/api/chamado/inserir'),
+    'subject' => Env::get('MKAUTH_TICKET_SUBJECT', 'Financeiro - Boleto / Carne'),
+    'priority' => Env::get('MKAUTH_TICKET_PRIORITY', 'normal'),
+    'timeout_seconds' => max(5, (int) Env::get('MKAUTH_TICKET_TIMEOUT_SECONDS', '15')),
+    'message_fallback' => filter_var(Env::get('MKAUTH_TICKET_MESSAGE_FALLBACK', '1'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true,
+], array_intersect_key($mkauthTicketOverrides, [
+    'enabled' => true, 'dry_run' => true, 'auto_create' => true, 'endpoint' => true,
+    'subject' => true, 'priority' => true, 'timeout_seconds' => true, 'message_fallback' => true,
+]));
+$appEnv = strtolower(trim((string) Env::get('APP_ENV', 'production')));
+if ($appEnv !== 'production' || !Env::bool('MKAUTH_WRITE_ENABLED', false)) {
+    $mkauthTicket['dry_run'] = true;
+}
 
 return [
     'term_version' => Env::get('CONTRACT_TERM_VERSION', '2026.1'),
@@ -44,41 +92,7 @@ return [
     'acceptance_ttl_hours' => max(1, (int) Env::get('CONTRACT_ACCEPTANCE_TTL_HOURS', (string) $commercial['validade_link_aceite_horas'])),
     'commercial' => $commercial,
     'financeiro_setor' => 'financeiro',
-    'mkauth_ticket' => array_replace([
-        'enabled' => filter_var(
-            Env::get('MKAUTH_TICKET_ENABLED', '0'),
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE
-        ) ?? false,
-        'dry_run' => filter_var(
-            Env::get('MKAUTH_TICKET_DRY_RUN', '1'),
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE
-        ) ?? true,
-        'auto_create' => filter_var(
-            Env::get('CONTRACT_AUTO_CREATE_FINANCIAL_TICKET', '0'),
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE
-        ) ?? false,
-        'endpoint' => Env::get('MKAUTH_TICKET_ENDPOINT', '/api/chamado/inserir'),
-        'subject' => Env::get('MKAUTH_TICKET_SUBJECT', 'Financeiro - Boleto / Carne'),
-        'priority' => Env::get('MKAUTH_TICKET_PRIORITY', 'normal'),
-        'timeout_seconds' => max(5, (int) Env::get('MKAUTH_TICKET_TIMEOUT_SECONDS', '15')),
-        'message_fallback' => filter_var(
-            Env::get('MKAUTH_TICKET_MESSAGE_FALLBACK', '1'),
-            FILTER_VALIDATE_BOOL,
-            FILTER_NULL_ON_FAILURE
-        ) ?? true,
-    ], array_intersect_key($mkauthTicketOverrides, [
-        'enabled' => true,
-        'dry_run' => true,
-        'auto_create' => true,
-        'endpoint' => true,
-        'subject' => true,
-        'priority' => true,
-        'timeout_seconds' => true,
-        'message_fallback' => true,
-    ])),
+    'mkauth_ticket' => $mkauthTicket,
     'system' => array_replace([
         'settings_saved_at' => '',
         'settings_saved_by' => '',
@@ -90,14 +104,14 @@ return [
         'aceite_nova_instalacao' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_nova_instalacao',
-            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
-            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas', 'central_assinante_url'],
+            'body' => "Olá, {cliente_nome}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {link_aceite}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'link_aceite'],
         ],
         'aceite_regularizacao_contrato' => [
             'channel' => 'whatsapp',
             'purpose' => 'aceite_regularizacao_contrato',
-            'body' => "Olá, {cliente_nome}! 👋\n\nAqui é a equipe {empresa_nome}.\nSeu cadastro foi realizado pelo técnico {tecnico_nome}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital pelo link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{central_assinante_url}\n\nEste link é pessoal, seguro e expira em {validade_horas} horas.\n\nSe tiver qualquer dúvida, fale com nossa equipe antes de confirmar.",
-            'variables_json' => ['cliente_nome', 'empresa_nome', 'tecnico_nome', 'link_aceite', 'validade_horas', 'central_assinante_url'],
+            'body' => "Olá, {cliente_nome}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {link_aceite}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.",
+            'variables_json' => ['cliente_nome', 'link_aceite'],
         ],
     ],
 ];

@@ -134,7 +134,7 @@ ob_start();
             </div>
             <div class="summary-item">
                 <span>Plano</span>
-                <strong><?= htmlspecialchars((string) ($record['plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                <strong><?= htmlspecialchars((string) ($record['plan_name'] ?? $record['plan'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></strong>
             </div>
             <div class="summary-item">
                 <span>Status</span>

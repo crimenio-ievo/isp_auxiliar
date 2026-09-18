@@ -1,0 +1,61 @@
+# Implantação isolada de Stable e Beta
+
+## Estado observado
+
+- candidato local da Stable operacional: `/var/www/html/isp_auxiliar_producao`,
+  commit `58a08d0fc50681944104aa18cf9cc49f924f974f`, `APP_ENV=production`;
+- desenvolvimento Beta: `/var/www/html/isp_auxiliar`, branch
+  `feature/migracao-operacional-beta`, base `94db2346528434a17aa38faccd4127a9953d2e97`;
+- o Apache deste host anuncia `teste.ievo.com.br` com `DocumentRoot /var/www/html`;
+- a URL pública observada da instalação candidata é `https://ispaux.ievo.com.br`;
+- a raiz pública responde com redirecionamento para login e `/api/release`
+  responde 404;
+- os hashes públicos de CSS/JS correspondem tanto ao commit `73a95b2e6adae4435d23f94cb9b4304c3317e017`
+  quanto ao equivalente `e40f04e2789a38fd56d149bef4884ffc320bb722`,
+  mas não ao checkout candidato em `58a08d0`; como esses commits pertencem a
+  históricos distintos, a ligação entre endpoint e commit exato não é
+  demonstrável pela configuração Apache disponível neste host.
+
+A Stable candidata possui alterações operacionais locais preexistentes. Ela foi
+somente inspecionada e não deve ser usada como alvo de automação antes de backup
+e conciliação da árvore.
+
+## Topologia preparada
+
+Topologia compatível com os diretórios realmente encontrados:
+
+```text
+/var/www/html/isp_auxiliar_producao checkout candidato à Stable, sem renomear
+/var/www/html/isp_auxiliar_beta     clone/check-out Beta independente
+/var/www/html/isp_auxiliar          checkout de desenvolvimento atual; não usar como alvo Stable
+```
+
+Os scripts de promoção/rollback exigem `--dir` para a Stable exatamente porque o
+caminho encontrado difere da topologia inicialmente sugerida. O vínculo do
+checkout `_producao` ao endpoint público deve ser confirmado antes de executar.
+
+Como o vhost atual expõe a raiz inteira, um vhost/subdomínio Beta separado é mais
+seguro do que ampliar aliases no mesmo host. O template está em
+`deploy/apache/isp_auxiliar-beta.conf.example`; DNS, certificado e habilitação
+continuam pendentes da infraestrutura. Nenhum vhost foi habilitado.
+
+Stable e Beta devem ter `.env`, DB local, cookie, `SESSION_PATH`, código, storage,
+logs, tmp, assets, release ID e commit próprios. O template Beta mantém escrita
+MkAuth desabilitada, mensagens e chamados em dry-run e usa banco
+`isp_auxiliar_beta`. Leituras do MkAuth dependem de usuário somente leitura
+autorizado.
+
+## Release info
+
+`GET /api/health` continua público e mínimo. `GET /api/release` exige sessão e
+perfil administrador e retorna channel, release ID, commit, build date, versão
+do schema e flags de escrita/dry-run, sem credenciais. Cookie e diretório de
+sessão são aplicados antes de `session_start()`. O seletor usa exclusivamente as
+duas URLs configuradas, registra auditoria e mostra a build real.
+
+## Segurança de configuração
+
+`storage/contracts/config.json` foi removido do índice e ignorado, sem excluir a
+cópia local. Há um exemplo sanitizado. O histórico contém versões anteriores do
+arquivo, portanto rotação de SMTP/Evotrix e invalidação de tokens são bloqueadores
+de produção. A rotação e eventual reescrita de histórico não foram executadas.

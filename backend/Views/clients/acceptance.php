@@ -10,7 +10,13 @@ $clientLogin = (string) ($draft['login'] ?? '');
 $clientCpf = (string) ($draft['cpf_cnpj'] ?? '');
 $clientCity = (string) ($draft['cidade'] ?? '');
 $clientState = (string) ($draft['estado'] ?? '');
-$clientPlan = (string) ($draft['plano'] ?? '');
+$clientPlan = trim((string) ($draft['plan_name'] ?? ''));
+$clientPlan = $clientPlan !== '' ? $clientPlan : 'Plano não localizado no catálogo atual';
+$clientPlanValue = trim((string) ($draft['plan_value'] ?? ''));
+$clientPlanValueLabel = $clientPlanValue !== ''
+    ? 'R$ ' . number_format((float) str_replace(',', '.', $clientPlanValue), 2, ',', '.') . '/mês'
+    : '';
+$clientPlanWarning = trim((string) ($draft['plan_resolution_warning'] ?? ''));
 $clientAddress = trim((string) ($draft['endereco'] ?? '') . ' ' . (string) ($draft['numero'] ?? ''));
 $clientNeighborhood = (string) ($draft['bairro'] ?? '');
 $clientCep = (string) ($draft['cep'] ?? '');
@@ -48,6 +54,8 @@ $hasRealEmail = (bool) ($emailContext['has_real_email'] ?? false);
 $acceptanceStamp = (string) ($acceptanceDateTime ?? date('d/m/Y H:i'));
 $checkpointToken = (string) ($checkpointToken ?? '');
 $sendRequestId = bin2hex(random_bytes(16));
+$partialProvision = (string) ($draft['provision_status'] ?? '') === 'plan_not_confirmed';
+$partialObservedPlan = trim((string) ($draft['plan_confirmation']['observed_name'] ?? ''));
 
 ob_start();
 ?>
@@ -92,6 +100,9 @@ ob_start();
             <div class="summary-item">
                 <span>Plano</span>
                 <strong><?= htmlspecialchars($clientPlan, ENT_QUOTES, 'UTF-8'); ?></strong>
+                <?php if ($clientPlanValueLabel !== ''): ?>
+                    <small><?= htmlspecialchars($clientPlanValueLabel, ENT_QUOTES, 'UTF-8'); ?></small>
+                <?php endif; ?>
             </div>
             <div class="summary-item">
                 <span>CEP</span>
@@ -106,6 +117,13 @@ ob_start();
                 <strong><?= htmlspecialchars(trim($clientAddress . ' - ' . $clientNeighborhood), ENT_QUOTES, 'UTF-8'); ?></strong>
             </div>
         </div>
+
+        <?php if ($clientPlanWarning !== ''): ?>
+            <div class="status-card status-card--warning" style="margin-top: 16px;">
+                <strong>Plano requer conferência técnica</strong>
+                <small><?= htmlspecialchars($clientPlanWarning, ENT_QUOTES, 'UTF-8'); ?></small>
+            </div>
+        <?php endif; ?>
 
         <div class="acceptance-term">
             <p class="section-heading__eyebrow">Termo de aceite</p>
@@ -126,10 +144,20 @@ ob_start();
         data-draft-key="client-acceptance-<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>"
         data-draft-json="<?= htmlspecialchars((string) ($draftJson ?? '{}'), ENT_QUOTES, 'UTF-8'); ?>"
     >
+        <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="draft_id" value="<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="checkpoint_token" value="<?= htmlspecialchars($checkpointToken, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="send_request_id" value="<?= htmlspecialchars($sendRequestId, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="assinatura_cliente" data-signature-input value="">
+
+        <?php if ($partialProvision): ?>
+            <div class="alert alert--error">
+                <strong>Cliente criado, mas o plano não foi confirmado.</strong>
+                <?= $partialObservedPlan !== '' ? 'O MkAuth retornou ' . htmlspecialchars($partialObservedPlan, ENT_QUOTES, 'UTF-8') . '. ' : ''; ?>
+                Use o botão de conclusão para tentar aplicar o plano novamente; o UUID já foi preservado e nenhum novo cliente será criado.
+                <a href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode($clientLogin)), ENT_QUOTES, 'UTF-8'); ?>">Abrir o cliente</a>
+            </div>
+        <?php endif; ?>
 
         <div class="section-heading">
             <p class="section-heading__eyebrow">Conferência</p>

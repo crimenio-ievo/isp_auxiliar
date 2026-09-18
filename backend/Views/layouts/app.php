@@ -11,6 +11,21 @@ $hideFooter = !empty($hideFooter);
 $hideHeader = !empty($hideHeader);
 $bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
 $basePath = Url::basePath();
+$releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
+$isBetaRelease = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta';
+$assetVersion = $layoutMode === 'guest' ? '' : trim((string) ($releaseInfo['id'] ?? ''));
+if ($assetVersion === '' && $layoutMode !== 'guest') {
+    $assetVersion = trim((string) ($releaseInfo['commit'] ?? ''));
+}
+if ($assetVersion === '') {
+    $assetRoot = dirname(__DIR__, 3) . '/public/assets';
+    $assetVersion = (string) max(
+        (int) @filemtime($assetRoot . '/css/app.css'),
+        (int) @filemtime($assetRoot . '/js/app.js'),
+        1
+    );
+}
+$assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -21,9 +36,14 @@ $basePath = Url::basePath();
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=20260708a'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=' . rawurlencode($assetVersion)), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if ($isBetaRelease): ?>
+        <aside class="beta-environment-banner" role="status" aria-label="Ambiente Beta">
+            <strong>AMBIENTE BETA — recursos em homologação</strong>
+        </aside>
+    <?php endif; ?>
     <?php if (!$hideHeader): ?>
         <?php require __DIR__ . '/header.php'; ?>
     <?php endif; ?>
@@ -41,6 +61,6 @@ $basePath = Url::basePath();
         </main>
     </div>
 
-    <script src="<?= htmlspecialchars(Url::asset('js/app.js?v=20260708a'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
+    <script src="<?= htmlspecialchars(Url::asset('js/app.js?v=' . rawurlencode($assetVersion)), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 </body>
 </html>

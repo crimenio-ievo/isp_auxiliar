@@ -10,6 +10,7 @@ use App\Core\Response;
 use App\Core\View;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
+use App\Services\Releases\ReleaseChannelService;
 
 /**
  * Controla a entrada basica do sistema.
@@ -23,14 +24,15 @@ final class AuthController
         private View $view,
         private Config $config,
         private MkAuthDatabase $mkauthDatabase,
-        private LocalRepository $localRepository
+        private LocalRepository $localRepository,
+        private ReleaseChannelService $releaseChannelService
     ) {
     }
 
     public function home(Request $request): Response
     {
         if (!empty($_SESSION['user'])) {
-            return Response::redirect('/dashboard');
+            return $this->authenticatedRedirect();
         }
 
         return Response::redirect('/login');
@@ -109,7 +111,7 @@ final class AuthController
                 (string) $request->header('User-Agent', '')
             );
 
-            return Response::redirect('/dashboard');
+            return $this->authenticatedRedirect();
         }
 
         if ($this->mkauthDatabase->isConfigured()) {
@@ -195,7 +197,7 @@ final class AuthController
                 // O login operacional nao deve depender do banco complementar.
             }
 
-            return Response::redirect('/dashboard');
+            return $this->authenticatedRedirect();
         }
 
         $normalizedLogin = $this->localRepository->normalizeLogin($username);
@@ -206,14 +208,28 @@ final class AuthController
             'source' => 'local-demo',
         ];
 
-        return Response::redirect('/dashboard');
+        return $this->authenticatedRedirect();
     }
 
     public function logout(Request $request): Response
     {
-        unset($_SESSION['user']);
+        unset($_SESSION['user'], $_SESSION['release_channel_preference']);
 
         return Response::redirect('/login');
+    }
+
+    private function authenticatedRedirect(): Response
+    {
+        try {
+            $user = is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : [];
+            $_SESSION['release_channel_preference'] = $this->releaseChannelService->preference($user);
+        } catch (\Throwable) {
+            $_SESSION['release_channel_preference'] = 'stable';
+        }
+
+        // O redirecionamento entre hosts depende de autenticação compartilhada e
+        // será ativado somente quando a topologia Stable/Beta estiver homologada.
+        return Response::redirect('/dashboard');
     }
 
     public function validateUser(Request $request): Response

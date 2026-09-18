@@ -229,6 +229,7 @@ final class LocalRepository
         $settingsLogins = $this->providerSettingList('settings_access_logins');
         $contractLogins = $this->providerSettingList('contract_access_logins');
         $financialLogins = $this->providerSettingList('financial_access_logins');
+        $betaLogins = $this->providerSettingList('beta_release_access_logins');
 
         $isAdminRole = in_array($role, ['platform_admin', 'admin', 'administrador'], true);
         $isManagerRole = in_array($role, ['manager', 'gestor'], true) || !empty($user['can_manage']);
@@ -265,6 +266,7 @@ final class LocalRepository
             'can_upgrade_correct' => $isManager || $isTechnicianRole || $explicitUpgradeCorrect,
             'can_cancel_pending_contracts' => $isManager || $isTechnicianRole || $explicitCancelPendingContracts,
             'can_supersede_contracts' => $isManager || $explicitSupersedeContracts,
+            'can_use_beta' => $isManager || ($login !== '' && in_array($login, $betaLogins, true)),
             'permission_origin' => $permissionOrigin,
             'permission_origin_label' => $permissionOrigin,
         ];

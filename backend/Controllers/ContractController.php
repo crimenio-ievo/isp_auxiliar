@@ -19,6 +19,8 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\Notifications\EvotrixService;
+use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\Notifications\NotificationTemplateService;
 
 /**
  * Primeira interface visual do modulo Contratos e Aceites.
@@ -47,9 +49,14 @@ final class ContractController
         private MessageTemplateRepository $messageTemplateRepository,
         private EvotrixService $evotrixService,
         private MkAuthTicketService $mkAuthTicketService,
-        private EmailService $emailService
+        private EmailService $emailService,
+        private AcceptanceWorkflowService $acceptanceWorkflowService,
+        private NotificationTemplateService $notificationTemplateService
     ) {
     }
+
+    /** Caminho alternativo do arquivo de configurações, usado somente por testes automatizados. */
+    private ?string $moduleSettingsPathOverride = null;
 
     public function index(Request $request): Response
     {
@@ -332,6 +339,9 @@ final class ContractController
         }
 
         try {
+            $delivery = $this->prepareAcceptanceForDelivery($acceptanceId);
+            $detail = $this->loadContractDetail($contractId) ?? $detail;
+            $detail['acceptance_delivery_token'] = $delivery['token'];
             $outcomes = [];
             $overallHasError = false;
             $overallHasSuccess = false;
@@ -504,6 +514,9 @@ final class ContractController
         }
 
         try {
+            $delivery = $this->prepareAcceptanceForDelivery($acceptanceId);
+            $detail = $this->loadContractDetail($contractId) ?? $detail;
+            $detail['acceptance_delivery_token'] = $delivery['token'];
             [$subject, $htmlBody, $textBody] = $this->buildAcceptanceEmailMessage($detail);
             $response = $this->emailService->sendAcceptanceEmail($recipient, $subject, $htmlBody, $textBody, $contractId, $acceptanceId, $forceResend);
 
@@ -743,17 +756,21 @@ final class ContractController
         }
 
         if (!empty($status['closed'])) {
+            $closedAt = trim((string) ($status['closed_at'] ?? '')) ?: $now;
+            $closedBy = trim((string) ($status['closed_by'] ?? ''));
             $this->syncFinancialTaskTicketMetadata(
                 $taskId,
                 $ticketId,
                 (string) ($status['raw_status'] ?? 'fechado'),
-                $now,
-                (string) $this->resolveUser()['login']
+                $closedAt,
+                $closedBy !== '' ? $closedBy : null
             );
             $this->financialTaskRepository->updateStatus($taskId, 'concluido');
             $this->financialTaskRepository->appendSystemNote(
                 $taskId,
-                '[' . $now . '] Chamado financeiro fechado no MkAuth em ' . $now . '. Pendencia marcada como concluida.',
+                '[' . $now . '] Chamado financeiro fechado no MkAuth em ' . $closedAt
+                . ($closedBy !== '' ? ' por ' . $closedBy : '')
+                . '. Pendencia marcada como concluida.',
                 'concluido'
             );
             $this->recordAudit('financial_task.mkauth_ticket.closed', 'financial_task', $taskId, [
@@ -866,13 +883,14 @@ final class ContractController
             if (!is_array($task)) {
                 return;
             }
+            $isClosed = in_array(strtolower(trim($ticketStatus)), ['fechado', 'encerrado', 'finalizado', 'concluido', 'concluído', 'resolvido'], true);
 
             $this->financialTaskRepository->updateTicketMetadata($taskId, [
                 'mkauth_ticket_id' => $ticketId !== '' ? $ticketId : ($task['mkauth_ticket_id'] ?? null),
                 'mkauth_ticket_status' => $ticketStatus !== '' ? $ticketStatus : ($task['mkauth_ticket_status'] ?? null),
                 'mkauth_ticket_checked_at' => $checkedAt ?? ($task['mkauth_ticket_checked_at'] ?? null),
-                'completed_at' => $completedBy !== null ? ($checkedAt ?? date('Y-m-d H:i:s')) : ($task['completed_at'] ?? null),
-                'completed_by' => $completedBy !== null ? $completedBy : ($task['completed_by'] ?? null),
+                'completed_at' => $isClosed ? ($checkedAt ?? date('Y-m-d H:i:s')) : ($task['completed_at'] ?? null),
+                'completed_by' => $isClosed && $completedBy !== null ? $completedBy : ($task['completed_by'] ?? null),
             ]);
         } catch (\Throwable) {
         }
@@ -1363,18 +1381,23 @@ final class ContractController
             throw new \RuntimeException('Diretorio de configuracoes sem permissão de escrita.');
         }
 
-        $written = file_put_contents(
-            $path,
-            json_encode([
-                'commercial' => $commercial,
-                'email' => $email,
-                'saved_at' => date('Y-m-d H:i:s'),
-                'saved_by' => (string) ($this->resolveUser()['login'] ?? ''),
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
-        );
+        $merged = $this->readStoredModuleSettings();
+        $merged['commercial'] = $commercial;
+        $merged['email'] = $email;
+        $merged['saved_at'] = date('Y-m-d H:i:s');
+        $merged['saved_by'] = (string) ($this->resolveUser()['login'] ?? '');
+
+        $payload = json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        $temporaryPath = $path . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+        $written = file_put_contents($temporaryPath, $payload);
 
         if ($written === false) {
             throw new \RuntimeException('Nao foi possivel escrever o arquivo de configuracoes.');
+        }
+
+        if (!@rename($temporaryPath, $path)) {
+            @unlink($temporaryPath);
+            throw new \RuntimeException('Nao foi possivel salvar o arquivo de configuracoes.');
         }
     }
 
@@ -1393,7 +1416,7 @@ final class ContractController
 
     private function contractSettingsPath(): string
     {
-        return $this->projectRootPath() . '/storage/contracts/config.json';
+        return $this->moduleSettingsPathOverride ?? ($this->projectRootPath() . '/storage/contracts/config.json');
     }
 
     private function projectRootPath(): string
@@ -1583,21 +1606,21 @@ final class ContractController
     {
         $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
         $variables = $this->buildAcceptanceMessageVariables($detail);
-        $company = (string) ($variables['{empresa_nome}'] ?? $this->resolveProviderDisplayName());
         $name = (string) ($variables['{cliente_nome}'] ?? ($contract['nome_cliente'] ?? 'Cliente'));
-        $tech = (string) ($variables['{tecnico_nome}'] ?? $this->resolveTechnicianDisplayName($contract));
         $link = trim((string) ($variables['{link_aceite}'] ?? $this->buildSimulatedAcceptanceLink($detail)));
-        $ttl = (string) ($variables['{validade_horas}'] ?? $this->config->get('contracts.acceptance_ttl_hours', 48));
-        $centralAssinanteUrl = (string) ($variables['{central_assinante_url}'] ?? $this->resolveCentralAssinanteUrl());
 
-        $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
-        $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
-        $messageOne = "Olá, {$name}! 👋\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$tech}.\n\nPara concluir com segurança, confira seus dados, plano contratado, valores e aceite digital no link que enviaremos a seguir.\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.";
+        $template = $this->findActiveAcceptanceTemplate($contract, 'whatsapp');
+        if ($template !== null) {
+            $rendered = $this->notificationTemplateService->render($template, $this->buildTemplateValues($detail));
+            $body = trim((string) $rendered['body']);
+            if ($body !== '') {
+                return [$body];
+            }
+        }
 
-        return [
-            $messageOne,
-            $link,
-        ];
+        $messageOne = "Olá, {$name}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {$link}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.";
+
+        return [$messageOne];
     }
 
     private function buildAcceptanceEmailMessage(array $detail): array
@@ -1606,28 +1629,98 @@ final class ContractController
         $variables = $this->buildAcceptanceMessageVariables($detail);
         $link = (string) ($variables['{link_aceite}'] ?? $this->buildSimulatedAcceptanceLink($detail));
         $name = (string) ($variables['{cliente_nome}'] ?? ($contract['nome_cliente'] ?? 'Cliente'));
-        $company = (string) ($variables['{empresa_nome}'] ?? $this->resolveProviderDisplayName());
-        $tech = (string) ($variables['{tecnico_nome}'] ?? $this->resolveTechnicianDisplayName($contract));
-        $ttl = (string) ($variables['{validade_horas}'] ?? $this->config->get('contracts.acceptance_ttl_hours', 48));
-        $centralAssinanteUrl = (string) ($variables['{central_assinante_url}'] ?? $this->resolveCentralAssinanteUrl());
-        $subject = 'Aceite digital do contrato - ' . $company;
-        $companyOpening = $company === 'nossa equipe' ? 'nossa equipe' : 'a equipe ' . $company;
-        $companyClosing = $company === 'nossa equipe' ? 'Nossa equipe' : 'Equipe ' . $company;
-        $supportLine = $company === 'nossa equipe' ? 'fale com nossa equipe' : 'fale com a equipe ' . $company;
-        $text = "Olá, {$name}!\n\nAqui é {$companyOpening}.\nSeu cadastro foi realizado pelo técnico {$tech}.\n\nPara concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:\n\n{$link}\n\nApós a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.\n\nBoletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:\n{$centralAssinanteUrl}\n\nEste link é pessoal, seguro e expira em {$ttl} horas.\n\nSe tiver qualquer dúvida, {$supportLine} antes de confirmar.\n\nAtenciosamente,\n{$companyClosing}";
+
+        $template = $this->findActiveAcceptanceTemplate($contract, 'email');
+        if ($template !== null) {
+            $rendered = $this->notificationTemplateService->render($template, $this->buildTemplateValues($detail));
+            $text = trim((string) $rendered['body']);
+            if ($text !== '') {
+                $subject = trim((string) $rendered['subject']) !== ''
+                    ? (string) $rendered['subject']
+                    : 'Aceite digital do contrato - ' . $this->resolveProviderDisplayName();
+                $html = '<p>' . nl2br(htmlspecialchars($text, ENT_QUOTES, 'UTF-8')) . '</p>';
+
+                return [$subject, $html, $text];
+            }
+        }
+
+        $subject = 'Aceite digital do contrato - iEvo Technology';
+        $text = "Olá, {$name}!\n\nPara conferir seus dados e concluir o aceite digital da iEvo Technology,\nclique no link abaixo:\n\n👉 {$link}\n\nSe tiver alguma dúvida, fale conosco antes de confirmar.";
         $html = '<p>Olá, <strong>' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</strong>!</p>'
-            . '<p>Aqui é ' . htmlspecialchars($companyOpening, ENT_QUOTES, 'UTF-8') . '.</p>'
-            . '<p>Seu cadastro foi realizado pelo técnico ' . htmlspecialchars($tech, ENT_QUOTES, 'UTF-8') . '.</p>'
-            . '<p>Para concluir com segurança, acesse o link abaixo e confira seus dados, plano contratado, valores e aceite digital:</p>'
+            . '<p>Para conferir seus dados e concluir o aceite digital da iEvo Technology, clique no link abaixo:</p>'
             . '<p><a href="' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>'
-            . '<p>Após a confirmação, você poderá acessar pelo mesmo link a cópia do termo assinado.</p>'
-            . '<p>Boletos, faturas, notas e segunda via ficam disponíveis na Central do Assinante:<br>'
-            . htmlspecialchars($centralAssinanteUrl, ENT_QUOTES, 'UTF-8') . '</p>'
-            . '<p>Este link é pessoal, seguro e expira em ' . htmlspecialchars($ttl, ENT_QUOTES, 'UTF-8') . ' horas.</p>'
-            . '<p>Se tiver qualquer dúvida, ' . htmlspecialchars($supportLine, ENT_QUOTES, 'UTF-8') . ' antes de confirmar.</p>'
-            . '<p><strong>Atenciosamente,<br>' . htmlspecialchars($companyClosing, ENT_QUOTES, 'UTF-8') . '</strong></p>';
+            . '<p>Se tiver alguma dúvida, fale conosco antes de confirmar.</p>';
 
         return [$subject, $html, $text];
+    }
+
+    /**
+     * Busca um template configurável ativo (mesmo mecanismo usado pelo
+     * ClientController) para o canal informado. Retorna null quando não há
+     * template ativo com o canal habilitado, sinalizando que o chamador deve
+     * usar o texto padrão embutido.
+     */
+    private function findActiveAcceptanceTemplate(array $contract, string $channel): ?array
+    {
+        $purpose = $this->resolveAcceptanceTemplatePurpose($contract);
+        if ($purpose === '') {
+            return null;
+        }
+
+        try {
+            $this->notificationTemplateService->seedDefaults();
+        } catch (\Throwable) {
+            // Mantém compatibilidade com bancos ainda sem a migration 017.
+        }
+
+        try {
+            $template = $this->messageTemplateRepository->findByPurpose($purpose, $channel);
+        } catch (\Throwable) {
+            // Tabela de templates indisponível: cai no texto padrão embutido.
+            return null;
+        }
+
+        if (!is_array($template) || empty($template['active'])) {
+            return null;
+        }
+
+        $enabledChannels = json_decode((string) ($template['enabled_channels_json'] ?? '[]'), true);
+        if (!is_array($enabledChannels) || !in_array($channel, $enabledChannels, true)) {
+            return null;
+        }
+
+        return $template;
+    }
+
+    /**
+     * Valores no formato %variavel% esperado por NotificationTemplateService,
+     * reaproveitando os dados já resolvidos para o texto padrão embutido.
+     */
+    private function buildTemplateValues(array $detail): array
+    {
+        $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
+        $legacy = $this->buildAcceptanceMessageVariables($detail);
+
+        return [
+            'nomecliente' => (string) ($legacy['{cliente_nome}'] ?? ''),
+            'nomeresumido' => '',
+            'documentocliente' => '',
+            'logincliente' => (string) ($contract['mkauth_login'] ?? ''),
+            'telefonecliente' => '',
+            'emailcliente' => '',
+            'planoatual' => '',
+            'novoplano' => '',
+            'valoratual' => '',
+            'novovalor' => '',
+            'tecnologiaatual' => '',
+            'novatecnologia' => '',
+            'beneficio' => '',
+            'fidelidade' => '',
+            'linkaceite' => (string) ($legacy['{link_aceite}'] ?? ''),
+            'data' => date('d/m/Y'),
+            'nomeprovedor' => (string) ($legacy['{empresa_nome}'] ?? ''),
+            'protocoloprocesso' => 'CTR-' . str_pad((string) ((int) ($contract['id'] ?? 0)), 6, '0', STR_PAD_LEFT),
+        ];
     }
 
     private function buildAcceptanceMessageVariables(array $detail): array
@@ -1727,13 +1820,17 @@ final class ContractController
         return $url !== '' ? $url : 'https://sistema.ievo.com.br/central';
     }
 
-    private function resolveAcceptanceTemplatePurpose(string $tipoAceite): string
+    /**
+     * Usa o mesmo esquema de purposes que ClientController::dispatchAcceptanceChannels
+     * já grava e lê de fato (via NotificationTemplateService/MessageTemplateRepository).
+     * Toda chamada aqui é um reenvio manual pelo painel de Contratos.
+     */
+    private function resolveAcceptanceTemplatePurpose(array $contract): string
     {
-        $tipoAceite = trim($tipoAceite);
-
-        return match ($tipoAceite) {
-            'regularizacao_contrato' => 'aceite_regularizacao_contrato',
-            default => 'aceite_nova_instalacao',
+        return match ((string) ($contract['tipo_aceite'] ?? '')) {
+            'upgrade_migracao' => 'migracao_reenviar_aceite',
+            'contrato_digital' => 'assinatura_avulsa_reenviar',
+            default => 'instalacao_reenviar_aceite',
         };
     }
 
@@ -2054,7 +2151,7 @@ final class ContractController
     {
         return (string) ($contract['lifecycle_status'] ?? 'active') === 'active'
             && trim((string) ($acceptance['revoked_at'] ?? '')) === ''
-            && !in_array((string) ($acceptance['status'] ?? ''), ['cancelado', 'expirado'], true);
+            && !in_array((string) ($acceptance['status'] ?? ''), ['cancelado'], true);
     }
 
     private function canManageFinancial(): bool
@@ -2073,7 +2170,7 @@ final class ContractController
     {
         $acceptance = is_array($detail['acceptance'] ?? null) ? $detail['acceptance'] : [];
         $contract = is_array($detail['contract'] ?? null) ? $detail['contract'] : [];
-        $tokenFragment = trim((string) ($acceptance['token_hash'] ?? ''));
+        $tokenFragment = trim((string) ($detail['acceptance_delivery_token'] ?? $acceptance['token_hash'] ?? ''));
 
         if ($tokenFragment === '') {
             $contractId = (int) ($contract['id'] ?? 0);
@@ -2082,6 +2179,49 @@ final class ContractController
         }
 
         return Url::absolute('/aceite/' . rawurlencode($tokenFragment));
+    }
+
+    /** @return array{token: string, rotated: bool} */
+    private function prepareAcceptanceForDelivery(int $acceptanceId): array
+    {
+        $pdo = $this->database->pdo();
+        $pdo->beginTransaction();
+
+        try {
+            $acceptance = $this->contractAcceptanceRepository->findByIdForUpdate($acceptanceId);
+            if (!is_array($acceptance) || trim((string) ($acceptance['revoked_at'] ?? '')) !== '' || (string) ($acceptance['status'] ?? '') === 'cancelado') {
+                throw new \RuntimeException('Este aceite não está mais disponível para envio.');
+            }
+
+            $expiresAt = new \DateTimeImmutable((string) ($acceptance['token_expires_at'] ?? 'now'));
+            if ((string) ($acceptance['status'] ?? '') === 'aceito' || $expiresAt > new \DateTimeImmutable()) {
+                $pdo->commit();
+                return ['token' => (string) ($acceptance['token_hash'] ?? ''), 'rotated' => false];
+            }
+
+            $renewal = $this->acceptanceWorkflowService->renewExpiredToken($acceptance);
+            $updated = array_merge($acceptance, [
+                'token' => $renewal['token'],
+                'token_hash' => hash('sha256', $renewal['token']),
+                'token_expires_at' => $renewal['token_expires_at'],
+                'status' => (string) ($acceptance['remote_signature_reason'] ?? '') !== '' ? 'assinatura_pendente' : 'criado',
+            ]);
+            if ($this->contractAcceptanceRepository->updateById($acceptanceId, $updated) !== 1) {
+                throw new \RuntimeException('Não foi possível renovar o link de aceite.');
+            }
+            $persisted = $this->contractAcceptanceRepository->findById($acceptanceId);
+            if (!is_array($persisted) || !hash_equals((string) ($persisted['token_hash'] ?? ''), hash('sha256', $renewal['token']))) {
+                throw new \RuntimeException('Não foi possível confirmar o novo link de aceite.');
+            }
+            $pdo->commit();
+
+            return ['token' => $renewal['token'], 'rotated' => true];
+        } catch (\Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     private function resolveUser(): array

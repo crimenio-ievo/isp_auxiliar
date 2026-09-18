@@ -40,6 +40,12 @@ final class Env
             }
 
             $value = self::normalizeValue($value);
+            $processValue = getenv($name);
+            if ($processValue !== false) {
+                // Variáveis injetadas pelo serviço/deploy têm precedência sobre
+                // o arquivo local, permitindo isolamento sem reescrever .env.
+                $value = (string) $processValue;
+            }
 
             $_ENV[$name] = $value;
             $_SERVER[$name] = $value;

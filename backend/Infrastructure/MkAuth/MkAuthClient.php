@@ -12,7 +12,7 @@ use RuntimeException;
  * Esta camada evita espalhar detalhes de autenticação e payload pelo restante
  * da aplicação.
  */
-final class MkAuthClient
+final class MkAuthClient implements ClientGateway
 {
     private ?string $jwtToken = null;
 

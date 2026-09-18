@@ -1487,7 +1487,7 @@ function updatePlanOptions() {
         }
 
         const matches = option.dataset.installType === selectedType
-            && option.dataset.localDici === selectedLocal;
+            && (option.dataset.localDici === selectedLocal || option.dataset.localDici === 'any');
 
         option.hidden = !matches;
         option.disabled = !matches;
@@ -3443,3 +3443,823 @@ document.querySelectorAll('[data-channel-choice]').forEach((choiceBlock) => {
         }, true);
     }
 });
+
+document.querySelectorAll('form[data-single-submit-form]').forEach((form) => {
+    if (!(form instanceof HTMLFormElement)) {
+        return;
+    }
+
+    const actionInput = form.querySelector('[data-process-action-input]');
+    const continueInput = form.querySelector('[data-process-continue-input]');
+    const submitButtons = Array.from(form.querySelectorAll('button[type="submit"]'));
+    let submitted = false;
+
+    submitButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            if (actionInput instanceof HTMLInputElement) {
+                actionInput.value = button.getAttribute('data-process-action') || 'save';
+            }
+            if (continueInput instanceof HTMLInputElement && button.hasAttribute('data-process-continue')) {
+                continueInput.value = button.getAttribute('data-process-continue') || 'migration_workspace';
+            }
+        });
+    });
+
+    form.addEventListener('submit', (event) => {
+        if (submitted) {
+            event.preventDefault();
+            return;
+        }
+
+        submitted = true;
+        form.setAttribute('aria-busy', 'true');
+        submitButtons.forEach((button) => {
+            if (!(button instanceof HTMLButtonElement)) {
+                return;
+            }
+            button.disabled = true;
+            button.dataset.originalLabel = button.textContent || 'Salvar';
+            button.textContent = 'Salvando...';
+        });
+    });
+});
+
+document.querySelectorAll('[data-copy-value]').forEach((button) => {
+    button.addEventListener('click', async () => {
+        const value = button.getAttribute('data-copy-value') || '';
+        const original = button.textContent || 'Copiar';
+        try {
+            await copyTextToClipboard(value);
+            button.textContent = 'Copiado';
+            window.setTimeout(() => { button.textContent = original; }, 1400);
+        } catch (error) {
+            window.prompt('Copie o valor:', value);
+        }
+    });
+});
+
+const migrationCancelDialog = document.querySelector('[data-migration-cancel-dialog]');
+if (migrationCancelDialog instanceof HTMLDialogElement) {
+    document.querySelectorAll('[data-open-migration-cancel]').forEach((button) => {
+        button.addEventListener('click', () => {
+            migrationCancelDialog.showModal();
+            migrationCancelDialog.querySelector('textarea[name="reason"]')?.focus();
+        });
+    });
+    migrationCancelDialog.querySelector('[data-close-migration-cancel]')?.addEventListener('click', () => migrationCancelDialog.close());
+    migrationCancelDialog.addEventListener('click', (event) => {
+        if (event.target === migrationCancelDialog) migrationCancelDialog.close();
+    });
+}
+
+const clientHub = document.querySelector('[data-client-hub]');
+if (clientHub instanceof HTMLElement) {
+    const modal = clientHub.querySelector('[data-client-modal]');
+    const dialog = modal?.querySelector('.client-detail-panel__dialog');
+    const modalTitle = modal?.querySelector('[data-client-modal-title]');
+    const modalBody = modal?.querySelector('[data-client-modal-body]');
+    let activePanelTrigger = null;
+    let activeRequestController = null;
+    let activeRequestTimeout = null;
+    const backgroundState = new Map();
+    const requestedTimeout = Number.parseInt(clientHub.dataset.clientDetailTimeoutMs || '10000', 10);
+    const detailTimeoutMs = Math.max(8000, Math.min(12000, Number.isFinite(requestedTimeout) ? requestedTimeout : 10000));
+
+    const abortActiveRequest = () => {
+        if (activeRequestTimeout !== null) {
+            window.clearTimeout(activeRequestTimeout);
+            activeRequestTimeout = null;
+        }
+        if (activeRequestController instanceof AbortController) {
+            activeRequestController.abort();
+            activeRequestController = null;
+        }
+    };
+
+    const hideClientHubBackground = () => {
+        Array.from(clientHub.children).forEach((element) => {
+            if (!(element instanceof HTMLElement) || element === modal || element instanceof HTMLTemplateElement) {
+                return;
+            }
+            backgroundState.set(element, {
+                ariaHidden: element.getAttribute('aria-hidden'),
+                inert: element.hasAttribute('inert'),
+            });
+            element.setAttribute('aria-hidden', 'true');
+            element.setAttribute('inert', '');
+        });
+    };
+
+    const restoreClientHubBackground = () => {
+        backgroundState.forEach((state, element) => {
+            if (state.ariaHidden === null) {
+                element.removeAttribute('aria-hidden');
+            } else {
+                element.setAttribute('aria-hidden', state.ariaHidden);
+            }
+            if (!state.inert) {
+                element.removeAttribute('inert');
+            }
+        });
+        backgroundState.clear();
+    };
+
+    const closeClientPanel = (restoreFocus = true) => {
+        abortActiveRequest();
+        document.removeEventListener('keydown', handleClientModalKeydown);
+        if (modal instanceof HTMLElement) {
+            modal.hidden = true;
+            modal.setAttribute('aria-hidden', 'true');
+            modal.setAttribute('inert', '');
+        }
+        if (modalBody instanceof HTMLElement) modalBody.replaceChildren();
+        if (modalTitle instanceof HTMLElement) modalTitle.textContent = '';
+        document.body.classList.remove('client-panel-open');
+        restoreClientHubBackground();
+        const returnFocus = activePanelTrigger;
+        activePanelTrigger = null;
+        if (returnFocus instanceof HTMLElement) returnFocus.setAttribute('aria-expanded', 'false');
+        if (restoreFocus && returnFocus instanceof HTMLElement) returnFocus.focus({ preventScroll: true });
+    };
+
+    const addDetail = (list, label, value) => {
+        const normalized = value === null || value === undefined ? '' : String(value).trim();
+        if (!normalized) {
+            return;
+        }
+        const row = document.createElement('div');
+        const term = document.createElement('dt');
+        const description = document.createElement('dd');
+        term.textContent = label;
+        description.textContent = normalized;
+        row.append(term, description);
+        list.appendChild(row);
+    };
+
+    const renderConnection = (target, data) => {
+        const list = document.createElement('dl');
+        list.className = 'detail-list';
+        addDetail(list, 'Sessão', data.online ? 'Online' : 'Offline');
+        addDetail(list, 'Login', data.login);
+        addDetail(list, 'Plano', data.plan);
+        addDetail(list, 'Tecnologia', data.technology?.label);
+        addDetail(list, 'IP atual', data.ip);
+        addDetail(list, 'MAC / Caller-ID', data.mac);
+        addDetail(list, 'NAS', data.nas);
+        addDetail(list, 'Início da sessão', data.started_at);
+        addDetail(list, 'Tempo conectado', Number.isFinite(Number(data.connected_seconds)) ? formatDuration(Number(data.connected_seconds)) : '');
+        addDetail(list, 'Equipamento', data.equipment);
+        addDetail(list, 'ONU/ONT', data.onu_ont);
+        addDetail(list, 'Interface', data.interface);
+        addDetail(list, 'Fonte', data.source);
+        target.replaceChildren(list);
+    };
+
+    const renderFinancial = (target, data) => {
+        const list = document.createElement('dl');
+        list.className = 'detail-list';
+        addDetail(list, 'Próximo vencimento', data.next_due?.datavenc);
+        addDetail(list, 'Títulos em aberto', data.open_count);
+        addDetail(list, 'Títulos vencidos', data.overdue_count);
+        addDetail(list, 'Modalidade de cobrança', data.billing_type);
+        addDetail(list, 'Conta de cobrança', data.billing_account);
+        addDetail(list, 'Última atualização', data.last_update);
+        addDetail(list, 'Fonte', data.source);
+        target.replaceChildren(list);
+    };
+
+    const detailError = (message, retryable = true, sessionExpired = false) => {
+        const error = new Error(message);
+        error.retryable = retryable;
+        error.sessionExpired = sessionExpired;
+        return error;
+    };
+
+    const renderLazyError = (target, error) => {
+        const alert = document.createElement('div');
+        alert.className = 'alert alert--warning client-detail-load-error';
+        const message = document.createElement('p');
+        message.textContent = error instanceof Error ? error.message : 'Os detalhes não puderam ser carregados.';
+        const actions = document.createElement('div');
+        actions.className = 'client-detail-load-actions';
+        if (error?.retryable !== false) {
+            const retry = document.createElement('button');
+            retry.className = 'button button--small';
+            retry.type = 'button';
+            retry.dataset.retryClientDetail = '1';
+            retry.textContent = 'Tentar novamente';
+            actions.appendChild(retry);
+        }
+        if (error?.sessionExpired === true) {
+            const login = document.createElement('a');
+            login.className = 'button button--small';
+            login.href = `${document.body.dataset.basePath || ''}/login`;
+            login.textContent = 'Ir para o login';
+            actions.appendChild(login);
+        }
+        const close = document.createElement('button');
+        close.className = 'button button--ghost button--small';
+        close.type = 'button';
+        close.dataset.closeClientPanel = '1';
+        close.textContent = 'Fechar';
+        actions.appendChild(close);
+        alert.append(message, actions);
+        target.replaceChildren(alert);
+    };
+
+    const loadLazyDetail = async () => {
+        if (!(modalBody instanceof HTMLElement) || modal?.hidden) {
+            return;
+        }
+        const target = modalBody.querySelector('[data-lazy-client-detail]');
+        if (!(target instanceof HTMLElement)) return;
+
+        abortActiveRequest();
+        const controller = new AbortController();
+        let timedOut = false;
+        activeRequestController = controller;
+        target.replaceChildren(Object.assign(document.createElement('p'), {
+            className: 'page-description',
+            textContent: target.dataset.lazyClientDetail === 'financial'
+                ? 'Carregando detalhes financeiros...'
+                : 'Carregando detalhes de conexão...',
+        }));
+        activeRequestTimeout = window.setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, detailTimeoutMs);
+
+        try {
+            const response = await fetch(target.dataset.url || '', {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal: controller.signal,
+            });
+            const responseUrl = new URL(response.url || window.location.href, window.location.href);
+            if (response.redirected || /\/login\/?$/.test(responseUrl.pathname)) {
+                throw detailError('Sua sessão expirou. Entre novamente para consultar os detalhes.', false, true);
+            }
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            if (!contentType.includes('application/json')) {
+                throw detailError('Os detalhes não puderam ser carregados porque o servidor retornou uma resposta inesperada.');
+            }
+            const body = await response.text();
+            if (body.trim() === '') {
+                throw detailError('Os detalhes não puderam ser carregados porque o servidor retornou uma resposta vazia.');
+            }
+            let payload;
+            try {
+                payload = JSON.parse(body);
+            } catch (error) {
+                throw detailError('Os detalhes não puderam ser carregados porque a resposta recebida é inválida.');
+            }
+            const successful = payload?.ok === true || payload?.status === 'success';
+            if (!response.ok || !successful) {
+                throw detailError(payload?.message || 'Os detalhes não puderam ser carregados.', payload?.retryable !== false);
+            }
+            if (target.dataset.lazyClientDetail === 'connection') {
+                renderConnection(target, payload.data || {});
+            } else {
+                renderFinancial(target, payload.data || {});
+            }
+        } catch (error) {
+            if (controller.signal.aborted && !timedOut) return;
+            if (modal?.hidden || controller !== activeRequestController) return;
+            if (timedOut) {
+                renderLazyError(target, detailError(target.dataset.lazyClientDetail === 'financial'
+                    ? 'Não foi possível carregar os dados financeiros no tempo esperado.'
+                    : 'Não foi possível carregar os dados de conexão no tempo esperado.'));
+            } else {
+                const controlledError = error instanceof Error && typeof error.retryable === 'boolean'
+                    ? error
+                    : detailError(target.dataset.lazyClientDetail === 'financial'
+                        ? 'Os detalhes financeiros não puderam ser carregados.'
+                        : 'Os detalhes de conexão não puderam ser carregados.');
+                renderLazyError(target, controlledError);
+            }
+        } finally {
+            if (controller === activeRequestController) {
+                if (activeRequestTimeout !== null) window.clearTimeout(activeRequestTimeout);
+                activeRequestTimeout = null;
+                activeRequestController = null;
+            }
+        }
+    };
+
+    function handleClientModalKeydown(event) {
+        if (!(modal instanceof HTMLElement) || modal.hidden || !(dialog instanceof HTMLElement)) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeClientPanel();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+            .filter((item) => item instanceof HTMLElement && !item.hidden);
+        if (focusable.length === 0) {
+            event.preventDefault();
+            dialog.focus();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+            event.preventDefault();
+            first.focus();
+        }
+    }
+
+    const openClientPanel = (key, trigger) => {
+        if (!(modal instanceof HTMLElement) || !(dialog instanceof HTMLElement) || !(modalBody instanceof HTMLElement) || !(modalTitle instanceof HTMLElement)) return;
+        const template = clientHub.querySelector(`template[data-client-panel-template="${CSS.escape(key)}"]`);
+        if (!(template instanceof HTMLTemplateElement)) return;
+        closeClientPanel(false);
+        activePanelTrigger = trigger instanceof HTMLElement ? trigger : null;
+        if (activePanelTrigger instanceof HTMLElement) activePanelTrigger.setAttribute('aria-expanded', 'true');
+        modalTitle.textContent = template.dataset.clientPanelTitle || 'Detalhes';
+        modalBody.replaceChildren(template.content.cloneNode(true));
+        hideClientHubBackground();
+        modal.removeAttribute('inert');
+        modal.setAttribute('aria-hidden', 'false');
+        modal.hidden = false;
+        document.body.classList.add('client-panel-open');
+        document.addEventListener('keydown', handleClientModalKeydown);
+        dialog.focus();
+        loadLazyDetail();
+    };
+
+    clientHub.querySelectorAll('[data-open-client-panel]').forEach((trigger) => {
+        trigger.addEventListener('click', () => {
+            const key = trigger.getAttribute('data-open-client-panel') || '';
+            if (key === 'documents') {
+                document.querySelector('#documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+            openClientPanel(key, trigger);
+        });
+    });
+
+    modal?.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest('[data-close-client-panel]')) {
+            closeClientPanel();
+            return;
+        }
+        if (target.closest('[data-retry-client-detail]')) {
+            loadLazyDetail();
+            return;
+        }
+        const copyButton = target.closest('[data-copy-value]');
+        if (copyButton instanceof HTMLElement) {
+            const value = copyButton.getAttribute('data-copy-value') || '';
+            const original = copyButton.textContent || 'Copiar';
+            try {
+                await copyTextToClipboard(value);
+                copyButton.textContent = 'Copiado';
+                window.setTimeout(() => { copyButton.textContent = original; }, 1400);
+            } catch (error) {
+                window.prompt('Copie o valor:', value);
+            }
+        }
+    });
+}
+
+const migrationWorkspace = document.querySelector('[data-migration-workspace]');
+if (migrationWorkspace instanceof HTMLElement) {
+    const checklist = migrationWorkspace.querySelector('[data-process-steps]');
+    const backdrop = migrationWorkspace.querySelector('.migration-checklist__backdrop');
+    const openButton = migrationWorkspace.querySelector('[data-open-process-steps]');
+    let checklistReturnFocus = null;
+
+    const closeChecklist = () => {
+        migrationWorkspace.classList.remove('is-checklist-open');
+        if (backdrop instanceof HTMLButtonElement) backdrop.hidden = true;
+        if (openButton instanceof HTMLButtonElement) openButton.setAttribute('aria-expanded', 'false');
+        document.body.classList.remove('process-steps-open');
+        if (checklistReturnFocus instanceof HTMLElement) checklistReturnFocus.focus({ preventScroll: true });
+    };
+    const openChecklist = () => {
+        checklistReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        migrationWorkspace.classList.add('is-checklist-open');
+        if (backdrop instanceof HTMLButtonElement) backdrop.hidden = false;
+        if (openButton instanceof HTMLButtonElement) openButton.setAttribute('aria-expanded', 'true');
+        document.body.classList.add('process-steps-open');
+        checklist?.querySelector('a')?.focus({ preventScroll: true });
+    };
+
+    openButton?.addEventListener('click', openChecklist);
+    migrationWorkspace.querySelectorAll('[data-close-process-steps]').forEach((button) => button.addEventListener('click', closeChecklist));
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && migrationWorkspace.classList.contains('is-checklist-open')) closeChecklist();
+    });
+}
+
+function formatDuration(seconds) {
+    const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const days = Math.floor(safeSeconds / 86400);
+    const hours = Math.floor((safeSeconds % 86400) / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    return [days ? `${days}d` : '', hours ? `${hours}h` : '', `${minutes}min`].filter(Boolean).join(' ');
+}
+
+const simpleUpgradeForm = document.querySelector('[data-upgrade-simple-form]');
+if (simpleUpgradeForm instanceof HTMLFormElement) {
+    const planSelect = simpleUpgradeForm.querySelector('[data-simple-plan-select]');
+    const operationOutput = simpleUpgradeForm.querySelector('[data-simple-operation]');
+    const fidelityToggle = simpleUpgradeForm.querySelector('[data-fidelity-toggle]');
+    const fidelityFields = simpleUpgradeForm.querySelector('[data-fidelity-fields]');
+    const planSearch = simpleUpgradeForm.querySelector('[data-simple-plan-search]');
+    const benefitConditions = simpleUpgradeForm.querySelector('[data-benefit-conditions]');
+    const benefitFlags = Array.from(simpleUpgradeForm.querySelectorAll('[data-benefit-flag]'));
+    const adhesionCharged = simpleUpgradeForm.querySelector('[data-adhesion-charged]');
+    const adhesionBenefit = simpleUpgradeForm.querySelector('[data-adhesion-benefit]');
+    const benefitInput = simpleUpgradeForm.querySelector('input[name="valor_beneficio"]');
+    const benefitReasonInput = simpleUpgradeForm.querySelector('input[name="benefit_adjustment_reason"]');
+    const automaticBenefitInput = simpleUpgradeForm.querySelector('[data-automatic-benefit-value]');
+    const otherBenefitFields = simpleUpgradeForm.querySelector('[data-other-benefit-fields]');
+    const otherBenefitInput = simpleUpgradeForm.querySelector('input[name="beneficio_outro_text"]');
+    const otherBenefitValue = simpleUpgradeForm.querySelector('input[name="beneficio_outro_valor"]');
+    const fidelityDescription = simpleUpgradeForm.querySelector('input[name="fidelity_benefit_description"]');
+    const fidelityMonths = simpleUpgradeForm.querySelector('input[name="fidelidade_meses"]');
+    let automaticFlags = {};
+    let automaticValue = 0;
+    let automaticFidelity = false;
+
+    const parseSpeed = (raw) => {
+        const match = String(raw || '').toLowerCase().match(/([0-9]+(?:[.,][0-9]+)?)\s*([kmg])?/);
+        if (!match) return null;
+        const value = Number(match[1].replace(',', '.'));
+        if (!Number.isFinite(value)) return null;
+        if (match[2] === 'g') return value * 1000;
+        if (match[2] === 'k') return value / 1000;
+        return value;
+    };
+
+    const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    const formatValue = (value) => Math.max(0, Number(value) || 0).toFixed(2).replace('.', ',');
+    const flagInput = (key) => benefitFlags.find((input) => input instanceof HTMLInputElement && input.dataset.benefitFlag === key);
+    const selectedFlags = () => Object.fromEntries(benefitFlags.map((input) => [input.dataset.benefitFlag || '', Boolean(input.checked)]));
+    const benefitDescription = (flags) => {
+        const labels = [];
+        if (flags.radio_to_fiber) labels.push('migração de tecnologia de rádio para fibra óptica');
+        if (flags.adhesion_waiver) labels.push('isenção da taxa de adesão/instalação');
+        if (flags.plan_upgrade) labels.push('upgrade de plano');
+        if (flags.retention) labels.push('condição comercial especial para retenção');
+        if (flags.other_benefit && otherBenefitInput instanceof HTMLInputElement && otherBenefitInput.value.trim()) labels.push(otherBenefitInput.value.trim());
+        return labels.join(', ');
+    };
+    const updateBenefitFields = () => {
+        const flags = selectedFlags();
+        const otherSelected = Boolean(flags.other_benefit);
+        if (otherBenefitFields instanceof HTMLElement) otherBenefitFields.hidden = !otherSelected;
+        [otherBenefitInput, otherBenefitValue].forEach((field) => {
+            if (field instanceof HTMLInputElement) field.disabled = !otherSelected;
+        });
+        if (otherBenefitInput instanceof HTMLInputElement) {
+            otherBenefitInput.required = otherSelected;
+            if (!otherSelected) otherBenefitInput.value = '';
+        }
+        if (otherBenefitValue instanceof HTMLInputElement && !otherSelected) otherBenefitValue.value = '0,00';
+
+        const fidelitySelected = fidelityToggle instanceof HTMLInputElement && fidelityToggle.checked;
+        if (fidelityFields instanceof HTMLElement) fidelityFields.hidden = !fidelitySelected;
+        fidelityFields?.querySelectorAll('input, select, textarea').forEach((field) => {
+            if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) field.disabled = !fidelitySelected;
+        });
+        if (fidelityDescription instanceof HTMLInputElement) {
+            fidelityDescription.required = fidelitySelected;
+            if (fidelitySelected && !fidelityDescription.value.trim()) fidelityDescription.value = benefitDescription(flags);
+        }
+        if (fidelityMonths instanceof HTMLInputElement) fidelityMonths.required = fidelitySelected;
+
+        const defaultValue = Number(benefitConditions?.dataset.adhesionDefault || 0);
+        const waived = Boolean(flags.adhesion_waiver);
+        const finalValue = benefitInput instanceof HTMLInputElement ? parseMoneyFieldValue(benefitInput.value) : 0;
+        if (adhesionCharged instanceof HTMLElement) adhesionCharged.textContent = `Valor cobrado: ${money.format(waived ? 0 : defaultValue)}`;
+        if (adhesionBenefit instanceof HTMLElement) adhesionBenefit.textContent = `Benefício concedido: ${money.format(finalValue)}`;
+
+        const flagChanged = Object.keys(automaticFlags).some((key) => Boolean(flags[key]) !== Boolean(automaticFlags[key]));
+        const valueChanged = Math.abs(finalValue - automaticValue) > 0.009;
+        const fidelityChanged = fidelitySelected !== automaticFidelity;
+        if (benefitReasonInput instanceof HTMLInputElement) benefitReasonInput.required = flagChanged || valueChanged || fidelityChanged;
+    };
+
+    const updateOperation = (resetSelection = false) => {
+        if (!(planSelect instanceof HTMLSelectElement) || !(operationOutput instanceof HTMLElement)) return;
+        const option = planSelect.selectedOptions[0];
+        if (!(option instanceof HTMLOptionElement) || !option.value) {
+            operationOutput.textContent = 'Selecione um plano';
+            automaticFlags = {};
+            automaticValue = 0;
+            automaticFidelity = false;
+            updateBenefitFields();
+            return;
+        }
+        const currentPlan = simpleUpgradeForm.dataset.currentPlan || '';
+        const currentFamily = simpleUpgradeForm.dataset.currentFamily || '';
+        const newFamily = option.dataset.planFamily || '';
+        const currentSpeed = parseSpeed(simpleUpgradeForm.dataset.currentSpeed);
+        const newSpeed = parseSpeed(option.dataset.planSpeed);
+        const currentValue = Number(simpleUpgradeForm.dataset.currentValue || 0);
+        const newValue = Number(option.dataset.planValue || 0);
+        const changed = option.value.toLowerCase() !== currentPlan.toLowerCase();
+        const increased = changed && ((currentSpeed !== null && newSpeed !== null && newSpeed > currentSpeed) || newValue > currentValue + 0.009);
+        const radioToFiber = currentFamily === 'radio' && newFamily === 'fibra';
+        const waiverMode = benefitConditions?.dataset.waiverMode || 'disabled';
+        automaticFlags = {
+            radio_to_fiber: radioToFiber,
+            adhesion_waiver: radioToFiber && waiverMode === 'automatic',
+            plan_upgrade: increased,
+            retention: false,
+            other_benefit: false,
+        };
+        automaticValue = automaticFlags.adhesion_waiver ? Number(benefitConditions?.dataset.adhesionDefault || 0) : 0;
+        automaticFidelity = automaticValue > 0
+            && ((radioToFiber && simpleUpgradeForm.dataset.autoFidelityMigration === '1')
+                || (increased && simpleUpgradeForm.dataset.autoFidelityUpgrade === '1'));
+        let operation = '';
+        if (changed) {
+            if (currentFamily && newFamily && currentFamily !== newFamily) {
+                operation = 'Migração';
+            } else if (currentFamily && newFamily) {
+                if (currentSpeed !== null && newSpeed !== null && currentSpeed !== newSpeed) {
+                    operation = newSpeed > currentSpeed ? 'Upgrade' : 'Downgrade';
+                } else if (currentValue !== newValue) {
+                    operation = newValue > currentValue ? 'Upgrade' : 'Downgrade';
+                }
+            }
+        }
+        operationOutput.textContent = operation || 'Sem mudança efetiva — escolha outro plano';
+        if (resetSelection) {
+            benefitFlags.forEach((input) => {
+                if (input instanceof HTMLInputElement) input.checked = Boolean(automaticFlags[input.dataset.benefitFlag || '']);
+            });
+            if (benefitInput instanceof HTMLInputElement) benefitInput.value = formatValue(automaticValue);
+            if (automaticBenefitInput instanceof HTMLInputElement) automaticBenefitInput.value = formatValue(automaticValue);
+            if (fidelityToggle instanceof HTMLInputElement) fidelityToggle.checked = automaticFidelity;
+            if (benefitReasonInput instanceof HTMLInputElement) benefitReasonInput.value = '';
+            if (otherBenefitInput instanceof HTMLInputElement) otherBenefitInput.value = '';
+            if (otherBenefitValue instanceof HTMLInputElement) otherBenefitValue.value = '0,00';
+            if (fidelityDescription instanceof HTMLInputElement) fidelityDescription.value = '';
+            if (fidelityMonths instanceof HTMLInputElement) fidelityMonths.value = '12';
+        }
+        if (automaticBenefitInput instanceof HTMLInputElement) automaticBenefitInput.value = formatValue(automaticValue);
+        updateBenefitFields();
+    };
+
+    const filterPlans = () => {
+        if (!(planSearch instanceof HTMLInputElement) || !(planSelect instanceof HTMLSelectElement)) return;
+        const query = planSearch.value.trim().toLocaleLowerCase('pt-BR');
+        Array.from(planSelect.options).forEach((option, index) => {
+            if (index === 0) return;
+            option.hidden = query !== '' && !`${option.textContent || ''} ${option.dataset.planName || ''}`.toLocaleLowerCase('pt-BR').includes(query);
+        });
+    };
+
+    planSelect?.addEventListener('change', () => updateOperation(true));
+    fidelityToggle?.addEventListener('change', updateBenefitFields);
+    benefitFlags.forEach((input) => input.addEventListener('change', updateBenefitFields));
+    benefitInput?.addEventListener('input', updateBenefitFields);
+    otherBenefitInput?.addEventListener('input', updateBenefitFields);
+    otherBenefitValue?.addEventListener('input', updateBenefitFields);
+    planSearch?.addEventListener('input', filterPlans);
+    updateOperation();
+    updateBenefitFields();
+}
+
+document.querySelectorAll('form[data-prevent-double-submit]').forEach((form) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    let submitted = false;
+    form.addEventListener('submit', (event) => {
+        if (submitted) {
+            event.preventDefault();
+            return;
+        }
+        submitted = true;
+        form.setAttribute('aria-busy', 'true');
+        if (event.submitter instanceof HTMLButtonElement && event.submitter.name) {
+            const submitValue = document.createElement('input');
+            submitValue.type = 'hidden';
+            submitValue.name = event.submitter.name;
+            submitValue.value = event.submitter.value;
+            form.appendChild(submitValue);
+        }
+        form.querySelectorAll('button[type="submit"]').forEach((button) => {
+            if (!(button instanceof HTMLButtonElement)) return;
+            const isSubmitter = event.submitter === button;
+            button.disabled = true;
+            if (isSubmitter) button.textContent = button.dataset.submitLabel || 'Enviando...';
+        });
+    });
+});
+
+const migrationActionMenus = Array.from(document.querySelectorAll('details[data-migration-actions-menu]'));
+migrationActionMenus.forEach((menu) => {
+    if (!(menu instanceof HTMLDetailsElement)) return;
+    const summary = menu.querySelector('summary');
+    const syncExpandedState = () => summary?.setAttribute('aria-expanded', menu.open ? 'true' : 'false');
+    menu.addEventListener('toggle', () => {
+        if (menu.open) {
+            migrationActionMenus.forEach((candidate) => {
+                if (candidate instanceof HTMLDetailsElement && candidate !== menu) candidate.open = false;
+            });
+        }
+        syncExpandedState();
+    });
+    menu.querySelector('[role="menu"]')?.addEventListener('click', () => {
+        menu.open = false;
+    });
+    syncExpandedState();
+});
+document.addEventListener('pointerdown', (event) => {
+    migrationActionMenus.forEach((menu) => {
+        if (menu instanceof HTMLDetailsElement && menu.open && !menu.contains(event.target)) menu.open = false;
+    });
+});
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const openMenu = migrationActionMenus.find((menu) => menu instanceof HTMLDetailsElement && menu.open);
+    if (!(openMenu instanceof HTMLDetailsElement)) return;
+    openMenu.open = false;
+    openMenu.querySelector('summary')?.focus();
+});
+
+const migrationAcceptanceForm = document.querySelector('[data-migration-acceptance-form]');
+if (migrationAcceptanceForm instanceof HTMLFormElement) {
+    const absentToggle = migrationAcceptanceForm.querySelector('[data-client-absent]');
+    const remoteReason = migrationAcceptanceForm.querySelector('[data-remote-reason]');
+    const localSignature = migrationAcceptanceForm.querySelector('[data-local-signature]');
+    const updateAcceptanceMode = () => {
+        const remote = absentToggle instanceof HTMLInputElement && absentToggle.checked;
+        if (remoteReason instanceof HTMLElement) remoteReason.hidden = !remote;
+        if (localSignature instanceof HTMLElement) localSignature.hidden = remote;
+        const reasonInput = remoteReason?.querySelector('input, select, textarea');
+        if (reasonInput instanceof HTMLInputElement || reasonInput instanceof HTMLSelectElement || reasonInput instanceof HTMLTextAreaElement) {
+            reasonInput.required = remote;
+            if (!remote) reasonInput.value = '';
+        }
+    };
+    absentToggle?.addEventListener('change', updateAcceptanceMode);
+    updateAcceptanceMode();
+}
+
+const connectionChecker = document.querySelector('[data-connection-checker]');
+if (connectionChecker instanceof HTMLElement) {
+    const checkButton = document.querySelector('[data-check-connection]');
+    const status = connectionChecker.querySelector('[data-connection-status]');
+    const ip = connectionChecker.querySelector('[data-connection-ip]');
+    const checked = connectionChecker.querySelector('[data-connection-checked]');
+    const offlineException = document.querySelector('[data-offline-exception]');
+    const checkConnection = async () => {
+        const endpoint = connectionChecker.dataset.connectionUrl || '';
+        if (!endpoint || !(checkButton instanceof HTMLButtonElement)) return;
+        checkButton.disabled = true;
+        const originalLabel = checkButton.textContent;
+        checkButton.textContent = 'Verificando...';
+        try {
+            const separator = endpoint.includes('?') ? '&' : '?';
+            const response = await fetch(`${endpoint}${separator}_t=${Date.now()}`, {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: { Accept: 'application/json' },
+            });
+            const payload = await response.json();
+            if (!response.ok || payload.status !== 'success') throw new Error(payload.message || 'Consulta indisponível.');
+            const online = payload.online === true;
+            if (status instanceof HTMLElement) status.textContent = online ? 'PPPoE online' : 'PPPoE offline ou indisponível';
+            if (ip instanceof HTMLElement) {
+                ip.hidden = !online;
+                ip.textContent = `IP: ${payload.connection?.session?.framedipaddress || '-'}`;
+            }
+            if (checked instanceof HTMLElement) {
+                const checkedAt = payload.connection?.checked_at ? new Date(payload.connection.checked_at) : new Date();
+                const time = checkedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                checked.textContent = `${online ? 'Verificado' : 'Última verificação'} às ${time} · origem: Radius MkAuth`;
+            }
+            if (offlineException instanceof HTMLElement) offlineException.hidden = online;
+        } catch (error) {
+            if (status instanceof HTMLElement) status.textContent = 'PPPoE offline ou indisponível';
+            if (checked instanceof HTMLElement) checked.textContent = error instanceof Error ? error.message : 'Não foi possível consultar agora.';
+            if (offlineException instanceof HTMLElement) offlineException.hidden = false;
+        } finally {
+            checkButton.disabled = false;
+            checkButton.textContent = originalLabel || 'Verificar conexão agora';
+        }
+    };
+    checkButton?.addEventListener('click', checkConnection);
+}
+
+document.querySelectorAll('[data-migration-evidence-uploader]').forEach((uploader) => {
+    if (!(uploader instanceof HTMLElement)) return;
+    const inputs = Array.from(uploader.querySelectorAll('[data-migration-evidence-input]'))
+        .filter((input) => input instanceof HTMLInputElement);
+    const preview = uploader.querySelector('[data-migration-evidence-preview]');
+    let previewUrls = [];
+    const renderEvidencePreview = () => {
+        if (!(preview instanceof HTMLElement)) return;
+        previewUrls.forEach((url) => URL.revokeObjectURL(url));
+        previewUrls = [];
+        preview.replaceChildren();
+        inputs.forEach((input, inputIndex) => {
+            Array.from(input.files || []).forEach((file, fileIndex) => {
+                const card = document.createElement('article');
+                card.className = 'migration-evidence-preview__item';
+                if (file.type.startsWith('image/')) {
+                    const image = document.createElement('img');
+                    const url = URL.createObjectURL(file);
+                    previewUrls.push(url);
+                    image.src = url;
+                    image.alt = `Prévia de ${file.name}`;
+                    card.append(image);
+                } else {
+                    const fileType = document.createElement('span');
+                    fileType.className = 'migration-evidence-preview__file';
+                    fileType.textContent = 'PDF';
+                    card.append(fileType);
+                }
+                const name = document.createElement('small');
+                name.textContent = file.name;
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'button button--ghost button--small';
+                remove.textContent = 'Remover';
+                remove.addEventListener('click', () => {
+                    const transfer = new DataTransfer();
+                    Array.from(input.files || []).forEach((candidate, candidateIndex) => {
+                        if (candidateIndex !== fileIndex) transfer.items.add(candidate);
+                    });
+                    input.files = transfer.files;
+                    renderEvidencePreview();
+                });
+                card.append(name, remove);
+                card.dataset.source = `${inputIndex}:${fileIndex}`;
+                preview.append(card);
+            });
+        });
+    };
+    inputs.forEach((input) => input.addEventListener('change', renderEvidencePreview));
+});
+
+const contractScanner = document.querySelector('[data-contract-scanner]');
+if (contractScanner instanceof HTMLFormElement) {
+    const input = contractScanner.querySelector('[data-scanner-input]');
+    const preview = contractScanner.querySelector('[data-scanner-preview]');
+    const orderInput = contractScanner.querySelector('[data-scanner-order]');
+    const rotationsInput = contractScanner.querySelector('[data-scanner-rotations]');
+    let pages = [];
+    const syncScannerState = () => {
+        if (orderInput instanceof HTMLInputElement) orderInput.value = JSON.stringify(pages.length ? pages.map((page) => page.index) : [-1]);
+        if (rotationsInput instanceof HTMLInputElement) rotationsInput.value = JSON.stringify(Object.fromEntries(pages.map((page) => [page.index, page.rotation])));
+    };
+    const renderScanner = () => {
+        if (!(preview instanceof HTMLElement)) return;
+        preview.replaceChildren();
+        pages.forEach((page, position) => {
+            const card = document.createElement('article');
+            card.className = 'scanner-page';
+            const visual = page.file.type === 'application/pdf' ? document.createElement('div') : document.createElement('img');
+            if (visual instanceof HTMLImageElement) {
+                visual.src = page.url;
+                visual.alt = `Prévia da página ${position + 1}`;
+                visual.style.transform = `rotate(${page.rotation}deg)`;
+            } else {
+                visual.className = 'scanner-page__pdf';
+                visual.textContent = 'PDF';
+            }
+            const name = document.createElement('strong');
+            name.textContent = `${position + 1}. ${page.file.name}`;
+            const actions = document.createElement('div');
+            [['↑', -1], ['↓', 1]].forEach(([label, delta]) => {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'button button--ghost button--small'; button.textContent = String(label);
+                button.setAttribute('aria-label', delta < 0 ? 'Mover página para cima' : 'Mover página para baixo');
+                button.addEventListener('click', () => { const target = position + Number(delta); if (target < 0 || target >= pages.length) return; [pages[position], pages[target]] = [pages[target], pages[position]]; renderScanner(); });
+                actions.appendChild(button);
+            });
+            const rotate = document.createElement('button');
+            rotate.type = 'button'; rotate.className = 'button button--ghost button--small'; rotate.textContent = 'Girar';
+            rotate.addEventListener('click', () => { page.rotation = (page.rotation + 90) % 360; renderScanner(); });
+            const remove = document.createElement('button');
+            remove.type = 'button'; remove.className = 'button button--ghost button--small'; remove.textContent = 'Remover';
+            remove.addEventListener('click', () => { URL.revokeObjectURL(page.url); pages.splice(position, 1); renderScanner(); });
+            actions.append(rotate, remove);
+            card.append(visual, name, actions);
+            preview.appendChild(card);
+        });
+        syncScannerState();
+    };
+    input?.addEventListener('change', () => {
+        pages.forEach((page) => URL.revokeObjectURL(page.url));
+        pages = Array.from(input.files || []).map((file, index) => ({ file, index, rotation: 0, url: URL.createObjectURL(file) }));
+        renderScanner();
+    });
+}
+
+const focusOnLoad = document.querySelector('[data-focus-field]') || document.querySelector('[data-focus-on-load]');
+if (focusOnLoad instanceof HTMLElement) {
+    focusOnLoad.focus({ preventScroll: false });
+}

@@ -22,11 +22,22 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Notifications\EvotrixService;
 use App\Infrastructure\Notifications\EmailService;
 use App\Infrastructure\MkAuth\ClientPayloadMapper;
+use App\Infrastructure\MkAuth\ClientPlanConfirmationService;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\ClientProvisioner;
 use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
+use App\Infrastructure\MkAuth\TechnologyMapper;
+use App\Infrastructure\Processes\OperationalProcessRepository;
+use App\Services\Contracts\AcceptanceWorkflowService;
+use App\Services\Clients\ClientCompletionValidator;
+use App\Services\MkAuth\MkAuthPlanChangeService;
+use App\Services\Processes\OperationalProcessService;
+use App\Services\Processes\MigrationJourneyService;
+use App\Services\Processes\MigrationEvidenceService;
+use App\Services\Processes\MigrationFinalizationService;
+use App\Services\Releases\ReleaseChannelService;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -62,6 +73,10 @@ function bootstrapApplication(): Application
         'evotrix' => require __DIR__ . '/../config/evotrix.php',
         'email' => require __DIR__ . '/../config/email.php',
     ]);
+
+    if (!defined('APP_RELEASE_INFO')) {
+        define('APP_RELEASE_INFO', (array) $config->get('app.release', []));
+    }
 
     date_default_timezone_set((string) $config->get('app.timezone', 'UTC'));
 
@@ -122,8 +137,13 @@ function bootstrapApplication(): Application
     $container->set(ContractRepository::class, new ContractRepository($localDatabase));
     $container->set(ContractAcceptanceRepository::class, new ContractAcceptanceRepository($localDatabase));
     $container->set(FinancialTaskRepository::class, new FinancialTaskRepository($localDatabase));
-    $container->set(MessageTemplateRepository::class, new MessageTemplateRepository($localDatabase));
+    $container->set(MessageTemplateRepository::class, new MessageTemplateRepository($localDatabase, $localRepository));
     $container->set(NotificationLogRepository::class, new NotificationLogRepository($localDatabase));
+    $container->set(OperationalProcessRepository::class, new OperationalProcessRepository(
+        $localDatabase,
+        $localRepository
+    ));
+    $container->set(AcceptanceWorkflowService::class, new AcceptanceWorkflowService($config));
     $container->set(EvotrixService::class, new EvotrixService(
         (array) $config->get('evotrix', []),
         $container->get(NotificationLogRepository::class)
@@ -139,6 +159,7 @@ function bootstrapApplication(): Application
         (bool) $config->get('app.mkauth.write_enabled', false),
         (string) $config->get('paths.logs', $rootPath . '/logs') . '/mkauth-write-guard.log'
     ));
+    $container->set(TechnologyMapper::class, new TechnologyMapper());
     $container->set(MkAuthClient::class, new MkAuthClient(
         $setting('mkauth_base_url', 'MKAUTH_BASE_URL'),
         $setting('mkauth_api_token', 'MKAUTH_API_TOKEN'),
@@ -154,12 +175,20 @@ function bootstrapApplication(): Application
         $setting('mkauth_db_password', 'MKAUTH_DB_PASSWORD'),
         $setting('mkauth_db_charset', 'MKAUTH_DB_CHARSET', 'utf8mb4'),
         $setting('mkauth_db_hash_algos', 'MKAUTH_DB_HASH_ALGOS', 'sha256,sha1'),
-        $container->get(MkAuthWriteGuard::class)
+        $container->get(MkAuthWriteGuard::class),
+        (int) $config->get('app.client_detail.timeout_seconds', 10)
     ));
     $container->set(ClientPayloadMapper::class, new ClientPayloadMapper());
+    $container->set(ClientCompletionValidator::class, new ClientCompletionValidator());
+    $container->set(ClientPlanConfirmationService::class, new ClientPlanConfirmationService(
+        $container->get(MkAuthDatabase::class)
+    ));
     $container->set(ClientProvisioner::class, new ClientProvisioner(
         $container->get(ClientPayloadMapper::class),
-        $container->get(MkAuthClient::class)
+        $container->get(MkAuthClient::class),
+        $container->get(ClientPlanConfirmationService::class),
+        (string) $config->get('paths.logs', $rootPath . '/logs') . '/client-plan-confirmation.log',
+        $container->get(ClientCompletionValidator::class)
     ));
     $container->set(MkAuthTicketService::class, new MkAuthTicketService(
         (array) $config->get('contracts.mkauth_ticket', []),
@@ -170,6 +199,30 @@ function bootstrapApplication(): Application
         $setting('mkauth_client_secret', 'MKAUTH_CLIENT_SECRET'),
         $container->get(MkAuthWriteGuard::class)
     ));
+    $container->set(MkAuthPlanChangeService::class, new MkAuthPlanChangeService(
+        $container->get(MkAuthDatabase::class),
+        $container->get(MkAuthClient::class),
+        $container->get(MkAuthWriteGuard::class)
+    ));
+    $container->set(OperationalProcessService::class, new OperationalProcessService(
+        $localDatabase,
+        $container->get(OperationalProcessRepository::class),
+        $container->get(ContractRepository::class),
+        $container->get(ContractAcceptanceRepository::class),
+        $container->get(FinancialTaskRepository::class),
+        $localRepository
+    ));
+    $container->set(MigrationJourneyService::class, new MigrationJourneyService());
+    $container->set(MigrationEvidenceService::class, new MigrationEvidenceService($config));
+    $container->set(MigrationFinalizationService::class, new MigrationFinalizationService(
+        $container->get(OperationalProcessService::class),
+        $container->get(MkAuthPlanChangeService::class),
+        $container->get(ClientPlanConfirmationService::class),
+        $container->get(MkAuthDatabase::class),
+        $container->get(MkAuthTicketService::class),
+        $container->get(FinancialTaskRepository::class)
+    ));
+    $container->set(ReleaseChannelService::class, new ReleaseChannelService($config, $localRepository));
 
     $router = new Router();
     $registerRoutes = require __DIR__ . '/../routes.php';

@@ -159,6 +159,7 @@ ob_start();
                     </p>
 
                     <form method="post" action="<?= htmlspecialchars(Url::to('/aceite/' . rawurlencode((string) ($token ?? '')) . '/termo'), ENT_QUOTES, 'UTF-8'); ?>" class="term-gate-form">
+                        <input type="hidden" name="_csrf" value="<?= htmlspecialchars((string) ($csrfToken ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         <label class="field">
                             <span>Primeiros <?= htmlspecialchars((string) $termValidationDigits, ENT_QUOTES, 'UTF-8'); ?> dígitos</span>
                             <input
