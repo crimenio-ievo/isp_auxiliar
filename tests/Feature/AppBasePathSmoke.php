@@ -50,9 +50,19 @@ try {
     $assert($betaLogin->path() === '/login', 'Rota login Beta não foi normalizada.');
     $assert($betaLogin->url('/logout') === '/isp_auxiliar/public/logout', 'Link interno não respeita a base explícita.');
 
+    $betaFrontController = $requestFromGlobals(
+        '/isp_auxiliar_beta_current/public/index.php',
+        '/isp_auxiliar/public/index.php',
+        '/isp_auxiliar/public'
+    );
+    $assert($betaFrontController->path() === '/', 'Front controller público não foi normalizado para a raiz.');
+
     $legacy = $requestFromGlobals('/isp_auxiliar/public/index.php', '/isp_auxiliar/public/login', null);
     $assert($legacy->basePath() === '/isp_auxiliar/public', 'Autodetecção legada foi alterada.');
     $assert($legacy->path() === '/login', 'Rota legada foi alterada.');
+
+    $legacyFrontController = $requestFromGlobals('/isp_auxiliar/public/index.php', '/isp_auxiliar/public/index.php', null);
+    $assert($legacyFrontController->path() === '/', 'Front controller legado não foi normalizado para a raiz.');
 
     $root = $requestFromGlobals('/index.php', '/api/health', '');
     $assert($root->basePath() === '', 'Base vazia deve representar a raiz.');

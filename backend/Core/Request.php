@@ -33,6 +33,9 @@ final class Request
             ? self::detectBasePath($scriptName)
             : self::normalizeConfiguredBasePath($configuredBasePath);
         $normalizedPath = self::stripBasePath($path, $basePath);
+        if ($normalizedPath === '/index.php') {
+            $normalizedPath = '/';
+        }
 
         return new self(
             strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET'),
