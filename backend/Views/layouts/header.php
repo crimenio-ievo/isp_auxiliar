@@ -26,6 +26,7 @@ $targetChannel = $releaseChannel === 'beta' ? 'stable' : 'beta';
 $targetLabel = $targetChannel === 'beta' ? 'Beta' : 'Stable';
 $targetDestination = $targetChannel === 'beta' ? $betaDestination : $stableDestination;
 $canOpenTarget = $targetDestination !== '' && ($targetChannel !== 'beta' || $canUseBeta);
+$hasReleaseDestinations = $stableDestination !== '' || $betaDestination !== '';
 $releaseId = trim((string) ($releaseInfo['id'] ?? ''));
 $releaseCommit = trim((string) ($releaseInfo['commit'] ?? ''));
 $releaseCommitShort = $releaseCommit !== '' ? substr($releaseCommit, 0, 7) : 'sem-hash';
@@ -46,17 +47,19 @@ $releaseCommitShort = $releaseCommit !== '' ? substr($releaseCommit, 0, 7) : 'se
 
     <div class="topbar__actions">
         <?php if ($layoutMode !== 'guest'): ?>
-            <div class="release-channel-control">
-                <form class="release-channel-selector" method="post" action="<?= htmlspecialchars(Url::to('/canal-versao'), ENT_QUOTES, 'UTF-8'); ?>">
-                    <?= Csrf::field('release_channel'); ?>
-                    <span class="release-channel-current">Canal: <strong><?= htmlspecialchars($releaseLabel, ENT_QUOTES, 'UTF-8'); ?></strong></span>
-                    <input type="hidden" name="release_channel" value="<?= htmlspecialchars($targetChannel, ENT_QUOTES, 'UTF-8'); ?>">
-                    <?php if ($canOpenTarget): ?>
-                        <button class="button button--ghost button--small" type="submit">Abrir <?= htmlspecialchars($targetLabel, ENT_QUOTES, 'UTF-8'); ?></button>
-                    <?php endif; ?>
-                </form>
-                <small class="release-channel-state"><?= htmlspecialchars($releaseLabel, ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseId !== '' ? $releaseId : 'release não informada', ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseCommitShort, ENT_QUOTES, 'UTF-8'); ?></small>
-            </div>
+            <?php if ($hasReleaseDestinations): ?>
+                <div class="release-channel-control">
+                    <form class="release-channel-selector" method="post" action="<?= htmlspecialchars(Url::to('/canal-versao'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <?= Csrf::field('release_channel'); ?>
+                        <span class="release-channel-current">Canal: <strong><?= htmlspecialchars($releaseLabel, ENT_QUOTES, 'UTF-8'); ?></strong></span>
+                        <input type="hidden" name="release_channel" value="<?= htmlspecialchars($targetChannel, ENT_QUOTES, 'UTF-8'); ?>">
+                        <?php if ($canOpenTarget): ?>
+                            <button class="button button--ghost button--small" type="submit">Abrir <?= htmlspecialchars($targetLabel, ENT_QUOTES, 'UTF-8'); ?></button>
+                        <?php endif; ?>
+                    </form>
+                    <small class="release-channel-state"><?= htmlspecialchars($releaseLabel, ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseId !== '' ? $releaseId : 'release não informada', ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseCommitShort, ENT_QUOTES, 'UTF-8'); ?></small>
+                </div>
+            <?php endif; ?>
             <div class="topbar__user">
                 <span class="avatar"><?= htmlspecialchars(substr((string) $user['name'], 0, 1), ENT_QUOTES, 'UTF-8'); ?></span>
                 <div>
