@@ -39,6 +39,9 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
     <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=' . rawurlencode($assetVersion)), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
+    <aside class="test-environment-banner" role="status" aria-label="Ambiente de testes">
+        <strong>AMBIENTE DE TESTES — não reflete produção real</strong>
+    </aside>
     <?php if ($isBetaRelease): ?>
         <aside class="beta-environment-banner" role="status" aria-label="Ambiente Beta">
             <strong>AMBIENTE BETA — recursos em homologação</strong>

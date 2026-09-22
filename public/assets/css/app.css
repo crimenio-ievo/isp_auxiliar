@@ -52,6 +52,26 @@
     letter-spacing: .04em;
 }
 
+.test-environment-banner {
+    align-items: center;
+    background: #fff4cc;
+    border-bottom: 1px solid #e8c65c;
+    color: #5f4300;
+    display: flex;
+    font-size: .78rem;
+    gap: .65rem;
+    justify-content: center;
+    min-height: 34px;
+    padding: .35rem 1rem;
+    position: relative;
+    text-align: center;
+    z-index: 60;
+}
+
+.test-environment-banner strong {
+    letter-spacing: .04em;
+}
+
 .release-channel-selector {
     align-items: center;
     display: flex;
@@ -98,7 +118,8 @@
 }
 
 @media (max-width: 768px) {
-    .beta-environment-banner {
+    .beta-environment-banner,
+    .test-environment-banner {
         align-items: flex-start;
         flex-direction: column;
         gap: .1rem;
