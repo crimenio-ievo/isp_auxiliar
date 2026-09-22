@@ -10,7 +10,6 @@ use App\Core\Response;
 use App\Core\View;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
-use App\Services\Releases\ReleaseChannelService;
 
 /**
  * Controla a entrada basica do sistema.
@@ -24,8 +23,7 @@ final class AuthController
         private View $view,
         private Config $config,
         private MkAuthDatabase $mkauthDatabase,
-        private LocalRepository $localRepository,
-        private ReleaseChannelService $releaseChannelService
+        private LocalRepository $localRepository
     ) {
     }
 

@@ -8,58 +8,17 @@ $assert = static function (bool $condition, string $message) use (&$checks): voi
     if (!$condition) {
         throw new RuntimeException($message);
     }
-
     $checks++;
 };
 
-$renderHeader = static function (array $releaseInfo) use ($root): string {
-    $program = <<<'PHP'
-$releaseInfo = json_decode(base64_decode($argv[1]), true, 512, JSON_THROW_ON_ERROR);
-require $argv[2] . '/backend/bootstrap/autoload.php';
+$header = (string) file_get_contents($root . '/backend/Views/layouts/header.php');
+$layout = (string) file_get_contents($root . '/backend/Views/layouts/app.php');
+$css = (string) file_get_contents($root . '/public/assets/css/app.css');
 
-use App\Core\Url;
-use App\Core\View;
+$assert(str_contains($header, "releaseInfo['label']"), 'Cabeçalho não usa o ambiente resolvido.');
+$assert(!str_contains($header, 'canal-versao'), 'Cabeçalho ainda contém troca de canal.');
+$assert(!str_contains($header, 'Stable') && !str_contains($header, 'Beta'), 'Cabeçalho ainda expõe nomenclatura de canais.');
+$assert(!str_contains($layout, 'beta-environment-banner'), 'Layout ainda exibe banner Beta.');
+$assert(!str_contains($css, '.release-channel-selector'), 'CSS ainda contém seletor de canais.');
 
-Url::setBasePath('/isp_auxiliar_stable/public');
-define('APP_RELEASE_INFO', $releaseInfo);
-session_start();
-$view = new View($argv[2] . '/backend/Views');
-echo $view->render('layouts/header', [
-    'layoutMode' => 'app',
-    'user' => ['name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]],
-    'appName' => 'ISP Auxiliar',
-]);
-PHP;
-    $payload = base64_encode(json_encode($releaseInfo, JSON_THROW_ON_ERROR));
-    $command = escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($program)
-        . ' ' . escapeshellarg($payload) . ' ' . escapeshellarg($root);
-    $output = shell_exec($command);
-
-    if (!is_string($output)) {
-        throw new RuntimeException('Não foi possível renderizar o cabeçalho isolado.');
-    }
-
-    return $output;
-};
-
-$singleProduction = $renderHeader([
-    'channel' => 'stable',
-    'id' => 'official',
-    'commit' => str_repeat('a', 40),
-    'stable_base_url' => '',
-    'beta_base_url' => '',
-]);
-$assert(!str_contains($singleProduction, 'release-channel-control'), 'Produção única exibiu seletor sem destinos.');
-$assert(!str_contains($singleProduction, 'Abrir Beta') && !str_contains($singleProduction, 'Abrir Stable'), 'Produção única exibiu link de versão vazio.');
-
-$dualDestination = $renderHeader([
-    'channel' => 'beta',
-    'id' => 'beta-test',
-    'commit' => str_repeat('b', 40),
-    'stable_base_url' => 'https://stable.example.test/isp_auxiliar/public',
-    'beta_base_url' => 'https://beta.example.test/isp_auxiliar/public',
-]);
-$assert(str_contains($dualDestination, 'Canal: <strong>Beta</strong>'), 'Ambiente com dois destinos não exibe o canal Beta.');
-$assert(str_contains($dualDestination, 'Abrir Stable'), 'Ambiente com dois destinos não mantém a troca retrocompatível.');
-
-echo "ReleaseChannelHeaderSmoke: {$checks} checks passed; configuração hermética.\n";
+echo "ReleaseChannelHeaderSmoke: {$checks} checks passed; interface sem canais concorrentes.\n";

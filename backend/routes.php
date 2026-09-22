@@ -9,7 +9,6 @@ use App\Controllers\ClientController;
 use App\Controllers\ClientDocumentController;
 use App\Controllers\DashboardController;
 use App\Controllers\OperationalProcessController;
-use App\Controllers\ReleaseChannelController;
 use App\Controllers\SettingsController;
 use App\Controllers\SystemController;
 use App\Core\Router;
@@ -28,7 +27,6 @@ return static function (Router $router): void {
     $router->get('/api/usuario/validar', [AuthController::class, 'validateUser'], 'api.usuario.validate');
 
     $router->get('/dashboard', [DashboardController::class, 'index'], 'dashboard');
-    $router->post('/canal-versao', [ReleaseChannelController::class, 'save'], 'release.channel.save');
     $router->get('/contratos', [ContractController::class, 'index'], 'contracts.index');
     $router->post('/contratos', [ContractController::class, 'index'], 'contracts.index.save');
     $router->get('/contratos/novos', [ContractController::class, 'novos'], 'contracts.new');

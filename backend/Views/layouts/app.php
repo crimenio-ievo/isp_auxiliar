@@ -12,8 +12,7 @@ $hideHeader = !empty($hideHeader);
 $bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
 $basePath = Url::basePath();
 $releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
-$isBetaRelease = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta';
-$assetVersion = $layoutMode === 'guest' ? '' : trim((string) ($releaseInfo['id'] ?? ''));
+$assetVersion = $layoutMode === 'guest' ? '' : trim((string) ($releaseInfo['release_id'] ?? ''));
 if ($assetVersion === '' && $layoutMode !== 'guest') {
     $assetVersion = trim((string) ($releaseInfo['commit'] ?? ''));
 }
@@ -39,11 +38,6 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
     <link rel="stylesheet" href="<?= htmlspecialchars(Url::asset('css/app.css?v=' . rawurlencode($assetVersion)), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
-    <?php if ($isBetaRelease): ?>
-        <aside class="beta-environment-banner" role="status" aria-label="Ambiente Beta">
-            <strong>AMBIENTE BETA — recursos em homologação</strong>
-        </aside>
-    <?php endif; ?>
     <?php if (!$hideHeader): ?>
         <?php require __DIR__ . '/header.php'; ?>
     <?php endif; ?>

@@ -37,7 +37,7 @@ use App\Services\Processes\OperationalProcessService;
 use App\Services\Processes\MigrationJourneyService;
 use App\Services\Processes\MigrationEvidenceService;
 use App\Services\Processes\MigrationFinalizationService;
-use App\Services\Releases\ReleaseChannelService;
+use App\Services\Releases\ReleaseMetadata;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -75,7 +75,16 @@ function bootstrapApplication(): Application
     ]);
 
     if (!defined('APP_RELEASE_INFO')) {
-        define('APP_RELEASE_INFO', (array) $config->get('app.release', []));
+        define('APP_RELEASE_INFO', ReleaseMetadata::resolve(
+            $rootPath,
+            [
+                'environment' => (string) $config->get('app.env', ''),
+                'release_id' => (string) $config->get('app.release.id', ''),
+                'commit' => (string) $config->get('app.release.commit', ''),
+                'build_date' => (string) $config->get('app.release.build_date', ''),
+            ],
+            is_array(APP_VERSION_INFO) ? APP_VERSION_INFO : []
+        ));
     }
 
     date_default_timezone_set((string) $config->get('app.timezone', 'UTC'));
@@ -222,8 +231,6 @@ function bootstrapApplication(): Application
         $container->get(MkAuthTicketService::class),
         $container->get(FinancialTaskRepository::class)
     ));
-    $container->set(ReleaseChannelService::class, new ReleaseChannelService($config, $localRepository));
-
     $router = new Router();
     $registerRoutes = require __DIR__ . '/../routes.php';
     $registerRoutes($router);

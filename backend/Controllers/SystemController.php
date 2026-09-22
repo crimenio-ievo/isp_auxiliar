@@ -216,13 +216,14 @@ final class SystemController
         }
 
         $version = defined('APP_VERSION_INFO') && is_array(APP_VERSION_INFO) ? APP_VERSION_INFO : [];
+        $release = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
 
         return Response::json([
             'status' => 'ok',
-            'channel' => $this->config->get('app.release.channel', 'stable'),
-            'release_id' => $this->config->get('app.release.id', ''),
-            'commit' => $this->config->get('app.release.commit', ''),
-            'build_date' => trim((string) $this->config->get('app.release.build_date', ''))
+            'environment' => $release['environment'] ?? '',
+            'release_id' => $release['release_id'] ?? '',
+            'commit' => $release['commit'] ?? '',
+            'build_date' => $release['build_date'] ?? trim((string) $this->config->get('app.release.build_date', ''))
                 ?: (string) ($version['build_date'] ?? ''),
             'schema_version' => $schemaVersion,
             'external_writes_enabled' => (bool) $this->config->get('app.mkauth.write_enabled', false),

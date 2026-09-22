@@ -12,11 +12,6 @@ return [
     'provider_key' => Env::get('APP_PROVIDER_KEY', 'default'),
     'timezone' => Env::get('APP_TIMEZONE', 'UTC'),
     'release' => [
-        'channel' => in_array(strtolower((string) Env::get('APP_RELEASE_CHANNEL', 'stable')), ['stable', 'beta'], true)
-            ? strtolower((string) Env::get('APP_RELEASE_CHANNEL', 'stable'))
-            : 'stable',
-        'stable_base_url' => Env::get('APP_STABLE_BASE_URL', ''),
-        'beta_base_url' => Env::get('APP_BETA_BASE_URL', ''),
         'id' => Env::get('APP_RELEASE_ID', ''),
         'commit' => Env::get('APP_RELEASE_COMMIT', ''),
         'build_date' => Env::get('APP_RELEASE_BUILD_DATE', ''),
