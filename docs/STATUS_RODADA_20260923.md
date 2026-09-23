@@ -139,7 +139,7 @@ próprio documento de proposta.
 
 **Nenhum código foi alterado nesta fase**, só o documento.
 
-**Commit:** pendente (adicionado após o commit).
+**Commit:** `c50235a` — `docs(proposta): mapear e propor agrupamento de Contratos/Processos/Aceites`
 
 ## Fase 4 — Proposta de categorização de Logs
 
