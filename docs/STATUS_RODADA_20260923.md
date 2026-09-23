@@ -165,7 +165,7 @@ sinalizadas no próprio documento para quando a tela for de fato desenhada.
 
 **Nenhum código foi alterado nesta fase**, só o documento.
 
-**Commit:** pendente (adicionado após o commit).
+**Commit:** `b8d03a2` — `docs(proposta): mapear origens de log e propor categorização`
 
 ## Fase 5 — Cruzamento multiempresa x Configurações extensível — CONCLUÍDA (só documento)
 
@@ -190,3 +190,60 @@ prioridade futura, registrada no próprio documento.
 **Nenhum código foi alterado nesta fase**, só o documento.
 
 **Commit:** `5529b6d` — `docs(proposta): cruzar multiempresa.md com ideia de registro de integrações`
+
+---
+
+## Resumo final da rodada — todas as 5 fases concluídas
+
+Nenhuma fase travou. Nenhuma janela fechou no meio. Ordem de execução seguiu exatamente o pedido,
+com validação real e commit isolado antes de cada fase seguinte.
+
+### Implementado e commitado (código)
+
+| Fase | O quê | Commit |
+|---|---|---|
+| 1 | Linha do tempo da ficha do cliente vira link quando existe destino real | `dab17dc` |
+| 2 | Configurações: Email/Evotrix/Mensagens agrupados em "Comunicação" | `8fb5b68` |
+
+### Virou documento de proposta (sem implementação, aguardando aprovação)
+
+| Fase | Documento | Commit |
+|---|---|---|
+| 3 | `docs/PROPOSTA_AGRUPAMENTO_CONTRATOS.md` | `c50235a` |
+| 4 | `docs/PROPOSTA_LOGS.md` | `b8d03a2` |
+| 5 | `docs/PROPOSTA_CONFIGURACOES_EXTENSIVEL.md` | `5529b6d` |
+
+(mais 3 commits pequenos só de atualização deste arquivo de status, entre as fases)
+
+### Perguntas que só você pode responder
+
+1. **Fase 1 (UX, não bloqueou):** o evento "Checkpoint" na timeline agora linka para
+   `/clientes/conexao?token=...`, que é uma tela de **ação** (permite finalizar conexão), não uma
+   tela passiva de detalhe. É o único destino real que existe para aquele registro — mantive o
+   link, mas quer que eu ajuste o rótulo/ícone pra deixar claro que é uma ação?
+2. **Fase 3:** qual caminho seguir para Contratos/Processos/Aceites — Opção A (fundir num nav só,
+   organizado por fluxo), Opção B (manter nav como está, só adicionar os links cruzados que faltam
+   entre contrato e processo — minha recomendação, por ser a de menor risco), ou nenhuma mudança
+   agora? Aceites, nas duas opções, não deve virar item de nível superior.
+3. **Fase 4:** nenhuma pergunta bloqueante; fica sinalizado no documento que a tela nova vai
+   precisar decidir o destino da rota `/logs` (hoje órfã e sem checagem de permissão) e o que fazer
+   com o `LOG_PATH` morto no `.env`.
+4. **Fase 5:** nenhuma pergunta bloqueante; é uma constatação arquitetural (Email/Evotrix hoje
+   gravam config num arquivo único e global, sem `provider_id` — viraria problema se a instalação
+   compartilhada multiempresa avançar antes disso ser corrigido) para orientar prioridade, não uma
+   decisão urgente.
+5. **Pendências flagradas em rodadas anteriores, ainda sem resposta** (não geradas por esta rodada,
+   só continuam em aberto): valor da variável CSS `--border`, remoção de "Logs" do rail de
+   navegação, realocação do botão de logout para a topbar, reaproveitamento de cor entre as
+   variantes `attention`/`queue`.
+
+### O que ainda não foi tocado
+
+- Implementação de qualquer uma das 3 propostas (Fases 3, 4, 5) — aguardando sua decisão.
+- Tudo que estava fora do escopo desta rodada: "Central de Atualizações", merge dos worktrees de
+  feature protegidos, rotação de credenciais SMTP/Evotrix expostas, destino do diretório
+  `isp_auxiliar_stable_legacy_...`, correção de nomenclatura `.env` em produção.
+- Nenhuma promoção para produção foi feita ou tentada (nem seria, sem confirmação explícita na hora).
+- O vhost de teste persistente (`https://teste.ievo.com.br/_isp_auxiliar_redesign_shell/public/`,
+  credenciais em `/root/.prod_test_once`, arquivo mantido) continua no ar para você validar tudo
+  visualmente quando quiser, antes de decidir os próximos passos.
