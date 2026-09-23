@@ -78,7 +78,7 @@ proposta (sem código), por instrução explícita.
   destino real que existe para aquele registro, mas quer que eu troque o rótulo/ícone para deixar
   claro que é uma ação e não só "ver detalhes", ou prefere manter como está?
 
-**Commit:** pendente de ser criado nesta mesma fase (ver hash abaixo, adicionado após o commit).
+**Commit:** `dab17dc` — `feat(clientes): linha do tempo com links para destinos reais`
 
 ---
 
