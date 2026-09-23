@@ -145,6 +145,26 @@ próprio documento de proposta.
 
 Status: **ainda não iniciada**.
 
-## Fase 5 — Cruzamento multiempresa x Configurações extensível
+## Fase 5 — Cruzamento multiempresa x Configurações extensível — CONCLUÍDA (só documento)
 
-Status: **ainda não iniciada**.
+Li `docs/multiempresa.md` por completo e investiguei se já existe algum padrão de "registro de
+integrações" (interface/registry/plugin) na tela de Configurações — não existe: as 7 abas são
+hardcoded em 3 lugares (view + 2 pontos no controller). Achado mais importante: **MkAuth/Geral já
+usam `provider_settings` (chave-valor por provedor, como `multiempresa.md` já prevê), mas Email e
+Evotrix/WhatsApp gravam num arquivo JSON único e global (`storage/contracts/config.json`, caminho
+fixo, sem `provider_id`/`provider_slug`)** — ou seja, metade das integrações já está no eixo
+multiempresa e a outra metade não está em eixo nenhum.
+
+Documento: `docs/PROPOSTA_CONFIGURACOES_EXTENSIVEL.md` — conclui que as duas ideias são
+complementares (não a mesma, não conflitantes), mas compartilham um pré-requisito técnico comum:
+se o registro de integrações for desenhado em cima de `provider_settings` (em vez de arquivos
+soltos), ele resolve ao mesmo tempo o hardcode de abas e a lacuna de isolamento multiempresa que
+Email/Evotrix já têm hoje. Recomendação: não implementar isoladamente; se abordado, desenhar já
+sobre `provider_settings`, migrando Email/Evotrix no mesmo movimento.
+
+**Pergunta pendente:** nenhuma decisão bloqueante — é uma constatação arquitetural para orientar
+prioridade futura, registrada no próprio documento.
+
+**Nenhum código foi alterado nesta fase**, só o documento.
+
+**Commit:** pendente (adicionado após o commit).
