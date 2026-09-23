@@ -116,7 +116,7 @@ proposta (sem código), por instrução explícita.
 
 **Pergunta pendente:** nenhuma — reorganização puramente visual, sem decisão de negócio envolvida.
 
-**Commit:** pendente (adicionado após o commit).
+**Commit:** `8fb5b68` — `feat(configuracoes): agrupar Email/Evotrix/Mensagens em "Comunicação"`
 
 ## Fase 3 — Proposta de agrupamento Contratos/Processos/Aceites
 
