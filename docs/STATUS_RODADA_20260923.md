@@ -118,9 +118,28 @@ proposta (sem código), por instrução explícita.
 
 **Commit:** `8fb5b68` — `feat(configuracoes): agrupar Email/Evotrix/Mensagens em "Comunicação"`
 
-## Fase 3 — Proposta de agrupamento Contratos/Processos/Aceites
+## Fase 3 — Proposta de agrupamento Contratos/Processos/Aceites — CONCLUÍDA (só documento)
 
-Status: **ainda não iniciada**.
+Investigação completa da relação real entre `ContractController`, `OperationalProcessController` e
+`AcceptanceController` (rotas, controllers, FKs, cross-references, sequenciamento de negócio).
+Achado central: o código já trata Processo como container do fluxo e Contrato+Aceite como artefato
+gerado dentro dele (aceite confirmado/não revogado é trava real para o resto do processo avançar) —
+dois documentos já existentes (`docs/hotfix-migracao/06-arquitetura-de-processos.md` e
+`26-area-operacional-unica.md`) já descrevem isso. Na tela, porém, Contratos e Processos são dois
+itens de nav soltos, sem nenhum link cruzado; Aceites não tem item próprio (é sub-página de
+Contratos + fluxo de cliente sem tela de operador).
+
+Documento: `docs/PROPOSTA_AGRUPAMENTO_CONTRATOS.md` — apresenta duas opções (A: fundir em nav único
+organizado por fluxo; B: manter nav como está e só adicionar os links cruzados que faltam entre
+contrato ↔ processo), recomendação (B primeiro, A como evolução futura se compensar), e reforça que
+Aceites não deve virar item de nível superior (contradiria o próprio modelo já documentado).
+
+**Pergunta pendente:** qual opção seguir (A, B, ou nenhuma agora) — decisão sua, registrada no
+próprio documento de proposta.
+
+**Nenhum código foi alterado nesta fase**, só o documento.
+
+**Commit:** pendente (adicionado após o commit).
 
 ## Fase 4 — Proposta de categorização de Logs
 
