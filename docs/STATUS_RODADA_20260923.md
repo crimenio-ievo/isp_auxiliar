@@ -141,9 +141,31 @@ próprio documento de proposta.
 
 **Commit:** `c50235a` — `docs(proposta): mapear e propor agrupamento de Contratos/Processos/Aceites`
 
-## Fase 4 — Proposta de categorização de Logs
+## Fase 4 — Proposta de categorização de Logs — CONCLUÍDA (só documento)
 
-Status: **ainda não iniciada**.
+Investigação exaustiva encontrou 7 origens reais de "log": `audit_logs` (mais de 70 tipos de
+evento), `notification_logs` (envio de WhatsApp/e-mail), `sis_suporte`/`sis_msg` do MkAuth
+(externo), dois arquivos (`client-plan-confirmation.log`, `mkauth-write-guard.log`), `error_log`
+do Apache/PHP, e `logs/app.log` — que **não existe de fato** (configuração morta no `.env`, sem
+nenhum código que escreva nele). Achado importante: já existem 3 telas parciais mostrando pedaços
+disso (`/logs`, que é **órfã de navegação e sem checagem de permissão**; aba de notificações/
+auditoria na ficha do contrato; linha do tempo da ficha do cliente), cada uma com seu próprio
+dicionário de tradução de eventos, incompleto e diferente das outras duas. Nenhuma origem tem
+severidade real (só `notification_logs.status` chega perto) e não existe rotina automática de
+limpeza (só um script manual, bloqueado em produção).
+
+Documento: `docs/PROPOSTA_LOGS.md` — propõe categorizar por significado (Contrato/Aceite,
+Provisionamento, Processos operacionais, Acesso/segurança, Configurações/testes, Chamados
+financeiros no MkAuth) em vez de por tabela de origem, e sinaliza decisões que a implementação
+futura vai precisar tomar (unificar os 3 dicionários de tradução; decidir o destino da rota `/logs`
+órfã e sem permissão; decidir o que fazer com `logs/app.log`, que é promessa não cumprida).
+
+**Pergunta pendente:** nenhuma decisão bloqueante nesta fase — as decisões de implementação ficam
+sinalizadas no próprio documento para quando a tela for de fato desenhada.
+
+**Nenhum código foi alterado nesta fase**, só o documento.
+
+**Commit:** pendente (adicionado após o commit).
 
 ## Fase 5 — Cruzamento multiempresa x Configurações extensível — CONCLUÍDA (só documento)
 
