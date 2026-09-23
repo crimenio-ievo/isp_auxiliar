@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Core\Csrf;
 use App\Core\Url;
 
 $layoutMode = $layoutMode ?? 'app';
@@ -14,32 +13,8 @@ $roleLabel = match ($role) {
     'technician' => 'Tecnico',
     default => (string) ($user['role'] ?? 'Sem sessao'),
 };
-$releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
-$releaseChannel = (string) ($releaseInfo['channel'] ?? 'stable') === 'beta' ? 'beta' : 'stable';
-$access = is_array($user['access'] ?? null) ? $user['access'] : [];
-$canUseBeta = !empty($access['can_use_beta'])
-    || in_array($role, ['manager', 'gestor', 'admin', 'platform_admin', 'administrador'], true);
-$stableDestination = rtrim(trim((string) ($releaseInfo['stable_base_url'] ?? '')), '/');
-$betaDestination = rtrim(trim((string) ($releaseInfo['beta_base_url'] ?? '')), '/');
-$releaseLabel = $releaseChannel === 'beta' ? 'Beta' : 'Stable';
-$targetChannel = $releaseChannel === 'beta' ? 'stable' : 'beta';
-$targetLabel = $targetChannel === 'beta' ? 'Beta' : 'Stable';
-$targetDestination = $targetChannel === 'beta' ? $betaDestination : $stableDestination;
-$canOpenTarget = $targetDestination !== '' && ($targetChannel !== 'beta' || $canUseBeta);
-$hasReleaseDestinations = $stableDestination !== '' || $betaDestination !== '';
-$releaseId = trim((string) ($releaseInfo['id'] ?? ''));
-$releaseCommit = trim((string) ($releaseInfo['commit'] ?? ''));
-$releaseCommitShort = $releaseCommit !== '' ? substr($releaseCommit, 0, 7) : 'sem-hash';
 ?>
 <header class="topbar<?= $layoutMode === 'guest' ? ' topbar--guest' : ''; ?>">
-    <?php if ($layoutMode !== 'guest'): ?>
-        <button class="menu-toggle" type="button" aria-label="Abrir menu" data-sidebar-toggle>
-            <span></span>
-            <span></span>
-            <span></span>
-        </button>
-    <?php endif; ?>
-
     <div class="topbar__brand">
         <p class="topbar__eyebrow">Central operacional</p>
         <strong><?= htmlspecialchars($appName ?? 'ISP Auxiliar', ENT_QUOTES, 'UTF-8'); ?></strong>
@@ -47,19 +22,6 @@ $releaseCommitShort = $releaseCommit !== '' ? substr($releaseCommit, 0, 7) : 'se
 
     <div class="topbar__actions">
         <?php if ($layoutMode !== 'guest'): ?>
-            <?php if ($hasReleaseDestinations): ?>
-                <div class="release-channel-control">
-                    <form class="release-channel-selector" method="post" action="<?= htmlspecialchars(Url::to('/canal-versao'), ENT_QUOTES, 'UTF-8'); ?>">
-                        <?= Csrf::field('release_channel'); ?>
-                        <span class="release-channel-current">Canal: <strong><?= htmlspecialchars($releaseLabel, ENT_QUOTES, 'UTF-8'); ?></strong></span>
-                        <input type="hidden" name="release_channel" value="<?= htmlspecialchars($targetChannel, ENT_QUOTES, 'UTF-8'); ?>">
-                        <?php if ($canOpenTarget): ?>
-                            <button class="button button--ghost button--small" type="submit">Abrir <?= htmlspecialchars($targetLabel, ENT_QUOTES, 'UTF-8'); ?></button>
-                        <?php endif; ?>
-                    </form>
-                    <small class="release-channel-state"><?= htmlspecialchars($releaseLabel, ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseId !== '' ? $releaseId : 'release não informada', ENT_QUOTES, 'UTF-8'); ?> · <?= htmlspecialchars($releaseCommitShort, ENT_QUOTES, 'UTF-8'); ?></small>
-                </div>
-            <?php endif; ?>
             <div class="topbar__user">
                 <span class="avatar"><?= htmlspecialchars(substr((string) $user['name'], 0, 1), ENT_QUOTES, 'UTF-8'); ?></span>
                 <div>
@@ -67,6 +29,9 @@ $releaseCommitShort = $releaseCommit !== '' ? substr($releaseCommit, 0, 7) : 'se
                     <small><?= htmlspecialchars($roleLabel, ENT_QUOTES, 'UTF-8'); ?></small>
                 </div>
             </div>
+            <a class="topbar__logout" href="<?= htmlspecialchars(Url::to('/logout'), ENT_QUOTES, 'UTF-8'); ?>" title="Sair" aria-label="Sair">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </a>
         <?php endif; ?>
     </div>
 </header>

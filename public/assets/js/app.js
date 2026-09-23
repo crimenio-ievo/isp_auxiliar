@@ -6,45 +6,6 @@
  */
 document.documentElement.classList.add('app-ready');
 
-const sidebar = document.querySelector('[data-sidebar]');
-const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
-const sidebarBackdrop = document.querySelector('[data-sidebar-backdrop]');
-
-function closeSidebar() {
-    document.body.classList.remove('sidebar-open');
-
-    if (sidebarBackdrop) {
-        sidebarBackdrop.hidden = true;
-    }
-}
-
-function openSidebar() {
-    document.body.classList.add('sidebar-open');
-
-    if (sidebarBackdrop) {
-        sidebarBackdrop.hidden = false;
-    }
-}
-
-if (sidebar && sidebarToggle && sidebarBackdrop) {
-    sidebarToggle.addEventListener('click', () => {
-        if (document.body.classList.contains('sidebar-open')) {
-            closeSidebar();
-            return;
-        }
-
-        openSidebar();
-    });
-
-    sidebarBackdrop.addEventListener('click', closeSidebar);
-
-    window.addEventListener('resize', () => {
-        if (window.innerWidth > 920) {
-            closeSidebar();
-        }
-    });
-}
-
 const citySelect = document.querySelector('[data-city-select]');
 const stateInput = document.querySelector('[data-city-state]');
 const ibgeInput = document.querySelector('[data-city-ibge]');

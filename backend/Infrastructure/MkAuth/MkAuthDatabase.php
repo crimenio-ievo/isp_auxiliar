@@ -168,6 +168,74 @@ final class MkAuthDatabase implements ClientPlanReadRepository
         return $this->countRows('SELECT COUNT(*) FROM sis_cliente WHERE login IS NOT NULL AND login <> ""');
     }
 
+    public function countBlockedClients(): int
+    {
+        return $this->countRows(
+            'SELECT COUNT(*) FROM sis_cliente WHERE login IS NOT NULL AND login <> "" AND LOWER(TRIM(bloqueado)) = "sim"'
+        );
+    }
+
+    /**
+     * Ativos e não bloqueados (nem todo cliente cai num desses dois grupos:
+     * existem casos reais de bloqueado="nao" com cli_ativado="n", que ficam
+     * de fora dos dois — não fazem parte de nenhuma das métricas de atenção).
+     */
+    public function countActiveNotBlockedClients(): int
+    {
+        return $this->countRows(
+            'SELECT COUNT(*) FROM sis_cliente
+             WHERE login IS NOT NULL AND login <> ""
+               AND LOWER(TRIM(bloqueado)) <> "sim"
+               AND LOWER(TRIM(cli_ativado)) IN ("s", "sim", "1", "true", "yes")'
+        );
+    }
+
+    /**
+     * Ativos, não bloqueados, com pelo menos um título em sis_lanc vencido e
+     * não pago. Mesma regra usada em clientFinancialSummary() para o detalhe
+     * financeiro por cliente, aqui agregada para toda a base.
+     */
+    public function countActiveClientsWithOverdueInvoice(): int
+    {
+        return $this->countRows(
+            'SELECT COUNT(*) FROM sis_cliente c
+             WHERE c.login IS NOT NULL AND c.login <> ""
+               AND LOWER(TRIM(c.bloqueado)) <> "sim"
+               AND LOWER(TRIM(c.cli_ativado)) IN ("s", "sim", "1", "true", "yes")
+               AND EXISTS (
+                   SELECT 1 FROM sis_lanc l
+                   WHERE LOWER(l.login) = LOWER(c.login)
+                     AND COALESCE(l.deltitulo, 0) = 0
+                     AND (l.datapag IS NULL OR l.datapag = "")
+                     AND LOWER(TRIM(COALESCE(l.status, ""))) NOT IN ("pago", "quitado", "baixado")
+                     AND l.datavenc < CURDATE()
+               )'
+        );
+    }
+
+    /**
+     * Complemento independente do método acima (não é a subtração): ativos,
+     * não bloqueados, sem nenhum título vencido e não pago. A soma dos dois
+     * deve sempre bater com countActiveNotBlockedClients().
+     */
+    public function countActiveClientsInGoodStanding(): int
+    {
+        return $this->countRows(
+            'SELECT COUNT(*) FROM sis_cliente c
+             WHERE c.login IS NOT NULL AND c.login <> ""
+               AND LOWER(TRIM(c.bloqueado)) <> "sim"
+               AND LOWER(TRIM(c.cli_ativado)) IN ("s", "sim", "1", "true", "yes")
+               AND NOT EXISTS (
+                   SELECT 1 FROM sis_lanc l
+                   WHERE LOWER(l.login) = LOWER(c.login)
+                     AND COALESCE(l.deltitulo, 0) = 0
+                     AND (l.datapag IS NULL OR l.datapag = "")
+                     AND LOWER(TRIM(COALESCE(l.status, ""))) NOT IN ("pago", "quitado", "baixado")
+                     AND l.datavenc < CURDATE()
+               )'
+        );
+    }
+
     public function countActivePlans(): int
     {
         return $this->countRows("SELECT COUNT(*) FROM sis_plano WHERE nome <> '' AND oculto = 'nao'");

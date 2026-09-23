@@ -8,6 +8,7 @@ use App\Core\Config;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\View;
+use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 
@@ -20,7 +21,8 @@ final class DashboardController
         private View $view,
         private Config $config,
         private LocalRepository $localRepository,
-        private MkAuthDatabase $mkauthDatabase
+        private MkAuthDatabase $mkauthDatabase,
+        private Database $database
     ) {
     }
 
@@ -33,6 +35,7 @@ final class DashboardController
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $this->resolveViewUser(),
             'stats' => $this->dashboardStats(),
+            'alertTiles' => $this->homeAlertTiles(),
             'recentActivities' => $this->recentInstallationActivities(),
             'pipeline' => [
                 'Cadastrar novo cliente com fotos e assinatura',
@@ -42,6 +45,103 @@ final class DashboardController
         ]);
 
         return Response::html($html);
+    }
+
+    /**
+     * Números semânticos da home (urgente/atenção/aguardando/ok).
+     *
+     * "Atenção" soma as regras de attentionRules() — hoje só fatura vencida,
+     * mas a lista existe para crescer sem mexer na apresentação.
+     */
+    private function homeAlertTiles(): array
+    {
+        return [
+            [
+                'label' => 'Clientes bloqueados',
+                'value' => (string) $this->safeMkAuthCount('blocked'),
+                'description' => 'Bloqueados no MkAuth agora',
+                'variant' => 'urgente',
+            ],
+            [
+                'label' => 'Atenção',
+                'value' => (string) $this->attentionCount(),
+                'description' => 'Ativos, não bloqueados, com fatura vencida',
+                'variant' => 'attention',
+            ],
+            [
+                'label' => 'Aceites pendentes',
+                'value' => (string) $this->pendingAcceptancesCount(),
+                'description' => 'Aguardando assinatura do cliente',
+                'variant' => 'queue',
+            ],
+            [
+                'label' => 'Em dia',
+                'value' => (string) $this->safeMkAuthCount('good_standing'),
+                'description' => 'Ativos, não bloqueados, sem pendência de atenção',
+                'variant' => 'ok',
+            ],
+        ];
+    }
+
+    /**
+     * Regras de atenção: cada entrada é uma função sem argumentos que
+     * devolve a contagem de clientes que ela sozinha capturaria. Hoje só
+     * existe a regra de fatura vencida — novas regras entram aqui como
+     * novas entradas, sem tocar na view nem no partial de alerta.
+     */
+    private function attentionRules(): array
+    {
+        return [
+            'fatura_vencida' => fn (): int => $this->safeMkAuthCount('overdue_invoice'),
+        ];
+    }
+
+    private function attentionCount(): int
+    {
+        $total = 0;
+        foreach ($this->attentionRules() as $rule) {
+            $total += $rule();
+        }
+
+        return $total;
+    }
+
+    /**
+     * Mesma condição de App\Controllers\ContractController::countPendingAcceptances(),
+     * reaproveitada aqui porque o método de origem é privado ao módulo de Contratos.
+     */
+    private function pendingAcceptancesCount(): int
+    {
+        if (!$this->tableExists('contract_acceptances')) {
+            return 0;
+        }
+
+        try {
+            $row = $this->database->fetchOne(
+                'SELECT COUNT(*) AS total FROM contract_acceptances WHERE status IN ("criado", "enviado", "assinatura_pendente", "expirado")'
+            );
+
+            return (int) ($row['total'] ?? 0);
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    private function tableExists(string $table): bool
+    {
+        try {
+            $row = $this->database->fetchOne(
+                'SELECT 1 AS found FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                 AND table_name = :table
+                 LIMIT 1',
+                ['table' => $table]
+            );
+
+            return is_array($row);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function resolveUser(): array
@@ -163,6 +263,9 @@ final class DashboardController
             return match ($type) {
                 'plans' => $this->mkauthDatabase->countActivePlans(),
                 'users' => $this->mkauthDatabase->countAccessUsers(),
+                'blocked' => $this->mkauthDatabase->countBlockedClients(),
+                'overdue_invoice' => $this->mkauthDatabase->countActiveClientsWithOverdueInvoice(),
+                'good_standing' => $this->mkauthDatabase->countActiveClientsInGoodStanding(),
                 default => $this->mkauthDatabase->countClients(),
             };
         } catch (\Throwable $exception) {
