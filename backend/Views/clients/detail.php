@@ -157,7 +157,12 @@ ob_start();
         <div class="section-heading"><p class="section-heading__eyebrow">Linha do tempo</p><h2>Eventos recentes</h2></div>
         <?php if ($timeline === []): ?><p class="page-description">Nenhum evento local encontrado.</p><?php endif; ?>
         <?php foreach (array_slice($timeline, 0, 12) as $event): ?>
-            <article><time><?= $h($formatEventTime($event['time'] ?? '')); ?></time><div><strong><?= $h($event['label'] ?? 'Evento'); ?></strong><?php if ($present($event['description'] ?? '')): ?><p><?= $h($event['description']); ?></p><?php endif; ?></div></article>
+            <?php $eventUrl = $event['url'] ?? null; ?>
+            <?php if ($present($eventUrl)): ?>
+                <a class="recent-events__row recent-events__row--linked" href="<?= $h($eventUrl); ?>"><time><?= $h($formatEventTime($event['time'] ?? '')); ?></time><div><strong><?= $h($event['label'] ?? 'Evento'); ?></strong><?php if ($present($event['description'] ?? '')): ?><p><?= $h($event['description']); ?></p><?php endif; ?></div></a>
+            <?php else: ?>
+                <article class="recent-events__row"><time><?= $h($formatEventTime($event['time'] ?? '')); ?></time><div><strong><?= $h($event['label'] ?? 'Evento'); ?></strong><?php if ($present($event['description'] ?? '')): ?><p><?= $h($event['description']); ?></p><?php endif; ?></div></article>
+            <?php endif; ?>
         <?php endforeach; ?>
         <?php if ($processes !== []): ?><a class="button button--ghost button--small" href="<?= $h(Url::to('/processos/detalhe?id=' . (int) ($processes[0]['id'] ?? 0))); ?>">Ver checklist técnico completo</a><?php endif; ?>
     </section>

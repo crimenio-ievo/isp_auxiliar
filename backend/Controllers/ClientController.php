@@ -2642,7 +2642,8 @@ final class ClientController
             $contracts,
             $acceptanceRecords,
             $financialTask,
-            $auditLogs
+            $auditLogs,
+            is_array($primaryContract) && isset($primaryContract['id']) ? (int) $primaryContract['id'] : 0
         );
 
         $address = trim(implode(', ', array_filter([
@@ -2897,7 +2898,8 @@ final class ClientController
         array $contracts,
         array $acceptances,
         array $financialTask,
-        array $auditLogs
+        array $auditLogs,
+        int $primaryContractId = 0
     ): array {
         $events = [];
 
@@ -2914,11 +2916,13 @@ final class ClientController
             if (!is_array($checkpoint)) {
                 continue;
             }
+            $token = trim((string) ($checkpoint['token'] ?? ''));
             $events[] = [
                 'group' => 'Instalacao',
                 'label' => 'Checkpoint',
                 'description' => (string) ($checkpoint['status'] ?? 'awaiting_connection'),
                 'time' => (string) ($checkpoint['updated_at'] ?? $checkpoint['created_at'] ?? ''),
+                'url' => $token !== '' ? Url::to('/clientes/conexao?token=' . rawurlencode($token)) : null,
             ];
         }
 
@@ -2926,11 +2930,13 @@ final class ClientController
             if (!is_array($contractItem)) {
                 continue;
             }
+            $contractItemId = (int) ($contractItem['id'] ?? 0);
             $events[] = [
                 'group' => 'Contrato',
                 'label' => 'Contrato ' . (string) ($contractItem['id'] ?? '-'),
                 'description' => (string) ($contractItem['status_financeiro'] ?? '-'),
                 'time' => (string) ($contractItem['updated_at'] ?? $contractItem['created_at'] ?? ''),
+                'url' => $contractItemId > 0 ? Url::to('/contratos/detalhe?id=' . $contractItemId) : null,
             ];
         }
 
@@ -2943,6 +2949,7 @@ final class ClientController
                 'label' => 'Aceite ' . (string) ($acceptanceItem['status'] ?? '-'),
                 'description' => 'Protocolo ' . (string) ($acceptanceItem['protocolo'] ?? ($acceptanceItem['id'] ?? '-')),
                 'time' => (string) ($acceptanceItem['accepted_at'] ?? $acceptanceItem['created_at'] ?? ''),
+                'url' => $primaryContractId > 0 ? Url::to('/contratos/detalhe?id=' . $primaryContractId) : null,
             ];
         }
 
@@ -2952,6 +2959,7 @@ final class ClientController
                 'label' => 'Pendencia financeira',
                 'description' => (string) ($financialTask['status'] ?? 'pendente'),
                 'time' => (string) ($financialTask['updated_at'] ?? $financialTask['created_at'] ?? ''),
+                'url' => $primaryContractId > 0 ? Url::to('/contratos/detalhe?id=' . $primaryContractId) : null,
             ];
         }
 
@@ -2960,12 +2968,18 @@ final class ClientController
                 continue;
             }
             $translated = $this->translateAuditEvent((string) ($log['action'] ?? ''), $log);
+            $entityType = (string) ($log['entity_type'] ?? '');
+            $auditUrl = null;
+            if ($primaryContractId > 0 && in_array($entityType, ['client_contract', 'contract_acceptance', 'financial_task'], true)) {
+                $auditUrl = Url::to('/contratos/detalhe?id=' . $primaryContractId);
+            }
             $events[] = [
                 'group' => 'Auditoria',
                 'label' => $translated['label'],
                 'description' => $translated['description'],
                 'time' => (string) ($log['created_at'] ?? ''),
                 'responsible' => trim((string) ($log['actor_login'] ?? '')),
+                'url' => $auditUrl,
             ];
         }
 

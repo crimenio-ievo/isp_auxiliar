@@ -3062,12 +3062,18 @@ body.modal-open {
     border-radius: 12px;
 }
 
-.recent-events article {
+.recent-events__row {
     display: grid;
     grid-template-columns: 150px 1fr;
     gap: 16px;
     padding: 14px 0;
     border-bottom: 1px solid var(--border);
+}
+
+.recent-events__row--linked:hover,
+.recent-events__row--linked:focus-visible {
+    background: var(--surface-muted);
+    border-radius: 8px;
 }
 
 .recent-events time,
@@ -3220,7 +3226,7 @@ body.client-panel-open {
     }
 
     .document-list a,
-    .recent-events article,
+    .recent-events__row,
     .detail-list > div {
         grid-template-columns: 1fr;
     }
