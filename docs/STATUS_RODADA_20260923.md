@@ -167,4 +167,4 @@ prioridade futura, registrada no próprio documento.
 
 **Nenhum código foi alterado nesta fase**, só o documento.
 
-**Commit:** pendente (adicionado após o commit).
+**Commit:** `5529b6d` — `docs(proposta): cruzar multiempresa.md com ideia de registro de integrações`
