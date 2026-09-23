@@ -63,6 +63,15 @@ $tabs = [
     'mensagens' => 'Mensagens e notificações',
     'sistema' => 'Sistema',
 ];
+$communicationTabs = ['email', 'evotrix', 'mensagens'];
+$navItems = [
+    ['key' => 'geral'],
+    ['key' => 'mkauth'],
+    ['key' => 'contratos'],
+    ['group' => 'comunicacao', 'label' => 'Comunicação', 'children' => $communicationTabs],
+    ['key' => 'sistema'],
+];
+$isCommunicationTab = in_array($currentTab, $communicationTabs, true);
 
 ob_start();
 ?>
@@ -110,10 +119,23 @@ ob_start();
 <?php else: ?>
     <section class="card">
         <nav class="settings-tabs" aria-label="Abas de configuração">
-            <?php foreach ($tabs as $tabKey => $tabLabel): ?>
-                <a class="button button--ghost<?= $currentTab === $tabKey ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=' . $tabKey), ENT_QUOTES, 'UTF-8'); ?>">
-                    <?= htmlspecialchars($tabLabel, ENT_QUOTES, 'UTF-8'); ?>
-                </a>
+            <?php foreach ($navItems as $navItem): ?>
+                <?php if (isset($navItem['group'])): ?>
+                    <div class="settings-tabs__group<?= $isCommunicationTab ? ' is-active' : ''; ?>">
+                        <span class="settings-tabs__group-label"><?= htmlspecialchars((string) $navItem['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        <div class="settings-tabs__group-items">
+                            <?php foreach ($navItem['children'] as $childKey): ?>
+                                <a class="button button--ghost button--small<?= $currentTab === $childKey ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=' . $childKey), ENT_QUOTES, 'UTF-8'); ?>">
+                                    <?= htmlspecialchars($tabs[$childKey] ?? $childKey, ENT_QUOTES, 'UTF-8'); ?>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <a class="button button--ghost<?= $currentTab === $navItem['key'] ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to('/configuracoes?tab=' . $navItem['key']), ENT_QUOTES, 'UTF-8'); ?>">
+                        <?= htmlspecialchars($tabs[$navItem['key']] ?? $navItem['key'], ENT_QUOTES, 'UTF-8'); ?>
+                    </a>
+                <?php endif; ?>
             <?php endforeach; ?>
         </nav>
         <p class="page-description" style="margin-top: 16px;">

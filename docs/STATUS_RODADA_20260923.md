@@ -82,9 +82,41 @@ proposta (sem código), por instrução explícita.
 
 ---
 
-## Fase 2 — Configurações agrupadas por domínio de comunicação
+## Fase 2 — Configurações agrupadas por domínio de comunicação — CONCLUÍDA E COMMITADA
 
-Status: **ainda não iniciada**.
+**Investigação primeiro:**
+- Tela é um arquivo único (`backend/Views/settings/index.php`, 753 linhas), sem partials por aba — cada
+  aba é um bloco `if/elseif` dentro do mesmo arquivo, com formulário próprio.
+- Troca de aba é 100% server-side via query string (`?tab=chave`), sem JS. Nenhuma lógica de
+  salvar/carregar depende de posição no DOM — só da string da chave (`settings_section` no form e
+  `tab` na URL), conferido em `SettingsController::normalizeTab()`/`saveSection()`.
+- 7 abas reais hoje: `geral` (Geral/Provedor), `mkauth`, `contratos`, `email`, `evotrix`,
+  `mensagens`, `sistema`. Confirmado que MkAuth e Provedor (`geral`) usam a mesma convenção visual
+  das outras (form + `section.card`) e não dependem de posição.
+
+**Implementação (só reorganização visual, zero mudança em salvar/carregar):**
+- `backend/Views/settings/index.php`: as chaves/abas `email`, `evotrix`, `mensagens` continuam
+  exatamente iguais (mesmo `<form>`, mesmo `settings_section`, mesmo conteúdo) — só a barra de
+  navegação passou a agrupar as três sob um rótulo "Comunicação" com sub-navegação própria
+  (`.settings-tabs__group`), em vez de 3 botões soltos na mesma fileira das outras abas. MkAuth,
+  Geral/Provedor e Sistema continuam como botões de nível superior, sem nenhuma alteração.
+- `public/assets/css/app.css`: novo bloco `.settings-tabs__group` (cápsula tracejada com rótulo +
+  sub-botões), sem tocar em nenhuma regra usada pelas abas que não mudaram de lugar.
+
+**Validação real:**
+- `php -l` limpo.
+- Testado ao vivo no vhost persistente: login real, `curl` nas 7 combinações de `?tab=...` — todas
+  200. Conferido por HTML que o grupo "Comunicação" aparece com `is-active` só quando a aba atual é
+  email/evotrix/mensagens, e o sub-botão certo recebe `is-active`; os outros 4 níveis-superiores
+  continuam soltos como antes.
+- Conferido que o `<input type="hidden" name="settings_section" value="...">` de cada aba continua
+  idêntico ao valor da chave (nenhuma mudança de lógica de salvar).
+- Rodei `tests/Feature/ContractSettingsPersistenceRegression.php` (única suíte que toca
+  `SettingsController`/persistência de config local) — 13 verificações, todas passaram.
+
+**Pergunta pendente:** nenhuma — reorganização puramente visual, sem decisão de negócio envolvida.
+
+**Commit:** pendente (adicionado após o commit).
 
 ## Fase 3 — Proposta de agrupamento Contratos/Processos/Aceites
 
