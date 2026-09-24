@@ -204,6 +204,9 @@ ob_start();
     <div class="hero-actions">
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/contratos/novos'), ENT_QUOTES, 'UTF-8'); ?>">Voltar aos contratos</a>
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/contratos/aceites/pendentes'), ENT_QUOTES, 'UTF-8'); ?>">Ver aceites pendentes</a>
+        <?php if ((int) ($acceptance['operational_process_id'] ?? 0) > 0): ?>
+            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/processos/detalhe?id=' . (int) $acceptance['operational_process_id']), ENT_QUOTES, 'UTF-8'); ?>">Ver processo</a>
+        <?php endif; ?>
     </div>
 </section>
 

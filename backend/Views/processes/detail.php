@@ -8,6 +8,7 @@ $process = is_array($process ?? null) ? $process : [];
 $steps = is_array($process['steps'] ?? null) ? $process['steps'] : [];
 $processId = (int) ($process['id'] ?? 0);
 $isClosed = in_array((string) ($process['status'] ?? ''), ['completed', 'cancelled'], true);
+$processContractId = (int) ($process['contract_id'] ?? 0);
 ob_start();
 ?>
 <section class="page-header">
@@ -18,6 +19,9 @@ ob_start();
     </div>
     <div class="hero-actions">
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/clientes/detalhe?login=' . rawurlencode((string) ($process['mkauth_login'] ?? ''))), ENT_QUOTES, 'UTF-8'); ?>">Detalhe do cliente</a>
+        <?php if ($processContractId > 0): ?>
+            <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/contratos/detalhe?id=' . $processContractId), ENT_QUOTES, 'UTF-8'); ?>">Ver contrato/documento assinado</a>
+        <?php endif; ?>
         <a class="button button--ghost" href="<?= htmlspecialchars(Url::to('/processos'), ENT_QUOTES, 'UTF-8'); ?>">Todos os processos</a>
     </div>
 </section>

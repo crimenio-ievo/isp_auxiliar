@@ -191,6 +191,9 @@ ob_start();
     <header class="migration-workspace__header">
         <div>
             <a class="client-hub__back" href="<?= $h($clientUrl); ?>">← Voltar ao cliente</a>
+            <?php if ((int) ($contract['id'] ?? 0) > 0): ?>
+                <a class="client-hub__back" href="<?= $h(Url::to('/contratos/detalhe?id=' . (int) $contract['id'])); ?>">Ver contrato/documento assinado</a>
+            <?php endif; ?>
             <p class="section-heading__eyebrow">Migração #<?= $processId; ?> · Etapa <?= $currentPhase; ?> de 4</p>
             <h1><?= $h($phases[$currentPhase] ?? 'Processo de migração'); ?></h1>
             <p class="page-description"><?= $h($process['client_name'] ?? $process['mkauth_login'] ?? 'Cliente'); ?> · <?= $h($process['mkauth_login'] ?? ''); ?></p>
