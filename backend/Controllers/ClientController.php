@@ -1348,27 +1348,31 @@ final class ClientController
         $plans = $this->loadPlans();
         $data = $this->captureClientPlanSnapshot($this->collectFormData($request), $plans);
         $this->saveFormDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
+
+        // Persiste o rascunho e salva a foto enviada antes de validar os demais campos,
+        // para que um erro em outro campo nunca derrube a foto ja anexada.
+        $draftId = $this->saveDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
+
+        if ($uploadedPhotoCount > 0) {
+            try {
+                $this->storeDraftPhotos($draftId, $request, $existingDraftPhotos > 0 || $editingCheckpoint);
+            } catch (\Throwable $exception) {
+                Flash::set('error', 'Nao foi possivel salvar as fotos agora: ' . $exception->getMessage());
+                return Response::redirect('/clientes/novo?draft=' . rawurlencode($draftId));
+            }
+        }
+
         $errors = $this->validateDraft($data, $request, $originalFormData, $editingCheckpoint, $hasExistingPhotos);
 
         if ($errors !== []) {
             $_SESSION['client_create_errors'] = $errors;
             Flash::set('error', implode(' ', $errors));
-            $redirect = '/clientes/novo';
-            if ($draftId !== '') {
-                $redirect .= '?draft=' . rawurlencode($draftId);
-            } elseif ($editingCheckpoint) {
-                $redirect .= '?token=' . rawurlencode($checkpointToken);
+            $redirect = '/clientes/novo?draft=' . rawurlencode($draftId);
+            if ($editingCheckpoint) {
+                $redirect .= '&token=' . rawurlencode($checkpointToken);
             }
 
             return Response::redirect($redirect);
-        }
-
-        $draftId = $this->saveDraft($data, $draftId !== '' ? $draftId : null, $editingCheckpoint ? $checkpointToken : null);
-        try {
-            $this->storeDraftPhotos($draftId, $request, $uploadedPhotoCount > 0 && ($existingDraftPhotos > 0 || $editingCheckpoint));
-        } catch (\Throwable $exception) {
-            Flash::set('error', 'Nao foi possivel salvar as fotos agora: ' . $exception->getMessage());
-            return Response::redirect('/clientes/novo?draft=' . rawurlencode($draftId));
         }
 
         Flash::set('success', 'Dados iniciais e fotos salvos. Agora confirme o aceite e conclua a assinatura local ou remota.');
