@@ -53,6 +53,7 @@ $renderNavLink = function (array $item) use ($isItemActive, $navIcons): void {
         href="<?= htmlspecialchars(Url::to($item['href']), ENT_QUOTES, 'UTF-8'); ?>"
         aria-current="<?= $isActive ? 'page' : 'false'; ?>"
         title="<?= htmlspecialchars((string) $item['label'], ENT_QUOTES, 'UTF-8'); ?>"
+        data-tooltip="<?= htmlspecialchars((string) $item['label'], ENT_QUOTES, 'UTF-8'); ?>"
     >
         <span class="app-nav__link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><?= $navIcons[$item['icon']] ?? ''; ?></svg>
