@@ -35,6 +35,8 @@ $fieldError = static function (string $name) use ($errors): string {
 };
 $draftId = (string) ($draftId ?? '');
 $checkpointToken = (string) ($checkpointToken ?? '');
+$draftMedia = is_array($draftMedia ?? null) ? $draftMedia : [];
+$draftMediaPhotos = is_array($draftMedia['photos'] ?? null) ? $draftMedia['photos'] : [];
 $draftKey = (string) ($draftKey ?? 'client-create');
 $commercial = is_array($contractCommercial ?? null) ? $contractCommercial : [];
 $skipDraftRestore = !empty($skipDraftRestore);
@@ -408,6 +410,11 @@ ob_start();
                         <strong data-photo-count>0 fotos anexadas</strong>
                         <small class="field-help">Voce pode anexar imagens do dispositivo em lote ou abrir a câmera para tirar na hora. A lista abaixo mostra o que já foi anexado.</small>
                     </div>
+                    <?php if ($draftMediaPhotos !== []): ?>
+                        <p class="photo-uploader__saved-notice" data-photo-saved-notice>
+                            <?= count($draftMediaPhotos); ?> foto(s) já salva(s) neste rascunho.
+                        </p>
+                    <?php endif; ?>
                     <div class="photo-uploader__preview" data-photo-preview></div>
                 </div>
                 <?= $fieldError('fotos'); ?>

@@ -484,7 +484,13 @@ async function hydrateDraftFiles(form, payload) {
         photoInput.files = transfer.files;
         refreshPhotoQueue();
     } catch (error) {
-        // Se o navegador nao permitir restaurar os arquivos, o tecnico pode selecionar novamente.
+        if (photoUploader) {
+            photoUploader.classList.add('is-invalid');
+        }
+        if (photoCount) {
+            photoCount.textContent = 'Não foi possível restaurar as fotos anteriores, anexe novamente.';
+            photoCount.dataset.tone = 'error';
+        }
     }
 }
 
