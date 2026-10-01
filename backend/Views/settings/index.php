@@ -52,8 +52,8 @@ $providerAnatelDefault = strtolower(trim((string) ($provider['slug'] ?? ''))) ==
     : '';
 $selected = static fn (bool $state): string => $state ? 'selected' : '';
 $checked = static fn (bool $state): string => $state ? 'checked' : '';
-$emailPasswordConfigured = trim((string) ($storedEmail['smtp_password'] ?? $email['smtp_password'] ?? '')) !== '';
-$evotrixTokenConfigured = trim((string) ($storedEvotrix['token'] ?? $evotrix['token'] ?? '')) !== '';
+$emailPasswordConfigured = trim((string) ($email['smtp_password'] ?? '')) !== '';
+$evotrixTokenConfigured = trim((string) ($evotrix['token'] ?? '')) !== '';
 $tabs = [
     'geral' => 'Geral / Provedor',
     'mkauth' => 'MkAuth',

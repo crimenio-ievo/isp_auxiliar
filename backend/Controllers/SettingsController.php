@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Config;
+use App\Infrastructure\Settings\IntegrationSettingsStore;
 use App\Core\Csrf;
 use App\Core\Flash;
 use App\Core\Request;
@@ -27,7 +28,8 @@ final class SettingsController
         private Config $config,
         private LocalRepository $localRepository,
         private MessageTemplateRepository $messageTemplateRepository,
-        private NotificationTemplateService $notificationTemplateService
+        private NotificationTemplateService $notificationTemplateService,
+        private IntegrationSettingsStore $integrationSettings
     ) {
     }
 
@@ -138,12 +140,8 @@ final class SettingsController
             'contratos' => $this->saveLocalPanelConfig([
                 'commercial' => $this->normalizeCommercialSettingsFromRequest($request),
             ]),
-            'email' => $this->saveLocalPanelConfig([
-                'email' => $this->normalizeEmailSettingsFromRequest($request),
-            ]),
-            'evotrix' => $this->saveLocalPanelConfig([
-                'evotrix' => $this->normalizeEvotrixSettingsFromRequest($request),
-            ]),
+            'email' => $this->saveIntegrationSettings('email', $this->normalizeEmailSettingsFromRequest($request)),
+            'evotrix' => $this->saveIntegrationSettings('evotrix', $this->normalizeEvotrixSettingsFromRequest($request)),
             'mensagens' => $this->saveMessageTemplate($request),
             'sistema' => $this->saveSystemSettings($request),
             default => null,
@@ -317,10 +315,8 @@ final class SettingsController
 
     private function normalizeEmailSettingsFromRequest(Request $request): array
     {
-        $current = $this->readLocalPanelConfig();
-        $existing = is_array($current['email'] ?? null) ? $current['email'] : [];
         $config = (array) $this->config->get('email', []);
-        $storedPassword = trim((string) ($existing['smtp_password'] ?? $config['smtp_password'] ?? ''));
+        $storedPassword = trim((string) ($config['smtp_password'] ?? ''));
         $incomingPassword = trim((string) $request->input('smtp_password', ''));
 
         return [
@@ -342,10 +338,8 @@ final class SettingsController
 
     private function normalizeEvotrixSettingsFromRequest(Request $request): array
     {
-        $current = $this->readLocalPanelConfig();
-        $existing = is_array($current['evotrix'] ?? null) ? $current['evotrix'] : [];
         $config = (array) $this->config->get('evotrix', []);
-        $storedToken = trim((string) ($existing['token'] ?? $config['token'] ?? ''));
+        $storedToken = trim((string) ($config['token'] ?? ''));
         $incomingToken = trim((string) $request->input('evotrix_api_key', ''));
 
         return [
@@ -379,6 +373,16 @@ final class SettingsController
                 isset($config['message_fallback']) ? (!empty($config['message_fallback']) ? '1' : '0') : '1'
             )),
         ];
+    }
+
+    /**
+     * Email/Evotrix ficam em provider_settings. O carimbo "salvo em/por" da aba
+     * Sistema continua sendo gravado no arquivo local, como antes.
+     */
+    private function saveIntegrationSettings(string $section, array $values): void
+    {
+        $this->integrationSettings->save($section, $values);
+        $this->saveLocalPanelConfig([]);
     }
 
     private function saveLocalPanelConfig(array $sections): void

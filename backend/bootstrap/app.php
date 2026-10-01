@@ -6,6 +6,7 @@ require_once __DIR__ . '/autoload.php';
 
 use App\Core\Application;
 use App\Core\Config;
+use App\Infrastructure\Settings\IntegrationSettingsStore;
 use App\Core\Flash;
 use App\Core\Container;
 use App\Core\Env;
@@ -130,7 +131,17 @@ function bootstrapApplication(): Application
         return $saved !== '' ? $saved : (string) Env::get($envKey, $default);
     };
 
+    // Email/Evotrix vivem em provider_settings; o arquivo storage/contracts/config.json
+    // (lido por backend/config/email.php e evotrix.php) segue apenas como fallback
+    // até a migração dos valores existentes.
+    $appEnvironment = (string) Env::get('APP_ENV', 'production');
+    $config = new Config(array_replace($config->all(), [
+        'email' => IntegrationSettingsStore::overlay('email', (array) $config->get('email', []), $providerSettings, $appEnvironment),
+        'evotrix' => IntegrationSettingsStore::overlay('evotrix', (array) $config->get('evotrix', []), $providerSettings, $appEnvironment),
+    ]));
+
     $container->set(Config::class, $config);
+    $container->set(IntegrationSettingsStore::class, new IntegrationSettingsStore($localRepository));
     $container->set(View::class, new View((string) $config->get('paths.views')));
     $container->set(Database::class, $localDatabase);
     $container->set(LocalRepository::class, $localRepository);

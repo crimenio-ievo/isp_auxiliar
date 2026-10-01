@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Config;
+use App\Infrastructure\Settings\IntegrationSettingsStore;
 use App\Core\Flash;
 use App\Core\Request;
 use App\Core\Response;
@@ -51,7 +52,8 @@ final class ContractController
         private MkAuthTicketService $mkAuthTicketService,
         private EmailService $emailService,
         private AcceptanceWorkflowService $acceptanceWorkflowService,
-        private NotificationTemplateService $notificationTemplateService
+        private NotificationTemplateService $notificationTemplateService,
+        private IntegrationSettingsStore $integrationSettings
     ) {
     }
 
@@ -1344,9 +1346,7 @@ final class ContractController
     private function normalizeEmailSettingsFromRequest(Request $request): array
     {
         $email = (array) $this->config->get('email', []);
-        $existing = $this->readStoredModuleSettings();
-        $existingEmail = is_array($existing['email'] ?? null) ? $existing['email'] : [];
-        $storedPassword = trim((string) ($existingEmail['smtp_password'] ?? $email['smtp_password'] ?? ''));
+        $storedPassword = trim((string) ($email['smtp_password'] ?? ''));
         $incomingPassword = trim((string) $request->input('smtp_password', ''));
 
         return [
@@ -1383,7 +1383,6 @@ final class ContractController
 
         $merged = $this->readStoredModuleSettings();
         $merged['commercial'] = $commercial;
-        $merged['email'] = $email;
         $merged['saved_at'] = date('Y-m-d H:i:s');
         $merged['saved_by'] = (string) ($this->resolveUser()['login'] ?? '');
 
@@ -1399,6 +1398,9 @@ final class ContractController
             @unlink($temporaryPath);
             throw new \RuntimeException('Nao foi possivel salvar o arquivo de configuracoes.');
         }
+
+        // E-mail vive em provider_settings (não mais no arquivo local).
+        $this->integrationSettings->save('email', $email);
     }
 
     private function readStoredModuleSettings(): array

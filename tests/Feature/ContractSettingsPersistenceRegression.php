@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Controllers\ContractController;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\Settings\IntegrationSettingsStore;
 
 require_once dirname(__DIR__, 2) . '/backend/bootstrap/autoload.php';
 
@@ -49,6 +50,18 @@ try {
     $localRepository = (new ReflectionClass(LocalRepository::class))->newInstanceWithoutConstructor();
     $controllerReflection->getProperty('localRepository')->setValue($controller, $localRepository);
 
+    // E-mail agora vai para provider_settings: um store falso captura as linhas, sem tocar no banco.
+    $fakeStore = new class extends IntegrationSettingsStore {
+        /** @var array<string, string> */
+        public array $rows = [];
+
+        protected function persist(array $rows): void
+        {
+            $this->rows = array_replace($this->rows, $rows);
+        }
+    };
+    $controllerReflection->getProperty('integrationSettings')->setValue($controller, $fakeStore);
+
     $pathOverride = $controllerReflection->getProperty('moduleSettingsPathOverride');
     $pathOverride->setValue($controller, $temporaryPath);
 
@@ -83,7 +96,9 @@ try {
 
     // 5. As seções que o ContractController realmente possui devem refletir o novo valor.
     $assert(($stored['commercial']['valor_adesao_padrao'] ?? null) === 99.9, 'Nova configuração comercial não foi persistida.');
-    $assert(($stored['email']['smtp_host'] ?? null) === 'smtp.exemplo.com', 'Nova configuração de e-mail não foi persistida.');
+    $assert(($fakeStore->rows['email.smtp_host'] ?? null) === 'smtp.exemplo.com', 'Nova configuração de e-mail não foi persistida em provider_settings.');
+    $assert(($fakeStore->rows['email.enabled'] ?? null) === '1', 'Booleano de e-mail não foi gravado como 1/0.');
+    $assert(($stored['email'] ?? null) === ['enabled' => false], 'saveModuleSettings não deve mais reescrever a seção email do arquivo legado.');
     $assert(($stored['saved_by'] ?? null) === 'teste.contratos', 'Carimbo saved_by não usa o usuário autenticado.');
 
     // 6. Escrita atômica: nenhum arquivo temporário deve sobrar após o rename.
