@@ -83,8 +83,9 @@ $result = [
         'stable_url' => $app->config()->get('app.release.stable_base_url'),
         'beta_url' => $app->config()->get('app.release.beta_base_url'),
     ],
-    'check_25' => str_contains($header, 'Canal: <strong>Beta</strong>')
-        && str_contains($header, 'Abrir Stable'),
+    // Banner de canal removido do cabeçalho: a verificação passa a garantir que ele não reaparece.
+    'check_25' => !str_contains($header, 'Canal: <strong>')
+        && !str_contains($header, 'Abrir Stable'),
     'check_26' => !(bool) $app->config()->get('app.mkauth.write_enabled', false)
         && (bool) $app->config()->get('evotrix.dry_run', false)
         && (bool) $app->config()->get('email.dry_run', false)

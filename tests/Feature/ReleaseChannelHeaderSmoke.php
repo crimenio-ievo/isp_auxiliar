@@ -59,7 +59,9 @@ $dualDestination = $renderHeader([
     'stable_base_url' => 'https://stable.example.test/isp_auxiliar/public',
     'beta_base_url' => 'https://beta.example.test/isp_auxiliar/public',
 ]);
-$assert(str_contains($dualDestination, 'Canal: <strong>Beta</strong>'), 'Ambiente com dois destinos não exibe o canal Beta.');
-$assert(str_contains($dualDestination, 'Abrir Stable'), 'Ambiente com dois destinos não mantém a troca retrocompatível.');
+// O banner de canal (Beta/Stable) foi removido do cabeçalho na redesign do shell:
+// mesmo com dois destinos configurados, o cabeçalho não exibe canal nem troca de versão.
+$assert(!str_contains($dualDestination, 'Canal: <strong>') && !str_contains($dualDestination, 'release-channel-control'), 'Cabeçalho voltou a exibir o canal de release.');
+$assert(!str_contains($dualDestination, 'Abrir Stable') && !str_contains($dualDestination, 'Abrir Beta'), 'Cabeçalho voltou a exibir link de troca de versão.');
 
 echo "ReleaseChannelHeaderSmoke: {$checks} checks passed; configuração hermética.\n";
