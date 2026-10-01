@@ -156,6 +156,11 @@ release_prepare_env() {
     fi
     install -m 600 "${source_env}" "${target_env}"
     release_write_env_setting "${target_env}" APP_RELEASE_CHANNEL "${channel}"
+    # Banner "AMBIENTE DE TESTES": só produção (e o legado stable) o esconde; candidata/qualquer outro mostra.
+    case "${channel}" in
+        production|stable) release_write_env_setting "${target_env}" APP_ENVIRONMENT production ;;
+        *) release_write_env_setting "${target_env}" APP_ENVIRONMENT test ;;
+    esac
     release_write_env_setting "${target_env}" APP_RELEASE_ID "${release_id}"
     release_write_env_setting "${target_env}" APP_RELEASE_COMMIT "${commit}"
     release_write_env_setting "${target_env}" APP_RELEASE_BUILD_DATE "$(date -u +%FT%TZ)"
@@ -459,7 +464,9 @@ release_cli_health_check() {
         $app = bootstrapApplication();
         $channel = (string)$app->config()->get("app.release.channel", "");
         $commit = (string)$app->config()->get("app.release.commit", "");
-        if ($channel !== $argv[2] || !hash_equals(strtolower($argv[3]), strtolower($commit))) exit(2);
+        // "stable" é o nome legado de produção: releases anteriores ao fluxo candidata->produção reportam stable.
+        $channelMatches = $channel === $argv[2] || ($argv[2] === "production" && $channel === "stable");
+        if (!$channelMatches || !hash_equals(strtolower($argv[3]), strtolower($commit))) exit(2);
         $db = new App\Infrastructure\Database\Database($app->config());
         $db->fetchOne("SELECT 1 AS ok");
     ' "${target}" "${expected_channel}" "${expected_commit}" || release_die "health CLI da release falhou"
@@ -511,6 +518,21 @@ release_validate_manifest() {
     [[ -f "${manifest}" ]] || release_die "manifesto da release ausente"
     grep -Fxq "release_id=${release_id}" "${manifest}" || release_die "release ID não confere com o manifesto"
     grep -Fxq "commit=${commit}" "${manifest}" || release_die "commit não confere com o manifesto"
+}
+
+release_manifest_channel() {
+    sed -n 's/^channel=//p' "$1/.release-manifest" | head -1
+}
+
+# Aceita mais de um canal (ex.: production ou o legado stable, em rollbacks para releases antigas).
+release_validate_manifest_channel_any() {
+    local release_dir="$1"
+    shift
+    local channel
+    for channel in "$@"; do
+        grep -Fxq "channel=${channel}" "${release_dir}/.release-manifest" && return 0
+    done
+    release_die "canal da release não confere (aceitos: $*)"
 }
 
 release_validate_manifest_channel() {

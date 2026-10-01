@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__, 2);
 $scripts = [
-    'deploy_beta.sh',
-    'promote_beta_to_stable.sh',
-    'rollback_beta.sh',
+    'deploy_candidate.sh',
+    'promote_release.sh',
     'rollback_stable.sh',
     'release_health_check.sh',
 ];
@@ -31,9 +30,8 @@ foreach ($scripts as $script) {
 
 $common = (string) file_get_contents($root . '/scripts/releases/common.sh');
 $migrationAuditor = (string) file_get_contents($root . '/scripts/releases/migration_auditor.php');
-$deploy = (string) file_get_contents($root . '/scripts/releases/deploy_beta.sh');
-$promote = (string) file_get_contents($root . '/scripts/releases/promote_beta_to_stable.sh');
-$rollbackBeta = (string) file_get_contents($root . '/scripts/releases/rollback_beta.sh');
+$deploy = (string) file_get_contents($root . '/scripts/releases/deploy_candidate.sh');
+$promote = (string) file_get_contents($root . '/scripts/releases/promote_release.sh');
 $rollbackStable = (string) file_get_contents($root . '/scripts/releases/rollback_stable.sh');
 $health = (string) file_get_contents($root . '/scripts/releases/release_health_check.sh');
 $diagnosticPath = $root . '/scripts/releases/release_smoke_diagnostic.sh';
@@ -62,12 +60,15 @@ $assert(str_contains($common, 'release_seal_immutable_code') && str_contains($co
 $assert(str_contains($common, 'RELEASE_WEB_GROUP:-www-data')
     && str_contains($common, 'getent group')
     && str_contains($common, '-o root -g "${web_group}" -m 2770'), 'Diretórios graváveis da release não definem owner, grupo web e setgid permanentemente.');
-$assert(str_contains($deploy, '/isp_auxiliar_beta_current') && !str_contains($deploy, 'isp_auxiliar_stable_current'), 'Deploy Beta pode atingir o symlink Stable.');
-$assert(str_contains($deploy, '--allow-http-health') && str_contains($rollbackBeta, '--allow-http-health'), 'Health HTTP explícito não está restrito aos fluxos Beta.');
+$assert(str_contains($deploy, '/isp_auxiliar_candidate_current') && !str_contains($deploy, 'isp_auxiliar_stable_current') && str_contains($deploy, '*production*'), 'Deploy da candidata pode atingir o symlink de produção.');
+$assert(str_contains($deploy, '--allow-http-health') && !str_contains($promote, '--allow-http'), 'Health HTTP explícito não está restrito ao fluxo da candidata.');
 $assert(str_contains($deploy, 'git -C "${SOURCE_DIR}" archive') && str_contains($deploy, '.release-manifest'), 'Deploy não usa o commit exato ou não cria manifesto.');
-$assert(str_contains($promote, 'release_validate_manifest_channel "${BETA_RELEASE}" beta') && str_contains($promote, 'cp -a "${BETA_RELEASE}"'), 'Promoção não reutiliza a release Beta homologada.');
-$assert(!str_contains($rollbackBeta, 'apply_migrations.php') && !str_contains($rollbackStable, 'apply_migrations.php'), 'Rollback tenta reverter ou aplicar banco automaticamente.');
-$assert(str_contains($rollbackBeta, 'canal Beta') && str_contains($rollbackStable, 'canal Stable'), 'Rollback não restringe o canal alvo.');
+$assert(str_contains($promote, 'release_validate_manifest_channel "${CANDIDATE_RELEASE}" candidate') && str_contains($promote, 'cp -a "${CANDIDATE_RELEASE}"'), 'Promoção não reutiliza a candidata homologada.');
+$assert(str_contains($promote, 's/^channel=candidate$/channel=production/') && str_contains($promote, 'release_backup_current production') && str_contains($promote, 'release_run_tests') && str_contains($promote, 'release_cli_health_check') && str_contains($promote, 'release_health_check.sh'), 'Promoção não mantém backup, testes e health-check ou não grava channel=production.');
+$assert(!str_contains($promote, 'apply_migrations') && !str_contains($rollbackStable, 'apply_migrations.php'), 'Promoção/rollback tentam aplicar ou reverter banco automaticamente.');
+$assert(str_contains($rollbackStable, 'release_validate_manifest_channel_any "${TARGET_RELEASE}" production stable') && str_contains($rollbackStable, 'canal de produção'), 'Rollback não restringe o canal alvo.');
+$assert(!file_exists($root . '/scripts/releases/promote_beta_to_stable.sh') && !file_exists($root . '/scripts/releases/deploy_beta.sh') && !file_exists($root . '/scripts/releases/rollback_beta.sh') && !file_exists($root . '/scripts/releases/install_beta.sh') && !file_exists($root . '/scripts/releases/update_beta.sh'), 'Scripts do fluxo Beta ainda existem.');
+$assert(str_contains($common, 'APP_ENVIRONMENT production') && str_contains($common, 'APP_ENVIRONMENT test'), 'Preparo da release não define APP_ENVIRONMENT (banner de testes).');
 $assert(str_contains($health, '/api/health') && str_contains($health, '/api/release') && str_contains($health, 'external_writes_enabled'), 'Health check não valida aplicação, release e bloqueio externo.');
 $assert(is_file($diagnosticPath) && is_executable($diagnosticPath), 'Runner diagnóstico ausente ou não executável.');
 $assert(str_contains($diagnostic, 'for test in "${tests[@]}"')

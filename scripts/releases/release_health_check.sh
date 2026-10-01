@@ -10,7 +10,7 @@ DRY_RUN=false
 ALLOW_HTTP=false
 
 usage() {
-    echo "Uso: $0 --url URL [--allow-http] [--cookie-file COOKIE_ADMIN] [--expected-channel stable|beta] [--expected-commit HASH] [--dry-run]"
+    echo "Uso: $0 --url URL [--allow-http] [--cookie-file COOKIE_ADMIN] [--expected-channel candidate|production] [--expected-commit HASH] [--dry-run]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -32,7 +32,7 @@ if [[ "${ALLOW_HTTP}" == true ]]; then
 else
     [[ "${BASE_URL}" =~ ^https://[^[:space:]]+$ ]] || { echo "ERRO: URL HTTPS obrigatória." >&2; exit 2; }
 fi
-[[ -z "${EXPECTED_CHANNEL}" || "${EXPECTED_CHANNEL}" =~ ^(stable|beta)$ ]] || { echo "ERRO: canal esperado inválido." >&2; exit 2; }
+[[ -z "${EXPECTED_CHANNEL}" || "${EXPECTED_CHANNEL}" =~ ^(stable|beta|candidate|production)$ ]] || { echo "ERRO: canal esperado inválido." >&2; exit 2; }
 [[ -z "${EXPECTED_COMMIT}" || "${EXPECTED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "ERRO: commit esperado inválido." >&2; exit 2; }
 if [[ -n "${COOKIE_FILE}" ]]; then
     [[ -f "${COOKIE_FILE}" ]] || { echo "ERRO: cookie administrativo não localizado." >&2; exit 2; }
@@ -65,7 +65,7 @@ curl --fail --silent --show-error --location --max-time 20 --cookie "${COOKIE_FI
 php -r '
     $d=json_decode((string)file_get_contents($argv[1]),true);
     if(!is_array($d)||($d["status"]??"")!=="ok") exit(2);
-    if($argv[2]!=="" && ($d["channel"]??"")!==$argv[2]) exit(3);
+    if($argv[2]!=="" && ($d["channel"]??"")!==$argv[2] && !($argv[2]==="production" && ($d["channel"]??"")==="stable")) exit(3);
     if($argv[3]!=="" && !hash_equals(strtolower($argv[3]),strtolower((string)($d["commit"]??"")))) exit(4);
     foreach(["schema_version","external_writes_enabled","notification_dry_run","ticket_dry_run"] as $key){if(!array_key_exists($key,$d))exit(5);}
     if(($d["external_writes_enabled"]??true)!==false)exit(6);

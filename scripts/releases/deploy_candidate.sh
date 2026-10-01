@@ -8,8 +8,8 @@ SOURCE_DIR=""
 COMMIT=""
 RELEASE_ID=""
 ENV_FILE=""
-RELEASE_ROOT="/var/www/html/isp_auxiliar_releases"
-CURRENT_LINK="/var/www/html/isp_auxiliar_beta_current"
+RELEASE_ROOT="/var/www/html/isp_auxiliar_production_releases"
+CURRENT_LINK="/var/www/html/isp_auxiliar_candidate_current"
 SHARED_ROOT="/var/www/html/isp_auxiliar_shared"
 BACKUP_ROOT="/var/backups/isp_auxiliar_releases"
 LOG_ROOT="/var/log/isp_auxiliar"
@@ -58,23 +58,23 @@ if [[ "${ALLOW_HTTP_HEALTH}" == true ]]; then
 else
     release_require_https_url "${HEALTH_URL}"
 fi
-[[ -f "${ENV_FILE}" ]] || release_die "arquivo .env Beta não localizado"
-[[ "${CURRENT_LINK}" != *stable* ]] || release_die "deploy Beta recebeu symlink da Stable"
+[[ -f "${ENV_FILE}" ]] || release_die "arquivo .env da candidata não localizado"
+[[ "${CURRENT_LINK}" != *stable* && "${CURRENT_LINK}" != *production* ]] || release_die "deploy da candidata recebeu symlink de produção"
 release_require_safe_operations
-release_set_log "${LOG_ROOT}" beta
-release_acquire_lock beta
+release_set_log "${LOG_ROOT}" candidate
+release_acquire_lock candidate
 
-RELEASE_DIR="${RELEASE_ROOT}/beta/${RELEASE_ID}"
+RELEASE_DIR="${RELEASE_ROOT}/${RELEASE_ID}"
 [[ ! -e "${RELEASE_DIR}" ]] || release_die "a release imutável já existe: ${RELEASE_DIR}"
 
-release_log "preparando Beta ${RELEASE_ID} no commit ${COMMIT}"
-release_run install -d -m 755 "${RELEASE_ROOT}/beta"
+release_log "preparando candidata ${RELEASE_ID} no commit ${COMMIT}"
+release_run install -d -m 755 "${RELEASE_ROOT}"
 release_run install -d -m 755 "${RELEASE_DIR}"
 if [[ "${DRY_RUN}" == false ]]; then
     git -C "${SOURCE_DIR}" archive --format=tar "${COMMIT}" | tar -xf - -C "${RELEASE_DIR}"
 fi
-release_prepare_env "${ENV_FILE}" "${RELEASE_DIR}/.env" beta "${RELEASE_ID}" "${COMMIT}"
-release_prepare_storage_links "${RELEASE_DIR}" beta "${SHARED_ROOT}" "${SOURCE_DIR}"
+release_prepare_env "${ENV_FILE}" "${RELEASE_DIR}/.env" candidate "${RELEASE_ID}" "${COMMIT}"
+release_prepare_storage_links "${RELEASE_DIR}" candidate "${SHARED_ROOT}" "${SOURCE_DIR}"
 
 if [[ -f "${SOURCE_DIR}/composer.json" ]]; then
     release_require_command composer
@@ -82,7 +82,7 @@ if [[ -f "${SOURCE_DIR}/composer.json" ]]; then
 fi
 
 if [[ "${DRY_RUN}" == false ]]; then
-    printf 'channel=beta\nrelease_id=%s\ncommit=%s\n' "${RELEASE_ID}" "${COMMIT}" > "${RELEASE_DIR}/.release-manifest"
+    printf 'channel=candidate\nrelease_id=%s\ncommit=%s\n' "${RELEASE_ID}" "${COMMIT}" > "${RELEASE_DIR}/.release-manifest"
 fi
 
 VALIDATION_DIR="${RELEASE_DIR}"
@@ -91,7 +91,7 @@ release_audit_migrations "${VALIDATION_DIR}"
 if [[ "${DRY_RUN}" == true ]]; then
     release_log "dry-run: auditoria real da cópia usou o checkout fonte"
 else
-    release_backup_current beta "${CURRENT_LINK}" "${BACKUP_ROOT}" "${ENV_FILE}"
+    release_backup_current candidate "${CURRENT_LINK}" "${BACKUP_ROOT}" "${ENV_FILE}"
     release_apply_migrations "${RELEASE_DIR}"
     schema_version="$(release_schema_version "${RELEASE_DIR}")"
     printf 'schema_version=%s\n' "${schema_version}" >> "${RELEASE_DIR}/.release-manifest"
@@ -99,13 +99,13 @@ else
 fi
 
 release_run_tests "${VALIDATION_DIR}"
-release_cli_health_check "${VALIDATION_DIR}" beta "${COMMIT}"
+release_cli_health_check "${VALIDATION_DIR}" candidate "${COMMIT}"
 release_seal_immutable_code "${RELEASE_DIR}"
 release_atomic_switch "${CURRENT_LINK}" "${RELEASE_DIR}"
 
-health_args=(--url "${HEALTH_URL}" --expected-channel beta --expected-commit "${COMMIT}")
+health_args=(--url "${HEALTH_URL}" --expected-channel candidate --expected-commit "${COMMIT}")
 [[ "${ALLOW_HTTP_HEALTH}" == true ]] && health_args+=(--allow-http)
 [[ -n "${COOKIE_FILE}" ]] && health_args+=(--cookie-file "${COOKIE_FILE}")
 [[ "${DRY_RUN}" == true ]] && health_args+=(--dry-run)
 "${SCRIPT_DIR}/release_health_check.sh" "${health_args[@]}"
-release_log "Beta ${RELEASE_ID} preparada; a Stable não foi alterada e a release anterior foi preservada."
+release_log "Candidata ${RELEASE_ID} preparada; a produção não foi alterada e a release anterior foi preservada."

@@ -12,7 +12,8 @@ return [
     'provider_key' => Env::get('APP_PROVIDER_KEY', 'default'),
     'timezone' => Env::get('APP_TIMEZONE', 'UTC'),
     'release' => [
-        'channel' => in_array(strtolower((string) Env::get('APP_RELEASE_CHANNEL', 'stable')), ['stable', 'beta'], true)
+        // candidate -> production é o fluxo atual; stable/beta ficam aceitos por compatibilidade com .env antigos.
+        'channel' => in_array(strtolower((string) Env::get('APP_RELEASE_CHANNEL', 'stable')), ['stable', 'beta', 'candidate', 'production'], true)
             ? strtolower((string) Env::get('APP_RELEASE_CHANNEL', 'stable'))
             : 'stable',
         'stable_base_url' => Env::get('APP_STABLE_BASE_URL', ''),
