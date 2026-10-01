@@ -19,6 +19,7 @@ $navIcons = [
     'clientes' => '<circle cx="9" cy="8" r="3.3"/><path d="M2.5 20c0-3.6 2.9-6.2 6.5-6.2s6.5 2.6 6.5 6.2"/><path d="M15.8 8.3a3 3 0 1 1 3 3"/><path d="M15.2 13.9c2.6.5 4.3 2.4 4.3 6.1"/>',
     'contratos' => '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9.3 13h5.4M9.3 16.5h5.4M9.3 9.5h2.4"/>',
     'processos' => '<path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/>',
+    'mais' => '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
     'logs' => '<path d="M5 4h14v16H5z"/><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4"/>',
     'configuracoes' => '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 ];
@@ -51,11 +52,11 @@ $isItemActive = static function (array $item) use ($currentPath): bool {
     return false;
 };
 
-$renderNavLink = function (array $item) use ($isItemActive, $navIcons): void {
+$renderNavLink = function (array $item, bool $mobileOverflow = false) use ($isItemActive, $navIcons): void {
     $isActive = $isItemActive($item);
     ?>
     <a
-        class="app-nav__link<?= $isActive ? ' is-active' : ''; ?>"
+        class="app-nav__link<?= $isActive ? ' is-active' : ''; ?><?= $mobileOverflow ? ' app-nav__link--mobile-hidden' : ''; ?>"
         href="<?= htmlspecialchars(Url::to($item['href']), ENT_QUOTES, 'UTF-8'); ?>"
         aria-current="<?= $isActive ? 'page' : 'false'; ?>"
         title="<?= htmlspecialchars((string) $item['label'], ENT_QUOTES, 'UTF-8'); ?>"
@@ -68,6 +69,24 @@ $renderNavLink = function (array $item) use ($isItemActive, $navIcons): void {
     </a>
     <?php
 };
+
+// Barra mobile: até 4 itens fixos (Início, Clientes, Processos e Contratos, nessa ordem de prioridade,
+// somente os que o perfil enxerga) + "Mais" com todo o resto (Logs, Configurações...). Desktop não muda.
+$mobileFixedPriority = ['/dashboard', '/clientes', '/processos', '/contratos'];
+$mobileFixedHrefs = [];
+foreach ($mobileFixedPriority as $href) {
+    foreach ($navigationItems as $item) {
+        if ($item['href'] === $href && count($mobileFixedHrefs) < 4) {
+            $mobileFixedHrefs[] = $href;
+        }
+    }
+}
+$mobileOverflowItems = array_values(array_filter($navigationItems, static fn (array $item): bool => !in_array($item['href'], $mobileFixedHrefs, true)));
+$isMobileOverflow = static fn (array $item): bool => !in_array($item['href'], $mobileFixedHrefs, true);
+$moreIsActive = false;
+foreach ($mobileOverflowItems as $item) {
+    $moreIsActive = $moreIsActive || $isItemActive($item);
+}
 
 $primaryItems = array_values(array_filter($navigationItems, static fn (array $item): bool => $item['icon'] !== 'configuracoes'));
 $settingsItem = null;
@@ -84,13 +103,39 @@ foreach ($navigationItems as $item) {
 
     <div class="app-nav__list">
         <?php foreach ($primaryItems as $item): ?>
-            <?php $renderNavLink($item); ?>
+            <?php $renderNavLink($item, $isMobileOverflow($item)); ?>
         <?php endforeach; ?>
+        <?php if ($mobileOverflowItems !== []): ?>
+            <button
+                type="button"
+                class="app-nav__link app-nav__more<?= $moreIsActive ? ' is-active' : ''; ?>"
+                data-nav-more-toggle
+                aria-expanded="false"
+                aria-controls="app-nav-more-panel"
+            >
+                <span class="app-nav__link-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><?= $navIcons['mais']; ?></svg>
+                </span>
+                <span class="app-nav__link-label">Mais</span>
+            </button>
+        <?php endif; ?>
     </div>
 
     <?php if ($settingsItem !== null): ?>
         <div class="app-nav__settings">
-            <?php $renderNavLink($settingsItem); ?>
+            <?php $renderNavLink($settingsItem, true); ?>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($mobileOverflowItems !== []): ?>
+        <div class="app-nav__more-panel" id="app-nav-more-panel" data-nav-more-panel role="dialog" aria-label="Mais opções" hidden>
+            <?php foreach ($mobileOverflowItems as $item): ?>
+                <?php $panelActive = $isItemActive($item); ?>
+                <a class="app-nav__more-item<?= $panelActive ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to($item['href']), ENT_QUOTES, 'UTF-8'); ?>" aria-current="<?= $panelActive ? 'page' : 'false'; ?>">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><?= $navIcons[$item['icon']] ?? ''; ?></svg>
+                    <span><?= htmlspecialchars((string) $item['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+                </a>
+            <?php endforeach; ?>
         </div>
     <?php endif; ?>
 </nav>

@@ -4230,3 +4230,31 @@ const focusOnLoad = document.querySelector('[data-focus-field]') || document.que
 if (focusOnLoad instanceof HTMLElement) {
     focusOnLoad.focus({ preventScroll: false });
 }
+
+// Barra inferior mobile: painel "Mais" com os itens que não cabem nos 4 fixos.
+(() => {
+    const toggle = document.querySelector('[data-nav-more-toggle]');
+    const panel = document.querySelector('[data-nav-more-panel]');
+    if (!(toggle instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
+        return;
+    }
+    const setOpen = (open) => {
+        panel.hidden = !open;
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setOpen(panel.hidden);
+    });
+    document.addEventListener('click', (event) => {
+        if (!panel.hidden && event.target instanceof Node && !panel.contains(event.target)) {
+            setOpen(false);
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !panel.hidden) {
+            setOpen(false);
+            toggle.focus();
+        }
+    });
+})();
