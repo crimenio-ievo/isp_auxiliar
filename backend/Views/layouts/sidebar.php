@@ -9,6 +9,7 @@ $currentPath = $currentPath ?? '/';
 $access = is_array($user['access'] ?? null) ? $user['access'] : [];
 $canManageSettings = AccessControl::can($access, 'configuracoes');
 $canAccessContracts = AccessControl::can($access, 'contratos');
+$canViewLogs = AccessControl::isGestor($access);
 
 /**
  * Ícones outline (estilo Feather, stroke, sem preenchimento).
@@ -18,6 +19,7 @@ $navIcons = [
     'clientes' => '<circle cx="9" cy="8" r="3.3"/><path d="M2.5 20c0-3.6 2.9-6.2 6.5-6.2s6.5 2.6 6.5 6.2"/><path d="M15.8 8.3a3 3 0 1 1 3 3"/><path d="M15.2 13.9c2.6.5 4.3 2.4 4.3 6.1"/>',
     'contratos' => '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9.3 13h5.4M9.3 16.5h5.4M9.3 9.5h2.4"/>',
     'processos' => '<path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/>',
+    'logs' => '<path d="M5 4h14v16H5z"/><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4"/>',
     'configuracoes' => '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 ];
 
@@ -33,6 +35,10 @@ if ($canAccessContracts) {
 
 if ($canManageSettings) {
     $navigationItems[] = ['href' => '/configuracoes', 'label' => 'Configurações', 'icon' => 'configuracoes', 'match' => ['/configuracoes']];
+}
+
+if ($canViewLogs) {
+    $navigationItems[] = ['href' => '/logs', 'label' => 'Logs', 'icon' => 'logs', 'match' => ['/logs']];
 }
 
 $isItemActive = static function (array $item) use ($currentPath): bool {

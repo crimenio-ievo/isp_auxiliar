@@ -1677,6 +1677,11 @@ body.modal-open {
     color: #506074;
 }
 
+.pill--danger {
+    background: rgba(180, 35, 24, 0.12);
+    color: #b42318;
+}
+
 .pill--success {
     background: rgba(11, 95, 89, 0.12);
     color: #0b5f59;

@@ -12,6 +12,8 @@ use App\Core\View;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
+use App\Core\AccessControl;
+use App\Services\Logs\AuditEventCatalog;
 
 /**
  * Centraliza telas institucionais e modulos operacionais simples desta fase.
@@ -174,13 +176,32 @@ final class SystemController
 
     public function logs(Request $request): Response
     {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+        if (!AccessControl::isGestor($access)) {
+            Flash::set('error', 'Seu usuário não possui acesso aos logs.');
+            return Response::redirect('/dashboard');
+        }
+
+        $categories = AuditEventCatalog::categories();
+        $selected = trim((string) $request->query('categoria', ''));
+        $selected = isset($categories[$selected]) ? $selected : '';
+        $all = $this->logEntries();
+        $counts = array_fill_keys(array_keys($categories), 0);
+        foreach ($all as $entry) {
+            $counts[$entry['category']]++;
+        }
+        $entries = $selected === '' ? $all : array_values(array_filter($all, static fn (array $entry): bool => $entry['category'] === $selected));
+
         $html = $this->view->render('logs/index', [
             'pageTitle' => 'Logs',
             'currentPath' => $request->path(),
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $this->resolveViewUser(),
-            'entries' => $this->logEntries(),
+            'entries' => array_slice($entries, 0, 150),
+            'categories' => $categories,
+            'categoryCounts' => $counts,
+            'selectedCategory' => $selected,
         ]);
 
         return Response::html($html);
@@ -510,42 +531,108 @@ final class SystemController
         return $deleted;
     }
 
+    /**
+     * Junta audit_logs, notification_logs e os dois arquivos técnicos numa lista
+     * única, já categorizada, da mais recente para a mais antiga.
+     *
+     * @return array<int, array{category: string, failure: bool, message: string, detail: string, time: string, source: string}>
+     */
     private function logEntries(): array
     {
+        $entries = [];
+
         try {
-            $auditLogs = $this->localRepository->recentAuditLogs(100);
+            $auditLogs = $this->localRepository->recentAuditLogs(300);
         } catch (\Throwable) {
             $auditLogs = [];
         }
-
-        if ($auditLogs !== []) {
-            return array_map(function (array $row): array {
-                return [
-                    'level' => 'INFO',
-                    'message' => $this->auditMessage($row),
-                    'time' => (string) ($row['created_at'] ?? '-'),
-                ];
-            }, $auditLogs);
-        }
-
-        $entries = [];
-
-        foreach ($this->installationRecords() as $record) {
+        foreach ($auditLogs as $row) {
+            $action = (string) ($row['action'] ?? '');
+            $actor = trim((string) ($row['actor_login'] ?? '')) ?: 'sistema';
+            $context = json_decode((string) ($row['context_json'] ?? '{}'), true);
+            $login = is_array($context) ? trim((string) ($context['login'] ?? '')) : '';
             $entries[] = [
-                'level' => $record['status'] === 'completed' ? 'INFO' : 'PENDENTE',
-                'message' => sprintf(
-                    'Instalação %s para %s (%s).',
-                    $record['status'] === 'completed' ? 'finalizada' : 'aguardando conexão',
-                    $record['client'],
-                    $record['login']
-                ),
-                'time' => $record['date'],
+                'category' => AuditEventCatalog::category($action, (string) ($row['entity_type'] ?? '')),
+                'failure' => AuditEventCatalog::isFailure($action),
+                'message' => AuditEventCatalog::label($action),
+                'detail' => 'Por ' . $actor . ($login !== '' ? ' · cliente ' . $login : '') . ' · ' . (string) ($row['ip_address'] ?? ''),
+                'time' => (string) ($row['created_at'] ?? ''),
+                'source' => 'audit_logs',
             ];
         }
 
-        return $entries !== [] ? $entries : [
-            ['level' => 'INFO', 'message' => 'Nenhum evento operacional registrado.', 'time' => '-'],
-        ];
+        try {
+            $notifications = $this->localRepository->recentNotificationLogs(150);
+        } catch (\Throwable) {
+            $notifications = [];
+        }
+        foreach ($notifications as $row) {
+            $channel = (string) ($row['channel'] ?? '') === 'email' ? 'E-mail' : 'WhatsApp';
+            $status = (string) ($row['status'] ?? '');
+            $entries[] = [
+                'category' => AuditEventCatalog::CONTRACT,
+                'failure' => $status === 'erro',
+                'message' => match ($status) {
+                    'enviado' => $channel . ' enviado ao cliente.',
+                    'erro' => 'Falha no envio de ' . $channel . ' ao cliente.',
+                    default => $channel . ' simulado (modo de teste, nada foi enviado).',
+                },
+                'detail' => 'Destino ' . (string) ($row['recipient'] ?? '-') . ((int) ($row['contract_id'] ?? 0) > 0 ? ' · contrato #' . (int) $row['contract_id'] : ''),
+                'time' => (string) ($row['created_at'] ?? ''),
+                'source' => 'notification_logs',
+            ];
+        }
+
+        $logsDir = (string) $this->config->get('paths.logs', dirname(__DIR__, 2) . '/logs');
+        foreach ($this->tailFile($logsDir . '/mkauth-write-guard.log', 30) as $line) {
+            $entries[] = [
+                'category' => AuditEventCatalog::SECURITY,
+                'failure' => true,
+                'message' => 'Gravação no MkAuth bloqueada pela trava de ambiente de teste.',
+                'detail' => $line,
+                'time' => preg_match('/^\[([^\]]+)\]/', $line, $m) === 1 ? $this->normalizeLogTime($m[1]) : '',
+                'source' => 'mkauth-write-guard.log',
+            ];
+        }
+        foreach ($this->tailFile($logsDir . '/client-plan-confirmation.log', 30) as $line) {
+            $data = json_decode($line, true);
+            if (!is_array($data)) {
+                continue;
+            }
+            $event = (string) ($data['event'] ?? '');
+            $entries[] = [
+                'category' => AuditEventCatalog::PROVISIONING,
+                'failure' => AuditEventCatalog::isFailure($event),
+                'message' => 'Confirmação de plano no cadastro: ' . ($event !== '' ? $event : 'evento'),
+                'detail' => 'Diário técnico · cliente ' . (string) ($data['login'] ?? '-'),
+                'time' => $this->normalizeLogTime((string) ($data['at'] ?? '')),
+                'source' => 'client-plan-confirmation.log',
+            ];
+        }
+
+        usort($entries, static fn (array $a, array $b): int => strcmp($b['time'], $a['time']));
+
+        return $entries;
+    }
+
+    /** @return array<int, string> */
+    private function tailFile(string $path, int $lines): array
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            return [];
+        }
+        $content = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        return is_array($content) ? array_slice($content, -$lines) : [];
+    }
+
+    private function normalizeLogTime(string $value): string
+    {
+        try {
+            return (new \DateTimeImmutable($value))->format('Y-m-d H:i:s');
+        } catch (\Throwable) {
+            return $value;
+        }
     }
 
     private function roleLabel(string $role): string
@@ -555,23 +642,6 @@ final class SystemController
             'manager' => 'Gestor do provedor',
             'technician' => 'Tecnico',
             default => $role,
-        };
-    }
-
-    private function auditMessage(array $row): string
-    {
-        $action = (string) ($row['action'] ?? '');
-        $actor = trim((string) ($row['actor_login'] ?? 'sistema')) ?: 'sistema';
-        $context = json_decode((string) ($row['context_json'] ?? '{}'), true);
-        $context = is_array($context) ? $context : [];
-
-        return match ($action) {
-            'auth.login' => "Login realizado por {$actor}.",
-            'provider_settings.updated' => "Configuracoes do provedor atualizadas por {$actor}.",
-            'client.provisioned' => 'Cliente enviado ao MkAuth por ' . $actor . ' (' . (string) ($context['login'] ?? '-') . ').',
-            'client.provision_failed' => 'Falha no envio ao MkAuth por ' . $actor . ' (' . (string) ($context['login'] ?? '-') . ').',
-            'installation.completed' => 'Instalação finalizada por ' . $actor . ' (' . (string) ($context['login'] ?? '-') . ').',
-            default => $action !== '' ? "{$action} por {$actor}." : "Evento registrado por {$actor}.",
         };
     }
 }

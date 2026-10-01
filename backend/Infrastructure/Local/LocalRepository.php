@@ -956,6 +956,26 @@ final class LocalRepository
         );
     }
 
+    /**
+     * Mensagens (WhatsApp/e-mail) que o sistema tentou enviar. A tabela não tem
+     * provider_id; segue o mesmo escopo global já usado pelas demais consultas.
+     */
+    public function recentNotificationLogs(int $limit = 100): array
+    {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+
+        $limit = max(1, min(500, $limit));
+
+        return $this->database->fetchAll(
+            'SELECT id, contract_id, channel, provider, recipient, status, created_at
+             FROM notification_logs
+             ORDER BY created_at DESC, id DESC
+             LIMIT ' . (int) $limit
+        );
+    }
+
     public function recentAuditLogs(int $limit = 100): array
     {
         $providerId = $this->currentProviderId();

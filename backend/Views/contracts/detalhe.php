@@ -118,23 +118,7 @@ $typeLabel = static function (string $value): string {
 $formatMoney = static fn (mixed $value): string => number_format((float) $value, 2, ',', '.');
 $formatDate = static fn (?string $value): string => trim((string) $value) !== '' ? (string) $value : '-';
 $shortHash = static fn (string $value): string => $value !== '' ? substr($value, 0, 16) . '…' : '-';
-$auditLabel = static fn (string $action): string => match ($action) {
-    'contract.acceptance.accepted', 'contract.acceptance.confirmed' => 'Cliente confirmou o aceite.',
-    'contract.acceptance.created' => 'Aceite preparado.',
-    'contract.upgrade.operational_task.created' => 'Pendência operacional criada.',
-    'contract.financial_task.created' => 'Pendência financeira criada.',
-    'contract.financial_task.completed' => 'Pendência financeira concluída.',
-    'contract.financial_task.canceled' => 'Pendência financeira cancelada.',
-    'contract.financial.closed', 'financial_task.mkauth_ticket.closed' => 'Chamado financeiro encerrado.',
-    'contract.upgrade.created' => 'Nova condição de migração preparada.',
-    'contract.upgrade.pending_condition_revised' => 'Condição pendente corrigida.',
-    'contract.upgrade.correction_started' => 'Substituição da condição iniciada.',
-    'contract.upgrade.superseded' => 'Condição anterior substituída.',
-    'contract.upgrade.cancelled', 'operational_process.cancelled' => 'Migração cancelada.',
-    'operational_process.completed' => 'Migração concluída.',
-    'operational_process.migration.revised' => 'Condição da migração revisada.',
-    default => str_starts_with($action, 'operational_process.step.') ? 'Etapa operacional atualizada.' : 'Registro operacional atualizado.',
-};
+$auditLabel = static fn (string $action): string => \App\Services\Logs\AuditEventCatalog::label($action);
 $summarizeProviderResponse = static function (mixed $value): string {
     if (is_array($value)) {
         $parts = [];
