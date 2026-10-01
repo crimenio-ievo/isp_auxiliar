@@ -134,7 +134,7 @@ ob_start();
             <a class="button button--ghost" href="<?= $h(Url::to('/clientes/documentos/digitalizar?login=' . rawurlencode($login))); ?>">Digitalizar contrato</a>
         </div>
 
-        <?php if ($contracts !== []): ?>
+        <?php if (!empty($canViewSignedTerm) && $contracts !== []): ?>
             <div class="document-list">
                 <?php foreach ($contracts as $contract): ?>
                     <a href="<?= $h(Url::to('/contratos/detalhe?id=' . (int) ($contract['id'] ?? 0))); ?>">
