@@ -61,6 +61,8 @@ $installments = (int) ($contractDetails['parcelas_adesao'] ?? $contract['parcela
 $installmentValue = 'R$ ' . number_format((float) ($contractDetails['valor_parcela_adesao'] ?? ($contract['valor_parcela_adesao'] ?? 0)), 2, ',', '.');
 $firstInstallmentDue = trim((string) ($contractDetails['vencimento_primeira_parcela'] ?? $contract['vencimento_primeira_parcela'] ?? '-'));
 $fidelityMonths = (int) ($contractDetails['fidelidade_meses'] ?? $contract['fidelidade_meses'] ?? 12);
+$benefitAmount = (float) ($contractDetails['beneficio_valor'] ?? $contract['beneficio_valor'] ?? 0);
+$benefitValueFormatted = 'R$ ' . number_format($benefitAmount, 2, ',', '.');
 $authorizedBy = trim((string) ($contractDetails['beneficio_concedido_por'] ?? $contract['beneficio_concedido_por'] ?? ''));
 $observations = trim(implode(' · ', array_filter([
     trim((string) ($contractDetails['observacao_adesao'] ?? '')),
@@ -243,6 +245,9 @@ ob_start();
                     <div class="document-grid">
                         <div><span>Tipo de adesão</span><strong><?= htmlspecialchars($adherenceType !== '' ? $adherenceType : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>
                         <div><span>Valor total</span><strong><?= htmlspecialchars($adherenceValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <?php if ($benefitAmount > 0): ?>
+                        <div><span>Benefício concedido</span><strong><?= htmlspecialchars($benefitValueFormatted, ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <?php endif; ?>
                         <div><span>Parcelas</span><strong><?= htmlspecialchars((string) $installments, ENT_QUOTES, 'UTF-8'); ?></strong></div>
                         <div><span>Valor da parcela</span><strong><?= htmlspecialchars($installmentValue, ENT_QUOTES, 'UTF-8'); ?></strong></div>
                         <div><span>Vencimento 1ª parcela</span><strong><?= htmlspecialchars($firstInstallmentDue !== '' ? $firstInstallmentDue : '-', ENT_QUOTES, 'UTF-8'); ?></strong></div>

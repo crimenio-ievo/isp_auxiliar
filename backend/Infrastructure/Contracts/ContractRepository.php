@@ -22,9 +22,9 @@ final class ContractRepository
     {
         $this->database->execute(
             'INSERT INTO client_contracts
-                (client_id, mkauth_login, technician_name, technician_login, nome_cliente, telefone_cliente, tipo_adesao, valor_adesao, parcelas_adesao, valor_parcela_adesao, vencimento_primeira_parcela, fidelidade_meses, beneficio_valor, multa_total, tipo_aceite, observacao_adesao, upgrade_snapshot_json, status_financeiro, lifecycle_status, supersedes_contract_id, superseded_by_contract_id, revision_number, cancellation_reason, cancelled_at, cancelled_by_user_id, cancelled_by_login, created_at, updated_at)
+                (client_id, mkauth_login, technician_name, technician_login, nome_cliente, telefone_cliente, tipo_adesao, valor_adesao, parcelas_adesao, valor_parcela_adesao, vencimento_primeira_parcela, fidelidade_meses, beneficio_valor, beneficio_concedido_por, multa_total, tipo_aceite, observacao_adesao, upgrade_snapshot_json, status_financeiro, lifecycle_status, supersedes_contract_id, superseded_by_contract_id, revision_number, cancellation_reason, cancelled_at, cancelled_by_user_id, cancelled_by_login, created_at, updated_at)
              VALUES
-                (:client_id, :mkauth_login, :technician_name, :technician_login, :nome_cliente, :telefone_cliente, :tipo_adesao, :valor_adesao, :parcelas_adesao, :valor_parcela_adesao, :vencimento_primeira_parcela, :fidelidade_meses, :beneficio_valor, :multa_total, :tipo_aceite, :observacao_adesao, :upgrade_snapshot_json, :status_financeiro, :lifecycle_status, :supersedes_contract_id, :superseded_by_contract_id, :revision_number, :cancellation_reason, :cancelled_at, :cancelled_by_user_id, :cancelled_by_login, NOW(), NOW())',
+                (:client_id, :mkauth_login, :technician_name, :technician_login, :nome_cliente, :telefone_cliente, :tipo_adesao, :valor_adesao, :parcelas_adesao, :valor_parcela_adesao, :vencimento_primeira_parcela, :fidelidade_meses, :beneficio_valor, :beneficio_concedido_por, :multa_total, :tipo_aceite, :observacao_adesao, :upgrade_snapshot_json, :status_financeiro, :lifecycle_status, :supersedes_contract_id, :superseded_by_contract_id, :revision_number, :cancellation_reason, :cancelled_at, :cancelled_by_user_id, :cancelled_by_login, NOW(), NOW())',
             $this->normalizeData($data)
         );
 
@@ -82,6 +82,7 @@ final class ContractRepository
                  vencimento_primeira_parcela = :vencimento_primeira_parcela,
                  fidelidade_meses = :fidelidade_meses,
                  beneficio_valor = :beneficio_valor,
+                 beneficio_concedido_por = :beneficio_concedido_por,
                  multa_total = :multa_total,
                  tipo_aceite = :tipo_aceite,
                  observacao_adesao = :observacao_adesao,
@@ -175,6 +176,7 @@ final class ContractRepository
             'vencimento_primeira_parcela' => $data['vencimento_primeira_parcela'] ?? null,
             'fidelidade_meses' => (string) ($data['fidelidade_meses'] ?? '12'),
             'beneficio_valor' => $this->normalizeAmount($data['beneficio_valor'] ?? '0.00'),
+            'beneficio_concedido_por' => $this->normalizeNullableString($data['beneficio_concedido_por'] ?? null),
             'multa_total' => $this->normalizeAmount($data['multa_total'] ?? '0.00'),
             'tipo_aceite' => (string) ($data['tipo_aceite'] ?? 'nova_instalacao'),
             'observacao_adesao' => (string) ($data['observacao_adesao'] ?? ''),
