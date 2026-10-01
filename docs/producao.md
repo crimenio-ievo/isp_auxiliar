@@ -161,6 +161,7 @@ Campos principais:
 
 ```env
 APP_ENV=production
+APP_ENVIRONMENT=production
 APP_DEBUG=false
 APP_URL=https://seu-dominio/isp_auxiliar/public
 APP_PROVIDER_KEY=ievo

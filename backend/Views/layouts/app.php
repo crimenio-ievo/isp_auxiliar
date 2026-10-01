@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Core\Environment;
 use App\Core\Url;
 
 $pageTitle = $pageTitle ?? 'ISP Auxiliar';
@@ -9,7 +10,8 @@ $layoutMode = $layoutMode ?? 'app';
 $content = $content ?? '';
 $hideFooter = !empty($hideFooter);
 $hideHeader = !empty($hideHeader);
-$bodyClass = $layoutMode === 'guest' ? 'layout-guest' : 'layout-app';
+$showTestBanner = Environment::showTestBanner();
+$bodyClass = ($layoutMode === 'guest' ? 'layout-guest' : 'layout-app') . ($showTestBanner ? ' has-test-banner' : ' no-test-banner');
 $basePath = Url::basePath();
 $releaseInfo = defined('APP_RELEASE_INFO') && is_array(APP_RELEASE_INFO) ? APP_RELEASE_INFO : [];
 $assetVersion = $layoutMode === 'guest' ? '' : trim((string) ($releaseInfo['id'] ?? ''));
@@ -39,9 +41,11 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
 </head>
 <body class="<?= htmlspecialchars($bodyClass, ENT_QUOTES, 'UTF-8'); ?>" data-base-path="<?= htmlspecialchars($basePath, ENT_QUOTES, 'UTF-8'); ?>">
     <div class="app-topbar-stack">
+        <?php if ($showTestBanner): ?>
         <aside class="test-environment-banner" role="status" aria-label="Ambiente de testes">
-            <strong>AMBIENTE DE TESTES — não reflete produção real</strong>
+            <strong>AMBIENTE DE TESTES — NÃO É PRODUÇÃO</strong>
         </aside>
+        <?php endif; ?>
         <?php if (!$hideHeader): ?>
             <?php require __DIR__ . '/header.php'; ?>
         <?php endif; ?>

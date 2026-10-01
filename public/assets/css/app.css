@@ -22,7 +22,9 @@
     --surface-page: #f6f3ee;
     --ink: #1c2430;
     --ink-muted: #6b7280;
-    --topbar-stack-height: 93px;
+    --test-banner-height: 34px;
+    --topbar-stack-height-base: 59px;
+    --topbar-stack-height: calc(var(--topbar-stack-height-base) + var(--test-banner-height));
     --shadow: 0 20px 48px rgba(17, 35, 49, 0.11);
     --radius-xl: 22px;
     --radius-lg: 18px;
@@ -44,33 +46,31 @@
 
 .test-environment-banner {
     align-items: center;
-    background: var(--alert-caution-bg);
-    border-bottom: 1px solid #e8c65c;
-    color: var(--alert-caution-ink);
+    background: #ffd54a;
+    border-bottom: 2px solid #b8860b;
+    color: #3d2b00;
     display: flex;
-    font-size: .78rem;
-    gap: .65rem;
+    font-size: .82rem;
     justify-content: center;
-    min-height: 34px;
-    padding: .35rem 1rem;
+    height: var(--test-banner-height);
+    padding: 0 .8rem;
     position: relative;
     text-align: center;
-    z-index: 60;
+    white-space: nowrap;
 }
 
 .test-environment-banner strong {
-    letter-spacing: .04em;
+    font-weight: 800;
+    letter-spacing: .05em;
 }
 
-@media (max-width: 768px) {
-    .test-environment-banner {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: .1rem;
-        padding-inline: .8rem;
-        text-align: left;
-    }
+@media (max-width: 480px) {
+    .test-environment-banner { font-size: .72rem; letter-spacing: 0; }
+    .test-environment-banner strong { letter-spacing: .02em; }
 }
+
+/* Sem banner (produção) a pilha do topo perde a altura dele, para a trilha lateral não deixar vão. */
+.no-test-banner { --topbar-stack-height: var(--topbar-stack-height-base); }
 
 *,
 *::before,
@@ -4298,7 +4298,7 @@ body.client-panel-open {
 }
 
 @media (max-height: 800px) {
-    :root { --page-gap: 12px; --section-gap: 10px; --topbar-stack-height: 91px; }
+    :root { --page-gap: 12px; --section-gap: 10px; --topbar-stack-height-base: 57px; --topbar-stack-height: calc(var(--topbar-stack-height-base) + var(--test-banner-height)); }
     .topbar { min-height: 56px; padding-block: 6px; }
     .app-nav { top: var(--topbar-stack-height); height: calc(100vh - var(--topbar-stack-height)); padding-block: 8px; }
     .card { padding: 13px; }

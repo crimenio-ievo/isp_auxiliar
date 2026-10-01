@@ -96,6 +96,7 @@ $providerLegal = resolveProviderLegalData($app->config(), $provider, $providerSe
 
 echo "ISP Auxiliar - cheque de instalacao\n";
 echo "APP_ENV: {$appEnv}\n";
+echo 'APP_ENVIRONMENT: ' . (trim((string) \App\Core\Env::get('APP_ENVIRONMENT')) !== '' ? \App\Core\Env::get('APP_ENVIRONMENT') : '(ausente)') . ' -> banner de testes ' . (\App\Core\Environment::showTestBanner() ? 'VISÍVEL' : 'oculto') . "\n";
 echo "APP_URL: {$appUrl}\n";
 echo "APP_PROVIDER_KEY: {$providerKey}\n";
 echo "DB_HOST: {$dbHost}\n";
