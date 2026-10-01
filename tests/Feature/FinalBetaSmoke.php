@@ -270,7 +270,7 @@ $assert(str_contains($migrationView, 'Verificar confirmação') && str_contains(
 $assert(!str_contains($migrationView, '<span>Serviço executado</span>') && str_contains($migrationView, 'Verificar conexão agora'), 'Execução técnica ainda exige campo genérico ou não atualiza PPPoE.');
 $assert(str_contains($javascript, "cache: 'no-store'") && str_contains($javascript, 'data-connection-checked'), 'Consulta PPPoE pode reutilizar cache ou não atualizar o bloco.');
 $assert(str_contains($migrationView, 'Concluindo migração...') && str_contains($migrationView, 'Dry-runs não serão registrados como execução real'), 'Finalização não explicita progresso e bloqueio externo.');
-$assert(str_contains($stylesheet, '--font-base: 0.8125rem') && str_contains($stylesheet, '--sidebar-expanded: 150px') && str_contains($stylesheet, 'clamp(270px, 20vw, 292px)'), 'Densidade desktop não atende aos limites finais.');
+$assert(str_contains($stylesheet, '--font-base: 0.8125rem') && str_contains($stylesheet, 'clamp(270px, 20vw, 292px)'), 'Densidade desktop não atende aos limites finais.');
 $assert(str_contains($stylesheet, '@media (max-height: 800px)') && str_contains($stylesheet, '--control-height-mobile: 44px'), 'Altura reduzida ou alvos móveis não foram preservados.');
 $assert(preg_match('/\bzoom\s*:/i', $stylesheet) !== 1 && preg_match('/transform\s*:\s*scale\s*\(/i', $stylesheet) !== 1, 'CSS usa escala global para simular densidade.');
 

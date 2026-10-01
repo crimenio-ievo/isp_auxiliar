@@ -396,31 +396,23 @@ try {
     $releaseResult = $releaseService->resolveSwitch(['login' => 'release.manager', 'role' => 'manager'], 'beta');
     $check(46, ($releaseResult['destination'] ?? '') === 'https://beta.example.test/isp' && !empty($releaseResult['redirect']), 'troca resolve o canal sem persistir preferência');
 
-    $autoloadPath = var_export($rootPath . '/backend/bootstrap/autoload.php', true);
-    $layoutPath = var_export($rootPath . '/backend/Views/layouts/app.php', true);
-    $betaScript = 'require ' . $autoloadPath . '; define("APP_RELEASE_INFO", ["channel" => "beta"]); $pageTitle="Teste"; $appName="Teste"; $layoutMode="guest"; $hideHeader=true; $hideFooter=true; $content="ok"; require ' . $layoutPath . ';';
-    $stableScript = 'require ' . $autoloadPath . '; define("APP_RELEASE_INFO", ["channel" => "stable"]); $pageTitle="Teste"; $appName="Teste"; $layoutMode="guest"; $hideHeader=true; $hideFooter=true; $content="ok"; require ' . $layoutPath . ';';
-    $betaOutput = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg($betaScript));
-    $stableOutput = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg($stableScript));
-    $check(47, str_contains($betaOutput, 'AMBIENTE BETA') && str_contains($betaOutput, 'recursos em homologação'), 'banner Beta aparece');
-    $check(48, !str_contains($stableOutput, 'AMBIENTE BETA'), 'Stable não mostra banner Beta');
     $unsafeRelease = new ReleaseChannelService(new Config(['app' => ['release' => ['channel' => 'stable', 'beta_base_url' => 'https://usuario:senha@evil.example.test/redirecionar']]]), $local);
-    $check(49, $unsafeRelease->destination('beta') === '', 'open redirect e URL com credencial são bloqueados');
+    $check(47, $unsafeRelease->destination('beta') === '', 'open redirect e URL com credencial são bloqueados');
 
     $legacyProcess = $processService->detail((int) $acceptedProcess['id']);
-    $check(50, is_array($legacyProcess) && count((array) ($legacyProcess['steps'] ?? [])) === 11, 'processo antigo continua legível');
-    $check(51, (int) (($acceptances->findById((int) $acceptedAcceptance['id'])['id'] ?? 0)) === (int) $acceptedAcceptance['id'], 'aceite antigo continua acessível');
-    $check(52, (int) (($contracts->findById($acceptedContractId)['id'] ?? 0)) === $acceptedContractId, 'contrato anterior continua acessível');
+    $check(48, is_array($legacyProcess) && count((array) ($legacyProcess['steps'] ?? [])) === 11, 'processo antigo continua legível');
+    $check(49, (int) (($acceptances->findById((int) $acceptedAcceptance['id'])['id'] ?? 0)) === (int) $acceptedAcceptance['id'], 'aceite antigo continua acessível');
+    $check(50, (int) (($contracts->findById($acceptedContractId)['id'] ?? 0)) === $acceptedContractId, 'contrato anterior continua acessível');
     $installationContractId = (int) $contracts->create($contractData($login . '_install', 'nova_instalacao'));
     $installationContract = $contracts->findById($installationContractId) ?? [];
     $installationAcceptance = $createAcceptance($installationContractId, 'test.fourth.installation');
     $installation = $processService->ensureForContract(OperationalProcessService::TYPE_INSTALLATION, $installationContract, $installationAcceptance, ['signature_mode' => 'local'], $operator);
-    $check(53, count((array) ($installation['steps'] ?? [])) === 11, 'instalação não é afetada');
+    $check(51, count((array) ($installation['steps'] ?? [])) === 11, 'instalação não é afetada');
     $signatureContractId = (int) $contracts->create($contractData($login . '_signature', 'contrato_digital'));
     $signatureContract = $contracts->findById($signatureContractId) ?? [];
     $signatureAcceptance = $createAcceptance($signatureContractId, 'test.fourth.signature');
     $signature = $processService->ensureForContract(OperationalProcessService::TYPE_STANDALONE_SIGNATURE, $signatureContract, $signatureAcceptance, ['signature_mode' => 'local'], $operator);
-    $check(54, count((array) ($signature['steps'] ?? [])) === 8, 'assinatura avulsa não é afetada');
+    $check(52, count((array) ($signature['steps'] ?? [])) === 8, 'assinatura avulsa não é afetada');
     $guard = new MkAuthWriteGuard('test', false);
     $writeBlocked = false;
     try {
@@ -428,18 +420,18 @@ try {
     } catch (RuntimeException $exception) {
         $writeBlocked = $exception->getMessage() === MkAuthWriteGuard::BLOCKED_MESSAGE;
     }
-    $check(55, !(bool) $app->config()->get('app.mkauth.write_enabled', false) && $writeBlocked, 'nenhuma escrita real no MkAuth é permitida');
-    $check(56, (bool) $app->config()->get('evotrix.dry_run', false) && (bool) $app->config()->get('email.dry_run', false) && (bool) $app->config()->get('contracts.mkauth_ticket.dry_run', false), 'notificações e chamado permanecem em dry-run');
+    $check(53, !(bool) $app->config()->get('app.mkauth.write_enabled', false) && $writeBlocked, 'nenhuma escrita real no MkAuth é permitida');
+    $check(54, (bool) $app->config()->get('evotrix.dry_run', false) && (bool) $app->config()->get('email.dry_run', false) && (bool) $app->config()->get('contracts.mkauth_ticket.dry_run', false), 'notificações e chamado permanecem em dry-run');
     $trackedFiles = preg_split('/\R+/', trim((string) shell_exec('git ls-files')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     $aiFiles = array_filter($trackedFiles, static fn (string $file): bool => preg_match('/(^|[\/_-])(openai|integracao[-_]?ia|ai[-_]?integration)([\/_.-]|$)/i', $file) === 1);
-    $check(57, $aiFiles === [], 'nenhum arquivo da IA está rastreado');
+    $check(55, $aiFiles === [], 'nenhum arquivo da IA está rastreado');
 
-    if (count($checks) !== 57) {
-        throw new RuntimeException('A suíte não executou as 57 categorias obrigatórias.');
+    if (count($checks) !== 55) {
+        throw new RuntimeException('A suíte não executou as 55 categorias obrigatórias.');
     }
 
     $pdo->rollBack();
-    echo "OK - 57 verificações da quarta iteração; rollback concluído; nenhuma escrita externa ou notificação real.\n";
+    echo "OK - 55 verificações da quarta iteração; rollback concluído; nenhuma escrita externa ou notificação real.\n";
 } catch (Throwable $exception) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

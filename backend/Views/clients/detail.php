@@ -118,6 +118,9 @@ ob_start();
         </div>
         <div class="hero-actions">
             <?php if ($contracts !== [] && (int) ($contracts[0]['id'] ?? 0) > 0): ?><a class="button button--ghost" href="<?= $h(Url::to('/contratos/detalhe?id=' . (int) $contracts[0]['id'])); ?>">Ver documentos</a><?php endif; ?>
+            <?php foreach ((array) ($detail['signedTerms'] ?? []) as $signedTerm): ?>
+                <a class="button button--ghost" href="<?= $h(Url::to('/contratos/termo?acceptance_id=' . (int) $signedTerm['acceptance_id'])); ?>" target="_blank" rel="noopener">Ver contrato assinado<?= count((array) $detail['signedTerms']) > 1 ? ' · #' . (int) $signedTerm['contract_id'] . ' ' . $h($signedTerm['tipo_aceite']) . ($signedTerm['superseded'] ? ' (substituído)' : '') : ''; ?></a>
+            <?php endforeach; ?>
             <?php if (!empty($canRequestContractSignature)): ?>
                 <form method="post" action="<?= $h(Url::to('/clientes/contrato/solicitar')); ?>" data-single-submit-form onsubmit="return confirm('Confirma a preparação e o envio controlado do contrato digital pelos canais cadastrados?');">
                     <input type="hidden" name="_csrf" value="<?= $h($contractSignatureCsrfToken ?? ''); ?>">

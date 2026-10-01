@@ -40,6 +40,7 @@ return static function (Router $router): void {
     $router->post('/contratos/financeiro/cancelar', [ContractController::class, 'cancelarFinanceiro'], 'contracts.financial.cancel');
     $router->post('/contratos/financeiro/chamado', [ContractController::class, 'abrirChamadoFinanceiro'], 'contracts.financial.ticket');
     $router->post('/contratos/financeiro/verificar-status', [ContractController::class, 'verificarStatusMkauth'], 'contracts.financial.ticket.check');
+    $router->get('/contratos/termo', [AcceptanceController::class, 'operatorTerm'], 'contracts.signed_term');
     $router->get('/aceite/{token}', [AcceptanceController::class, 'show'], 'acceptance.show');
     $router->post('/aceite/{token}/confirmar', [AcceptanceController::class, 'confirm'], 'acceptance.confirm');
     $router->get('/aceite/{token}/termo', [AcceptanceController::class, 'term'], 'acceptance.term');

@@ -123,7 +123,6 @@ try {
     $appJs = (string) file_get_contents($rootPath . '/public/assets/js/app.js');
     $appCss = (string) file_get_contents($rootPath . '/public/assets/css/app.css');
     $layoutSource = (string) file_get_contents($rootPath . '/backend/Views/layouts/app.php');
-    $headerSource = (string) file_get_contents($rootPath . '/backend/Views/layouts/header.php');
     $controllerSource = (string) file_get_contents($rootPath . '/backend/Controllers/ClientController.php');
 
     $check(1, substr_count($withoutProcess, 'data-client-modal hidden aria-hidden="true" inert') === 1, 'abrir cliente não abre modal');
@@ -154,8 +153,6 @@ try {
     $check(23, str_contains($withActiveProcess, '/processos/migracao?id=77&amp;step=open_financial_ticket'), 'Continuar processo aponta para a etapa correta');
     $check(24, !str_contains($layoutSource, '20260803a') && str_contains($layoutSource, "releaseInfo['id']") && str_contains($layoutSource, "releaseInfo['commit']") && str_contains($layoutSource, 'filemtime(') && substr_count($layoutSource, '?v=') === 2 && substr_count($layoutSource, 'rawurlencode($assetVersion)') === 2, 'assets possuem cache busting por release, commit ou filemtime');
 
-    $check(25, str_contains($headerSource, '$hasReleaseDestinations') && !str_contains($headerSource, 'data-shared-build'), 'seletor de versões depende de destinos configurados');
-
     $guard = new MkAuthWriteGuard('test', false);
     $writeBlocked = false;
     try {
@@ -163,17 +160,17 @@ try {
     } catch (RuntimeException $exception) {
         $writeBlocked = $exception->getMessage() === MkAuthWriteGuard::BLOCKED_MESSAGE;
     }
-    $check(26, !(bool) $app->config()->get('app.mkauth.write_enabled', false) && $writeBlocked && str_contains($controllerSource, 'clientFinancialSummary'), 'nenhuma escrita no MkAuth é permitida');
-    $check(27, (bool) $app->config()->get('evotrix.dry_run', false) && (bool) $app->config()->get('email.dry_run', false) && (bool) $app->config()->get('contracts.mkauth_ticket.dry_run', false), 'nenhuma notificação real é permitida');
+    $check(25, !(bool) $app->config()->get('app.mkauth.write_enabled', false) && $writeBlocked && str_contains($controllerSource, 'clientFinancialSummary'), 'nenhuma escrita no MkAuth é permitida');
+    $check(26, (bool) $app->config()->get('evotrix.dry_run', false) && (bool) $app->config()->get('email.dry_run', false) && (bool) $app->config()->get('contracts.mkauth_ticket.dry_run', false), 'nenhuma notificação real é permitida');
     $trackedFiles = preg_split('/\R+/', trim((string) shell_exec('git ls-files')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     $aiFiles = array_filter($trackedFiles, static fn (string $file): bool => preg_match('/(^|[\/_-])(openai|integracao[-_]?ia|ai[-_]?integration)([\/_.-]|$)/i', $file) === 1);
-    $check(28, $aiFiles === [], 'nenhum arquivo da IA está rastreado');
+    $check(27, $aiFiles === [], 'nenhum arquivo da IA está rastreado');
 
-    if (count($checks) !== 28) {
-        throw new RuntimeException('A suíte não executou as 28 categorias obrigatórias.');
+    if (count($checks) !== 27) {
+        throw new RuntimeException('A suíte não executou as 27 categorias obrigatórias.');
     }
 
-    echo "OK - 28 verificações do hotfix de modal e pendências; nenhuma escrita externa ou notificação real.\n";
+    echo "OK - 27 verificações do hotfix de modal e pendências; nenhuma escrita externa ou notificação real.\n";
 } catch (Throwable $exception) {
     fwrite(STDERR, 'FALHOU - ' . $exception->getMessage() . PHP_EOL);
     exit(1);

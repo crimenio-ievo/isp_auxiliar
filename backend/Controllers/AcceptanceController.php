@@ -171,6 +171,85 @@ final class AcceptanceController
         return Response::html($html);
     }
 
+    /**
+     * Termo assinado para o operador autenticado: mesmo conteúdo da tela pública
+     * após a confirmação do CPF, sem a validação (a sessão e o perfil já a substituem).
+     */
+    public function operatorTerm(Request $request): Response
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveOperator());
+        if (!($access['is_manager'] || $access['is_admin'] || !empty($access['can_access_contracts']) || !empty($access['can_view_contracts']))) {
+            Flash::set('error', 'Seu usuário não possui acesso ao termo assinado.');
+            return Response::redirect('/dashboard');
+        }
+
+        $acceptanceId = (int) $request->query('acceptance_id', 0);
+        $acceptance = $acceptanceId > 0 ? $this->acceptanceRepository->findById($acceptanceId) : null;
+        if (!is_array($acceptance) || ($acceptance['status'] ?? '') !== 'aceito') {
+            Flash::set('error', 'Termo assinado não encontrado para este aceite.');
+            return Response::redirect('/clientes');
+        }
+
+        $context = $this->loadContextForAcceptance($acceptance, true);
+        if (!empty($context['error'])) {
+            Flash::set('error', (string) $context['error']);
+            return Response::redirect('/clientes');
+        }
+
+        $login = (string) ($context['contract']['mkauth_login'] ?? '');
+        $operator = $this->resolveOperator();
+        try {
+            $this->localRepository->log(
+                null,
+                (string) ($operator['login'] ?? ''),
+                'contract.signed_term.operator_viewed',
+                'contract_acceptance',
+                $acceptanceId,
+                ['contract_id' => (int) $acceptance['contract_id'], 'login' => $login],
+                (string) $request->server('REMOTE_ADDR', ''),
+                (string) $request->header('User-Agent', '')
+            );
+        } catch (\Throwable) {
+            // Auditoria não deve impedir a consulta.
+        }
+
+        $signaturePath = trim((string) ($context['publicDetails']['assinatura_path'] ?? ''));
+        $html = $this->view->render('contracts/termo', [
+            'layoutMode' => 'guest',
+            'pageTitle' => 'Termo assinado',
+            'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'providerName' => $this->resolveProviderDisplayName(),
+            'providerLegal' => $this->resolveProviderLegalProfile(),
+            'basePath' => $request->basePath(),
+            'hideHeader' => true,
+            'hideFooter' => true,
+            'user' => ['name' => 'Cliente', 'login' => '', 'role' => 'guest'],
+            'token' => '',
+            'termUrl' => '',
+            'acceptanceUrl' => $login !== '' ? Url::to('/clientes/detalhe?login=' . rawurlencode($login)) : '',
+            'centralAssinanteUrl' => $this->resolveCentralAssinanteUrl(),
+            'context' => $context,
+            'signaturePath' => $signaturePath,
+            'signatureRef' => $signaturePath !== '' ? basename(dirname($signaturePath)) : '',
+            'termValidated' => true,
+            'termLocked' => false,
+            'termAttemptsRemaining' => 5,
+            'termValidationError' => '',
+            'termValidationDigits' => 3,
+            'csrfToken' => '',
+        ]);
+
+        return Response::html($html);
+    }
+
+    private function resolveOperator(): array
+    {
+        $user = $_SESSION['user'] ?? ['login' => ''];
+        $user['login'] = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
+
+        return $user;
+    }
+
     public function confirm(Request $request): Response
     {
         $token = trim((string) $request->route('token', ''));
@@ -425,6 +504,15 @@ final class AcceptanceController
             return ['error' => 'Este link não está mais válido.', 'unavailableReason' => 'invalid'];
         }
 
+        return $this->loadContextForAcceptance($acceptance);
+    }
+
+    /**
+     * Monta o contexto do aceite. Com $operatorView o operador autenticado
+     * consulta o termo já aceito mesmo de contratos substituídos/migrados.
+     */
+    private function loadContextForAcceptance(array $acceptance, bool $operatorView = false): array
+    {
         $contract = $this->contractRepository->findById((int) $acceptance['contract_id']);
 
         if (!is_array($contract)) {
@@ -432,10 +520,11 @@ final class AcceptanceController
         }
 
         $lifecycleStatus = (string) ($contract['lifecycle_status'] ?? 'active');
-        if ($lifecycleStatus !== 'active'
+        if (!$operatorView && (
+            $lifecycleStatus !== 'active'
             || trim((string) ($acceptance['revoked_at'] ?? '')) !== ''
             || (string) ($acceptance['status'] ?? '') === 'cancelado'
-        ) {
+        )) {
             return [
                 'error' => 'Use o link mais recente enviado pela iEvo.',
                 'unavailableReason' => 'cancelled_or_superseded',

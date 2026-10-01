@@ -252,6 +252,9 @@ final class ClientController
             $detail['scannedDocuments'] = [];
         }
 
+        $canViewSignedTerm = $this->canViewSignedTerm();
+        $detail['signedTerms'] = $canViewSignedTerm ? $this->listSignedTerms((array) ($detail['contracts'] ?? [])) : [];
+
         $html = $this->view->render('clients/detail', [
             'pageTitle' => 'Cliente',
             'currentPath' => $request->path(),
@@ -267,6 +270,7 @@ final class ClientController
             'canManageSettings' => $this->canManageSettings(),
             'canRequestUpgrade' => $this->canRequestUpgrade(),
             'canRequestContractSignature' => $this->canRequestContractSignature(),
+            'canViewSignedTerm' => $canViewSignedTerm,
             'canCompleteUpgradeTechnical' => $this->canCompleteUpgradeTechnical(),
             'canCorrectUpgrade' => $this->canCorrectUpgrade(),
             'canCancelPendingContract' => $this->canCancelPendingContract(),
@@ -2493,6 +2497,53 @@ final class ClientController
         $access = $this->localRepository->accessProfileForUser($this->resolveUser());
 
         return $access['is_manager'] || $access['is_admin'] || !empty($access['can_upgrade_request']);
+    }
+
+    private function canViewSignedTerm(): bool
+    {
+        $access = $this->localRepository->accessProfileForUser($this->resolveUser());
+
+        return $access['is_manager'] || $access['is_admin']
+            || !empty($access['can_access_contracts']) || !empty($access['can_view_contracts']);
+    }
+
+    /**
+     * Aceites efetivamente assinados de todos os contratos do cliente
+     * (ex.: migração + contrato original), mais recentes primeiro.
+     *
+     * @param array<int, array<string, mixed>> $contracts
+     * @return array<int, array<string, mixed>>
+     */
+    private function listSignedTerms(array $contracts): array
+    {
+        $terms = [];
+        foreach ($contracts as $contract) {
+            $contractId = (int) ($contract['id'] ?? 0);
+            if ($contractId <= 0) {
+                continue;
+            }
+            try {
+                $acceptances = $this->contractAcceptanceRepository->listByContractId($contractId);
+            } catch (\Throwable) {
+                continue;
+            }
+            foreach ($acceptances as $acceptance) {
+                if (($acceptance['status'] ?? '') !== 'aceito') {
+                    continue;
+                }
+                $terms[] = [
+                    'acceptance_id' => (int) $acceptance['id'],
+                    'contract_id' => $contractId,
+                    'tipo_aceite' => (string) ($contract['tipo_aceite'] ?? ''),
+                    'accepted_at' => (string) ($acceptance['accepted_at'] ?? ''),
+                    'superseded' => (string) ($contract['lifecycle_status'] ?? 'active') !== 'active'
+                        || trim((string) ($acceptance['revoked_at'] ?? '')) !== '',
+                ];
+            }
+        }
+        usort($terms, static fn (array $a, array $b): int => strcmp($b['accepted_at'], $a['accepted_at']));
+
+        return $terms;
     }
 
     private function canRequestContractSignature(): bool
