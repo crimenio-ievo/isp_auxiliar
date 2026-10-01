@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Core\AccessControl;
 use App\Core\Url;
 
 $layoutMode = $layoutMode ?? 'app';
@@ -13,12 +14,30 @@ $roleLabel = match ($role) {
     'technician' => 'Tecnico',
     default => (string) ($user['role'] ?? 'Sem sessao'),
 };
+$access = is_array($user['access'] ?? null) ? $user['access'] : [];
+// Perfil desconhecido (sem 'access') mostra a busca; a rota /clientes ainda valida a permissão.
+$canSearchClients = $layoutMode !== 'guest' && ($access === [] || AccessControl::can($access, 'clients.view'));
+$globalSearchQuery = trim((string) ($_GET['q'] ?? ''));
 ?>
 <header class="topbar<?= $layoutMode === 'guest' ? ' topbar--guest' : ''; ?>">
     <div class="topbar__brand">
         <p class="topbar__eyebrow">Central operacional</p>
         <strong><?= htmlspecialchars($appName ?? 'ISP Auxiliar', ENT_QUOTES, 'UTF-8'); ?></strong>
     </div>
+
+    <?php if ($canSearchClients): ?>
+        <form class="topbar__search" method="get" action="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>" role="search" data-global-search>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input
+                type="search"
+                name="q"
+                value="<?= htmlspecialchars($globalSearchQuery, ENT_QUOTES, 'UTF-8'); ?>"
+                placeholder="Buscar cliente, login, CPF/CNPJ, contrato ou equipamento..."
+                aria-label="Buscar cliente, login, CPF/CNPJ, contrato ou equipamento"
+                autocomplete="off"
+            >
+        </form>
+    <?php endif; ?>
 
     <div class="topbar__actions">
         <?php if ($layoutMode !== 'guest'): ?>

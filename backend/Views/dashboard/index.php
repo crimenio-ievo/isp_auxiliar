@@ -44,20 +44,6 @@ ob_start();
     </div>
 </section>
 
-<section class="home-search">
-    <h1>Buscar cliente ou operação</h1>
-    <form class="home-search__field" method="get" action="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input
-            class="home-search__input"
-            type="search"
-            name="q"
-            placeholder="Buscar cliente, login, CPF/CNPJ, contrato ou equipamento..."
-            aria-label="Buscar cliente, login, CPF/CNPJ, contrato ou equipamento"
-        >
-    </form>
-</section>
-
 <section class="stats-grid alert-tiles">
     <?php foreach ($alertTiles as $alertTile): ?>
         <?php require __DIR__ . '/../components/alert_tile.php'; ?>
