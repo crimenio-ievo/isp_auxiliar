@@ -240,10 +240,21 @@ release_backup_database() {
     db_user="$(php -r '$v=parse_ini_file($argv[1],false,INI_SCANNER_RAW)?:[];echo $v["DB_USERNAME"]??"";' "${target}/.env")"
     db_password="$(php -r '$v=parse_ini_file($argv[1],false,INI_SCANNER_RAW)?:[];echo $v["DB_PASSWORD"]??"";' "${target}/.env")"
     [[ -n "${db_name}" && -n "${db_user}" ]] || release_die "configuração do banco incompleta"
-    MYSQL_PWD="${db_password}" mysqldump --host="${db_host}" --port="${db_port}" --user="${db_user}" \
-        --single-transaction --quick --routines --triggers --events "${db_name}" | gzip -9 > "${backup_file}"
+    # A senha vai por arquivo de opções temporário (600) com --defaults-file, que ignora ~/.my.cnf e /etc/mysql:
+    # MYSQL_PWD e --defaults-extra-file perdem para a senha de um .my.cnf global (acesso negado neste servidor),
+    # e -p/--password apareceria no `ps`.
+    local defaults_file escaped_password
+    defaults_file="$(mktemp)"
+    chmod 600 "${defaults_file}"
+    escaped_password="${db_password//\\/\\\\}"
+    escaped_password="${escaped_password//\"/\\\"}"
+    printf '[client]\nuser="%s"\npassword="%s"\n' "${db_user}" "${escaped_password}" > "${defaults_file}"
+    mysqldump --defaults-file="${defaults_file}" --host="${db_host}" --port="${db_port}" \
+        --single-transaction --quick --routines --triggers --events "${db_name}" | gzip -9 > "${backup_file}" \
+        || { rm -f "${defaults_file}"; release_die "mysqldump falhou"; }
+    rm -f "${defaults_file}"
     chmod 600 "${backup_file}"
-    unset db_password MYSQL_PWD
+    unset db_password escaped_password
     gzip -t "${backup_file}" || release_die "dump de banco inválido"
 }
 
