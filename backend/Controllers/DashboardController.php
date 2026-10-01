@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Config;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Url;
 use App\Core\View;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
@@ -55,30 +56,40 @@ final class DashboardController
      */
     private function homeAlertTiles(): array
     {
+        // Cada bloco leva à lista que o alimenta; sem permissão para a lista, o bloco fica sem link.
+        $access = $this->localRepository->accessProfileForUser(is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : []);
+        $clientsLink = !empty($access['can_search_clients']);
+        $acceptancesLink = !empty($access['is_manager']) || !empty($access['can_access_contracts']);
+        $clients = static fn (string $situation): string => $clientsLink ? Url::to('/clientes?situacao=' . $situation) : '';
+
         return [
             [
                 'label' => 'Clientes bloqueados',
                 'value' => (string) $this->safeMkAuthCount('blocked'),
                 'description' => 'Bloqueados no MkAuth agora',
                 'variant' => 'urgente',
+                'href' => $clients('bloqueados'),
             ],
             [
                 'label' => 'Atenção',
                 'value' => (string) $this->attentionCount(),
                 'description' => 'Ativos, não bloqueados, com fatura vencida',
                 'variant' => 'attention',
+                'href' => $clients('atencao'),
             ],
             [
                 'label' => 'Aceites pendentes',
                 'value' => (string) $this->pendingAcceptancesCount(),
                 'description' => 'Aguardando assinatura do cliente',
                 'variant' => 'queue',
+                'href' => $acceptancesLink ? Url::to('/contratos/aceites/pendentes') : '',
             ],
             [
                 'label' => 'Em dia',
                 'value' => (string) $this->safeMkAuthCount('good_standing'),
                 'description' => 'Ativos, não bloqueados, sem pendência de atenção',
                 'variant' => 'ok',
+                'href' => $clients('em_dia'),
             ],
         ];
     }

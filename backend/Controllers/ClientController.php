@@ -75,8 +75,18 @@ final class ClientController
         $query = trim((string) $request->query('q', $request->input('q', '')));
         $searchMode = $this->detectClientSearchMode($query);
         $results = [];
+        $situationLabels = ['bloqueados' => 'Clientes bloqueados', 'atencao' => 'Atenção: ativos com fatura vencida', 'em_dia' => 'Clientes em dia'];
+        $situation = (string) $request->query('situacao', '');
+        $situation = isset($situationLabels[$situation]) ? $situation : '';
+        $page = max(1, (int) $request->query('pagina', '1'));
 
-        if ($query !== '') {
+        if ($situation !== '' && $query === '') {
+            try {
+                $results = $this->mkauthDatabase->listClientsBySituation($situation, 50, ($page - 1) * 50);
+            } catch (\Throwable $exception) {
+                Flash::set('error', 'Nao foi possivel consultar o MkAuth agora. Tente novamente.');
+            }
+        } elseif ($query !== '') {
             try {
                 $results = $this->mkauthDatabase->searchClients($query, 50);
             } catch (\Throwable $exception) {
@@ -98,6 +108,9 @@ final class ClientController
             'user' => $this->resolveViewUser(),
             'flash' => Flash::get(),
             'query' => $query,
+            'situation' => $situation,
+            'situationLabel' => $situation !== '' ? $situationLabels[$situation] : '',
+            'page' => $page,
             'searchMode' => $searchMode,
             'results' => $this->buildClientHubSearchResults($results),
             'recentRegistrations' => $this->buildRecentClientItems($recentRegistrations),

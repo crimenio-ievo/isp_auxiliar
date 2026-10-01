@@ -6,6 +6,9 @@ use App\Core\Url;
 
 $query = trim((string) ($query ?? ''));
 $results = is_array($results ?? null) ? $results : [];
+$situation = (string) ($situation ?? '');
+$situationLabel = (string) ($situationLabel ?? '');
+$page = max(1, (int) ($page ?? 1));
 $recentRegistrations = is_array($recentRegistrations ?? null) ? $recentRegistrations : [];
 $canCreateClient = !empty($canCreateClient);
 $canSearchClients = !empty($canSearchClients);
@@ -70,11 +73,11 @@ ob_start();
     <?php endif; ?>
 </section>
 
-<?php if ($query !== '' || $results !== []): ?>
+<?php if ($query !== '' || $situation !== '' || $results !== []): ?>
     <section class="card">
         <div class="section-heading">
-            <p class="section-heading__eyebrow">Resultados</p>
-            <h2>Clientes encontrados</h2>
+            <p class="section-heading__eyebrow"><?= $situation !== '' ? 'Filtro da Home' : 'Resultados'; ?></p>
+            <h2><?= htmlspecialchars($situation !== '' ? $situationLabel : 'Clientes encontrados', ENT_QUOTES, 'UTF-8'); ?></h2>
         </div>
 
         <?php if ($results !== []): ?>
@@ -123,6 +126,12 @@ ob_start();
                     </article>
                 <?php endforeach; ?>
             </div>
+            <?php if ($situation !== ''): ?>
+                <nav class="hero-actions" aria-label="Paginação">
+                    <?php if ($page > 1): ?><a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/clientes?situacao=' . rawurlencode($situation) . '&pagina=' . ($page - 1)), ENT_QUOTES, 'UTF-8'); ?>">← Anteriores</a><?php endif; ?>
+                    <?php if (count($results) >= 50): ?><a class="button button--ghost button--small" href="<?= htmlspecialchars(Url::to('/clientes?situacao=' . rawurlencode($situation) . '&pagina=' . ($page + 1)), ENT_QUOTES, 'UTF-8'); ?>">Próximos 50 →</a><?php endif; ?>
+                </nav>
+            <?php endif; ?>
         <?php else: ?>
             <p class="page-description" style="margin-top: 16px;">Nenhum cliente encontrado. Tente outro nome, login, documento ou telefone.</p>
         <?php endif; ?>

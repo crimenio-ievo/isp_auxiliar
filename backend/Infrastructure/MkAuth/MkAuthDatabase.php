@@ -600,6 +600,51 @@ final class MkAuthDatabase implements ClientPlanReadRepository
         );
     }
 
+    /**
+     * Lista de clientes de cada bloco da Home (mesmas condições das contagens
+     * countBlockedClients / countActiveClientsWithOverdueInvoice /
+     * countActiveClientsInGoodStanding, para o número do bloco bater com a lista).
+     * Usa o JOIN agregado de vencidos, sem subquery por cliente (online_now fica
+     * fora de propósito: seria um EXISTS em radacct por linha).
+     *
+     * @param 'bloqueados'|'atencao'|'em_dia' $situation
+     */
+    public function listClientsBySituation(string $situation, int $limit = 50, int $offset = 0): array
+    {
+        if (!$this->isConfigured()) {
+            return [];
+        }
+
+        $active = 'LOWER(TRIM(c.cli_ativado)) IN ("s", "sim", "1", "true", "yes")';
+        $notBlocked = 'LOWER(TRIM(c.bloqueado)) <> "sim"';
+        $where = match ($situation) {
+            'bloqueados' => 'LOWER(TRIM(c.bloqueado)) = "sim"',
+            'atencao' => $notBlocked . ' AND ' . $active . ' AND overdue.login_norm IS NOT NULL',
+            'em_dia' => $notBlocked . ' AND ' . $active . ' AND overdue.login_norm IS NULL',
+            default => throw new \InvalidArgumentException('Situação de cliente desconhecida.'),
+        };
+        $limit = max(1, min(200, $limit));
+        $offset = max(0, $offset);
+
+        $rows = $this->fetchAll(
+            'SELECT c.id, c.uuid_cliente, c.nome, c.login, c.cpf_cnpj, c.fone, c.celular, c.bairro, c.cidade,
+                    c.estado, c.cep, c.venc, c.plano, c.cli_ativado, c.bloqueado, c.endereco, c.numero,
+                    c.complemento, c.cadastro, c.last_update, 0 AS online_now,
+                    COALESCE(NULLIF(p.nome, ""), NULLIF(c.plano, "")) AS plano_nome,
+                    p.valor AS plano_valor, p.tecnologia AS plano_tecnologia
+             FROM sis_cliente c
+             LEFT JOIN (' . self::OVERDUE_LOGINS_SUBQUERY . ') AS overdue
+                ON overdue.login_norm = LOWER(TRIM(c.login))
+             LEFT JOIN sis_plano p
+                ON LOWER(p.nome) = LOWER(c.plano) OR p.uuid_plano = c.plano
+             WHERE c.login IS NOT NULL AND c.login <> "" AND ' . $where . '
+             ORDER BY c.nome ASC
+             LIMIT ' . (int) $limit . ' OFFSET ' . (int) $offset
+        );
+
+        return array_map(fn (array $row): array => $this->normalizeClientProfileRow($row), $rows);
+    }
+
     public function listPlans(int $limit = 300): array
     {
         $limit = max(1, min(500, $limit));
