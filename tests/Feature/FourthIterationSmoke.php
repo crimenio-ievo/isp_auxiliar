@@ -17,7 +17,6 @@ use App\Infrastructure\MkAuth\TechnologyMapper;
 use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\Processes\OperationalProcessService;
-use App\Services\Releases\ReleaseChannelService;
 
 require dirname(__DIR__, 2) . '/backend/bootstrap/app.php';
 
@@ -143,7 +142,7 @@ $baseViewData = static function (string $login, array $operationalProcesses): ar
         'currentPath' => '/clientes/detalhe',
         'basePath' => '',
         'appName' => 'ISP Auxiliar',
-        'user' => ['name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]],
+        'user' => ['name' => 'Gestor', 'role' => 'manager'],
         'flash' => null,
         'detail' => [
             'login' => $login,
@@ -202,7 +201,7 @@ $renderMigration = static function (View $view, array $process, array $contract,
         'currentPath' => '/processos/migracao',
         'basePath' => '',
         'appName' => 'ISP Auxiliar',
-        'user' => ['name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]],
+        'user' => ['name' => 'Gestor', 'role' => 'manager'],
         'flash' => null,
         'process' => $process,
         'activeStep' => $steps[$activeIndex] ?? [],
@@ -382,22 +381,14 @@ try {
     $translatedEvent = $translateAudit->invoke($controller, 'contract.acceptance.accepted', ['actor_login' => 'vanessa']);
     $check(42, ($translatedEvent['label'] ?? '') === 'Cliente confirmou o aceite.' && str_contains((string) ($translatedEvent['description'] ?? ''), 'vanessa'), 'eventos técnicos são traduzidos sem inventar responsável');
 
-    $releaseConfig = new Config(['app' => ['release' => ['channel' => 'stable', 'stable_base_url' => 'https://stable.example.test/isp', 'beta_base_url' => 'https://beta.example.test/isp']]]);
-    $releaseService = new ReleaseChannelService($releaseConfig, $local);
-    $check(43, $releaseService->currentChannel() === 'stable' && $releaseService->preference(['login' => 'release.viewer', 'role' => 'viewer']) === 'stable', 'Stable é o canal atual');
-    $betaDenied = false;
-    try {
-        $releaseService->resolveSwitch(['login' => 'release.viewer', 'role' => 'viewer'], 'beta');
-    } catch (RuntimeException) {
-        $betaDenied = true;
-    }
-    $check(44, $betaDenied, 'Beta exige permissão');
-    $check(45, $releaseService->destination('beta') === 'https://beta.example.test/isp', 'URL do canal vem somente da configuração');
-    $releaseResult = $releaseService->resolveSwitch(['login' => 'release.manager', 'role' => 'manager'], 'beta');
-    $check(46, ($releaseResult['destination'] ?? '') === 'https://beta.example.test/isp' && !empty($releaseResult['redirect']), 'troca resolve o canal sem persistir preferência');
-
-    $unsafeRelease = new ReleaseChannelService(new Config(['app' => ['release' => ['channel' => 'stable', 'beta_base_url' => 'https://usuario:senha@evil.example.test/redirecionar']]]), $local);
-    $check(47, $unsafeRelease->destination('beta') === '', 'open redirect e URL com credencial são bloqueados');
+    // Seletor de canal Beta/Stable removido (as 5 verificações abaixo substituem as antigas 43-47).
+    $routesSource = (string) file_get_contents($rootPath . '/backend/routes.php');
+    $check(43, !class_exists('App\\Services\\Releases\\ReleaseChannelService') && !class_exists('App\\Controllers\\ReleaseChannelController'), 'seletor de canal não existe mais');
+    $check(44, !str_contains($routesSource, 'canal-versao'), 'rota /canal-versao removida');
+    $check(45, !array_key_exists('can_use_beta', $local->accessProfileForUser(['login' => 'release.manager', 'role' => 'manager'])), 'permissão Beta não é mais calculada');
+    $footerSource = (string) file_get_contents($rootPath . '/backend/Views/layouts/footer.php');
+    $check(46, !str_contains($footerSource, 'Beta') && !str_contains($footerSource, 'Stable'), 'rodapé sem rótulo de canal');
+    $check(47, str_contains($footerSource, "releaseId") && str_contains($footerSource, "commit"), 'rodapé mantém release_id e commit');
 
     $legacyProcess = $processService->detail((int) $acceptedProcess['id']);
     $check(48, is_array($legacyProcess) && count((array) ($legacyProcess['steps'] ?? [])) === 11, 'processo antigo continua legível');

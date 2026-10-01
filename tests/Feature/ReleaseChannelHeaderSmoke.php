@@ -26,7 +26,7 @@ session_start();
 $view = new View($argv[2] . '/backend/Views');
 echo $view->render('layouts/header', [
     'layoutMode' => 'app',
-    'user' => ['name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]],
+    'user' => ['name' => 'Gestor', 'role' => 'manager'],
     'appName' => 'ISP Auxiliar',
 ]);
 PHP;

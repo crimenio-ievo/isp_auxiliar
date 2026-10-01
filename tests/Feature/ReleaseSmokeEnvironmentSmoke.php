@@ -65,7 +65,7 @@ $root = (string) getenv('SMOKE_APP_ROOT');
 require $root . '/backend/bootstrap/app.php';
 $app = bootstrapApplication();
 $view = new App\Core\View((string) $app->config()->get('paths.views'));
-$user = ['name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]];
+$user = ['name' => 'Gestor', 'role' => 'manager'];
 $header = $view->render('layouts/header', [
     'layoutMode' => 'app',
     'user' => $user,

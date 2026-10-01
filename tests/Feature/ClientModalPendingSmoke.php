@@ -64,7 +64,7 @@ $renderClient = static function (
         'currentPath' => '/clientes/detalhe',
         'basePath' => '',
         'appName' => 'ISP Auxiliar',
-        'user' => ['name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]],
+        'user' => ['name' => 'Gestor', 'role' => 'manager'],
         'flash' => null,
         'detail' => [
             'login' => 'cliente_modal_teste',
@@ -106,7 +106,7 @@ $renderClient = static function (
     ]);
 };
 
-$_SESSION['user'] = ['login' => 'gestor.modal', 'name' => 'Gestor', 'role' => 'manager', 'access' => ['can_use_beta' => true]];
+$_SESSION['user'] = ['login' => 'gestor.modal', 'name' => 'Gestor', 'role' => 'manager'];
 
 try {
     $withoutProcess = $renderClient([], null, [], false);

@@ -11,7 +11,6 @@ use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
-use App\Services\Releases\ReleaseChannelService;
 
 require dirname(__DIR__, 2) . '/backend/bootstrap/app.php';
 
@@ -61,22 +60,10 @@ foreach (['channel', 'release_id', 'commit', 'build_date', 'schema_version', 'ex
 }
 $assert(!preg_match('/smtp_password|api_token|client_secret|db_password/i', $adminBody), 'Release info expôs campo de credencial.');
 
-$safeConfig = new Config(['app' => ['release' => [
-    'channel' => 'beta',
-    'stable_base_url' => 'https://stable.example.test/app',
-    'beta_base_url' => 'https://beta.example.test/app',
-]]]);
-$safeChannels = new ReleaseChannelService($safeConfig, $local);
-$assert($safeChannels->destination('stable') === 'https://stable.example.test/app', 'Destino Stable configurado foi alterado.');
-$assert($safeChannels->destination('beta') === 'https://beta.example.test/app', 'Destino Beta configurado foi alterado.');
-$switch = $safeChannels->resolveSwitch(['login' => 'release.admin.test', 'role' => 'admin'], 'beta');
-$assert(empty($switch['redirect']) && ($switch['destination'] ?? '') === '', 'Seleção do próprio canal provocaria recarga.');
-$switch = $safeChannels->resolveSwitch(['login' => 'release.admin.test', 'role' => 'admin'], 'stable');
-$assert(!empty($switch['redirect']) && ($switch['destination'] ?? '') === 'https://stable.example.test/app', 'Troca não resolveu o destino configurado.');
-$unsafeChannels = new ReleaseChannelService(new Config(['app' => ['release' => [
-    'stable_base_url' => 'https://usuario:senha@host.example.test/app',
-]]]), $local);
-$assert($unsafeChannels->destination('stable') === '', 'URL com credencial foi aceita pelo seletor.');
+// Seletor de canal Beta/Stable removido: nem classe, nem rota, nem permissão.
+$assert(!class_exists('App\\Services\\Releases\\ReleaseChannelService') && !class_exists('App\\Controllers\\ReleaseChannelController'), 'Seletor de canal ainda existe no código.');
+$assert(!str_contains((string) file_get_contents($root . '/backend/routes.php'), 'canal-versao'), 'Rota /canal-versao ainda registrada.');
+$assert(!array_key_exists('can_use_beta', $local->accessProfileForUser(['login' => 'release.admin.test', 'role' => 'admin'])), 'Permissão can_use_beta ainda é calculada.');
 
 $footerPath = var_export($root . '/backend/Views/layouts/footer.php', true);
 $guestFooter = (string) shell_exec(PHP_BINARY . ' -r ' . escapeshellarg('$layoutMode="guest"; define("APP_RELEASE_INFO", ["channel"=>"beta","id"=>"secret-release","commit"=>"abcdef123"]); ob_start(); require ' . $footerPath . '; echo ob_get_clean();'));

@@ -38,7 +38,6 @@ use App\Services\Processes\OperationalProcessService;
 use App\Services\Processes\MigrationJourneyService;
 use App\Services\Processes\MigrationEvidenceService;
 use App\Services\Processes\MigrationFinalizationService;
-use App\Services\Releases\ReleaseChannelService;
 
 /**
  * Monta a aplicacao com configuracao, container, views e rotas.
@@ -233,7 +232,6 @@ function bootstrapApplication(): Application
         $container->get(MkAuthTicketService::class),
         $container->get(FinancialTaskRepository::class)
     ));
-    $container->set(ReleaseChannelService::class, new ReleaseChannelService($config, $localRepository));
 
     $router = new Router();
     $registerRoutes = require __DIR__ . '/../routes.php';

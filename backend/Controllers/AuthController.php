@@ -10,7 +10,6 @@ use App\Core\Response;
 use App\Core\View;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\MkAuth\MkAuthDatabase;
-use App\Services\Releases\ReleaseChannelService;
 
 /**
  * Controla a entrada basica do sistema.
@@ -24,8 +23,7 @@ final class AuthController
         private View $view,
         private Config $config,
         private MkAuthDatabase $mkauthDatabase,
-        private LocalRepository $localRepository,
-        private ReleaseChannelService $releaseChannelService
+        private LocalRepository $localRepository
     ) {
     }
 
@@ -213,22 +211,13 @@ final class AuthController
 
     public function logout(Request $request): Response
     {
-        unset($_SESSION['user'], $_SESSION['release_channel_preference']);
+        unset($_SESSION['user']);
 
         return Response::redirect('/login');
     }
 
     private function authenticatedRedirect(): Response
     {
-        try {
-            $user = is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : [];
-            $_SESSION['release_channel_preference'] = $this->releaseChannelService->preference($user);
-        } catch (\Throwable) {
-            $_SESSION['release_channel_preference'] = 'stable';
-        }
-
-        // O redirecionamento entre hosts depende de autenticação compartilhada e
-        // será ativado somente quando a topologia Stable/Beta estiver homologada.
         return Response::redirect('/dashboard');
     }
 

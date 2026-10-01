@@ -65,3 +65,8 @@ aditivas aplicadas com runner canônico e smokes com integrações bloqueadas. P
 rollback: apontar o symlink ao release Stable anterior, restaurar somente dados
 quando houver plano de rollback compatível e manter auditoria/evidências. Nenhuma
 dessas ações foi executada nesta entrega.
+
+> **Atualização (2026-10):** o seletor de canal (`POST /canal-versao`, `ReleaseChannelController`,
+> `ReleaseChannelService`), o rótulo Beta/Stable do rodapé e a permissão `can_use_beta`
+> (`beta_release_access_logins`) foram removidos do código. Registros antigos em `provider_settings`
+> e `audit_logs` (`release.channel.preference_changed`) permanecem no banco, sem uso.
