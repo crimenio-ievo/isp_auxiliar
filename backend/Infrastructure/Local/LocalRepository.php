@@ -120,6 +120,17 @@ final class LocalRepository
         return (string) ($settings[$key] ?? $default);
     }
 
+    /**
+     * Dias de tolerância da fatura vencida nos blocos da Home (provider_settings
+     * `home_overdue_grace_days`, padrão 5): só vira "Atenção" com vencido há MAIS que isso.
+     */
+    public function homeOverdueGraceDays(): int
+    {
+        $raw = trim($this->providerSetting('home_overdue_grace_days', ''));
+
+        return $raw !== '' && ctype_digit($raw) ? min(365, (int) $raw) : 5;
+    }
+
     public function providerSettingList(string $key): array
     {
         $raw = $this->providerSetting($key, '');

@@ -43,31 +43,32 @@ final class DashboardController
     }
 
     /**
-     * Números semânticos da home (urgente/atenção/aguardando/ok).
-     *
-     * "Atenção" soma as regras de attentionRules() — hoje só fatura vencida,
-     * mas a lista existe para crescer sem mexer na apresentação.
+     * Números semânticos da home (urgente/atenção/aguardando/ok). As regras dos três
+     * blocos de clientes vivem em MkAuthDatabase::situationCondition(), compartilhada
+     * com a lista filtrada de /clientes?situacao=.
      */
     private function homeAlertTiles(): array
     {
-        // Cada bloco leva à lista que o alimenta; sem permissão para a lista, o bloco fica sem link.
+        // Cada bloco leva à lista que o alimenta; sem permissão para a lista de destino, fica sem link.
         $access = $this->localRepository->accessProfileForUser(is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : []);
         $clientsLink = !empty($access['can_search_clients']);
         $acceptancesLink = !empty($access['is_manager']) || !empty($access['can_access_contracts']);
         $clients = static fn (string $situation): string => $clientsLink ? Url::to('/clientes?situacao=' . $situation) : '';
+        $grace = $this->localRepository->homeOverdueGraceDays();
+        $counts = $this->situationCounts($grace);
 
         return [
             [
-                'label' => 'Clientes bloqueados',
-                'value' => (string) $this->safeMkAuthCount('blocked'),
-                'description' => 'Bloqueados no MkAuth agora',
+                'label' => 'Bloqueados ou reduzidos',
+                'value' => (string) $counts['bloqueados'],
+                'description' => 'Clientes ativos bloqueados ou com velocidade reduzida',
                 'variant' => 'urgente',
                 'href' => $clients('bloqueados'),
             ],
             [
                 'label' => 'Atenção',
-                'value' => (string) $this->attentionCount(),
-                'description' => 'Ativos, não bloqueados, com fatura vencida',
+                'value' => (string) $counts['atencao'],
+                'description' => 'Ativos com fatura vencida há mais de ' . $grace . ' dias',
                 'variant' => 'attention',
                 'href' => $clients('atencao'),
             ],
@@ -80,35 +81,22 @@ final class DashboardController
             ],
             [
                 'label' => 'Em dia',
-                'value' => (string) $this->safeMkAuthCount('good_standing'),
-                'description' => 'Ativos, não bloqueados, sem pendência de atenção',
+                'value' => (string) $counts['em_dia'],
+                'description' => 'Demais ativos (vencido de até ' . $grace . ' dias entra aqui)',
                 'variant' => 'ok',
                 'href' => $clients('em_dia'),
             ],
         ];
     }
 
-    /**
-     * Regras de atenção: cada entrada é uma função sem argumentos que
-     * devolve a contagem de clientes que ela sozinha capturaria. Hoje só
-     * existe a regra de fatura vencida — novas regras entram aqui como
-     * novas entradas, sem tocar na view nem no partial de alerta.
-     */
-    private function attentionRules(): array
+    /** @return array{bloqueados: int, atencao: int, em_dia: int} */
+    private function situationCounts(int $grace): array
     {
-        return [
-            'fatura_vencida' => fn (): int => $this->safeMkAuthCount('overdue_invoice'),
-        ];
-    }
-
-    private function attentionCount(): int
-    {
-        $total = 0;
-        foreach ($this->attentionRules() as $rule) {
-            $total += $rule();
+        try {
+            return $this->mkauthDatabase->homeSituationCounts($grace);
+        } catch (\Throwable $exception) {
+            return ['bloqueados' => 0, 'atencao' => 0, 'em_dia' => 0];
         }
-
-        return $total;
     }
 
     /**
@@ -224,25 +212,5 @@ final class DashboardController
         }
 
         return $records;
-    }
-
-    private function safeMkAuthCount(string $type): int
-    {
-        if (!$this->mkauthDatabase->isConfigured()) {
-            return 0;
-        }
-
-        try {
-            return match ($type) {
-                'plans' => $this->mkauthDatabase->countActivePlans(),
-                'users' => $this->mkauthDatabase->countAccessUsers(),
-                'blocked' => $this->mkauthDatabase->countBlockedClients(),
-                'overdue_invoice' => $this->mkauthDatabase->countActiveClientsWithOverdueInvoice(),
-                'good_standing' => $this->mkauthDatabase->countActiveClientsInGoodStanding(),
-                default => $this->mkauthDatabase->countClients(),
-            };
-        } catch (\Throwable $exception) {
-            return 0;
-        }
     }
 }

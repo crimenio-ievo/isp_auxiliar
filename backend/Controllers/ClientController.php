@@ -75,14 +75,19 @@ final class ClientController
         $query = trim((string) $request->query('q', $request->input('q', '')));
         $searchMode = $this->detectClientSearchMode($query);
         $results = [];
-        $situationLabels = ['bloqueados' => 'Clientes bloqueados', 'atencao' => 'Atenção: ativos com fatura vencida', 'em_dia' => 'Clientes em dia'];
+        $graceDays = $this->localRepository->homeOverdueGraceDays();
+        $situationLabels = [
+            'bloqueados' => 'Clientes ativos bloqueados ou com velocidade reduzida',
+            'atencao' => 'Atenção: ativos com fatura vencida há mais de ' . $graceDays . ' dias',
+            'em_dia' => 'Clientes ativos em dia',
+        ];
         $situation = (string) $request->query('situacao', '');
         $situation = isset($situationLabels[$situation]) ? $situation : '';
         $page = max(1, (int) $request->query('pagina', '1'));
 
         if ($situation !== '' && $query === '') {
             try {
-                $results = $this->mkauthDatabase->listClientsBySituation($situation, 50, ($page - 1) * 50);
+                $results = $this->mkauthDatabase->listClientsBySituation($situation, $graceDays, 50, ($page - 1) * 50);
             } catch (\Throwable $exception) {
                 Flash::set('error', 'Nao foi possivel consultar o MkAuth agora. Tente novamente.');
             }
@@ -2640,6 +2645,7 @@ final class ClientController
                 'onu' => trim((string) ($row['onu'] ?? $row['olt'] ?? '')),
                 'mac' => trim((string) ($row['mac'] ?? $row['user_mac'] ?? '')),
                 'detail_url' => Url::to('/clientes/detalhe?login=' . rawurlencode($login)),
+                'situation_reason' => trim((string) ($row['situation_reason'] ?? '')),
             ];
         }
 

@@ -120,6 +120,9 @@ ob_start();
                             <span><?= htmlspecialchars($locationParts !== [] ? implode(' / ', $locationParts) : '-', ENT_QUOTES, 'UTF-8'); ?></span>
                             <span><?= htmlspecialchars((string) ($result['phone'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></span>
                         </div>
+                        <?php if (trim((string) ($result['situation_reason'] ?? '')) !== ''): ?>
+                            <div class="client-result-card__note client-result-card__reason"><strong>Motivo:</strong> <?= htmlspecialchars((string) $result['situation_reason'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
                         <?php if ($statusClass === 'client-status-blocked' && $statusNote !== ''): ?>
                             <div class="client-result-card__note"><?= htmlspecialchars($statusNote, ENT_QUOTES, 'UTF-8'); ?></div>
                         <?php endif; ?>

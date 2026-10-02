@@ -29,7 +29,7 @@ $xss = $render(['label' => 'X', 'value' => '1', 'href' => '/a"><script>']);
 $assert(!str_contains($xss, '<script>'), 'href é escapado');
 
 $db = (string) file_get_contents($root . '/backend/Infrastructure/MkAuth/MkAuthDatabase.php');
-$assert(substr_count($db, 'self::OVERDUE_LOGINS_SUBQUERY') >= 3, 'lista reaproveita o JOIN agregado de vencidos');
+$assert(substr_count($db, 'self::OVERDUE_LOGINS_SUBQUERY') >= 2 && str_contains($db, 'GROUP BY LOWER(TRIM(l.login))'), 'contagem e lista reaproveitam o JOIN agregado de vencidos');
 $i = strpos($db, 'function listClientsBySituation');
 $body = substr($db, $i, 2600);
 $assert(!str_contains($body, 'EXISTS') && !str_contains($body, 'radacct'), 'lista não usa subquery por cliente');

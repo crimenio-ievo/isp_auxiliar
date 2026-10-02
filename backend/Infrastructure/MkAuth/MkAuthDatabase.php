@@ -168,83 +168,84 @@ final class MkAuthDatabase implements ClientPlanReadRepository
         return $this->countRows('SELECT COUNT(*) FROM sis_cliente WHERE login IS NOT NULL AND login <> ""');
     }
 
-    public function countBlockedClients(): int
-    {
-        return $this->countRows(
-            'SELECT COUNT(*) FROM sis_cliente WHERE login IS NOT NULL AND login <> "" AND LOWER(TRIM(bloqueado)) = "sim"'
-        );
-    }
-
     /**
-     * Ativos e não bloqueados (nem todo cliente cai num desses dois grupos:
-     * existem casos reais de bloqueado="nao" com cli_ativado="n", que ficam
-     * de fora dos dois — não fazem parte de nenhuma das métricas de atenção).
-     */
-    public function countActiveNotBlockedClients(): int
-    {
-        return $this->countRows(
-            'SELECT COUNT(*) FROM sis_cliente
-             WHERE login IS NOT NULL AND login <> ""
-               AND LOWER(TRIM(bloqueado)) <> "sim"
-               AND LOWER(TRIM(cli_ativado)) IN ("s", "sim", "1", "true", "yes")'
-        );
-    }
-
-    /**
-     * Subconsulta derivada com os logins normalizados que têm título vencido
-     * e não pago em sis_lanc — calculada uma única vez (DISTINCT), não por
-     * cliente. As duas contagens abaixo fazem LEFT JOIN contra ela.
-     *
-     * Antes disso, countActiveClientsWithOverdueInvoice/countActiveClientsInGoodStanding
-     * usavam EXISTS/NOT EXISTS correlacionados por linha de sis_cliente
-     * (LOWER(l.login) = LOWER(c.login) dentro da subquery). O LOWER() nos
-     * dois lados impedia o otimizador de usar qualquer índice em `login`
-     * (MariaDB 10.3 não tem índice funcional), e a subquery rodava uma vez
-     * por cliente — ~28s por contagem, ~62s de /dashboard fim-a-fim. A
-     * derivada abaixo calcula o conjunto de logins vencidos uma única vez
-     * e faz o join contra sis_cliente uma única vez, sem mudar a regra de
-     * negócio: mesma condição de vencido/não pago, mesmo filtro de
-     * ativo/não bloqueado. Medido: ~0,1s por contagem, mesmos resultados
-     * exatos (36 e 266).
+     * Derivada com, por login normalizado, há quantos dias está vencido o título mais
+     * antigo ainda em aberto em sis_lanc — calculada UMA vez (GROUP BY) e ligada por
+     * LEFT JOIN, nunca por subquery correlacionada por cliente (o EXISTS por linha com
+     * LOWER() nos dois lados levava ~28s por contagem; o JOIN leva ~0,1s).
      */
     private const OVERDUE_LOGINS_SUBQUERY = '
-        SELECT DISTINCT LOWER(TRIM(l.login)) AS login_norm
+        SELECT LOWER(TRIM(l.login)) AS login_norm,
+               DATEDIFF(CURDATE(), MIN(l.datavenc)) AS overdue_days
         FROM sis_lanc l
         WHERE COALESCE(l.deltitulo, 0) = 0
           AND (l.datapag IS NULL OR l.datapag = "")
           AND LOWER(TRIM(COALESCE(l.status, ""))) NOT IN ("pago", "quitado", "baixado")
           AND l.datavenc < CURDATE()
+        GROUP BY LOWER(TRIM(l.login))
     ';
 
-    public function countActiveClientsWithOverdueInvoice(): int
+    private const SITUATION_ACTIVE = 'LOWER(TRIM(COALESCE(c.cli_ativado, ""))) IN ("s", "sim", "1", "true", "yes")';
+    private const SITUATION_RED = '(LOWER(TRIM(COALESCE(c.bloqueado, ""))) = "sim" OR LOWER(TRIM(COALESCE(c.status_corte, ""))) = "down")';
+
+    /**
+     * Condição ÚNICA de cada bloco da Home, usada tanto na contagem quanto na lista
+     * (o número do bloco é sempre igual ao tamanho da lista).
+     *
+     * - bloqueados: ativo E (bloqueado='sim' OU status_corte='down')
+     * - atencao:    ativo, não vermelho, título vencido há MAIS de :grace dias
+     * - em_dia:     ativo, não vermelho, não amarelo (vencido de até :grace dias entra aqui)
+     * Desativados (cli_ativado='n') ficam fora de todos. Os três somam o total de ativos.
+     */
+    private function situationCondition(string $situation, string $graceParam): string
     {
-        return $this->countRows(
-            'SELECT COUNT(*) FROM sis_cliente c
-             LEFT JOIN (' . self::OVERDUE_LOGINS_SUBQUERY . ') AS overdue
-                ON overdue.login_norm = LOWER(TRIM(c.login))
-             WHERE c.login IS NOT NULL AND c.login <> ""
-               AND LOWER(TRIM(c.bloqueado)) <> "sim"
-               AND LOWER(TRIM(c.cli_ativado)) IN ("s", "sim", "1", "true", "yes")
-               AND overdue.login_norm IS NOT NULL'
-        );
+        $active = self::SITUATION_ACTIVE;
+        $red = self::SITUATION_RED;
+
+        return match ($situation) {
+            'bloqueados' => $active . ' AND ' . $red,
+            'atencao' => $active . ' AND NOT ' . $red . ' AND overdue.overdue_days > ' . $graceParam,
+            'em_dia' => $active . ' AND NOT ' . $red . ' AND (overdue.overdue_days IS NULL OR overdue.overdue_days <= ' . $graceParam . ')',
+            default => throw new \InvalidArgumentException('Situação de cliente desconhecida.'),
+        };
     }
 
     /**
-     * Complemento independente do método acima (não é a subtração): ativos,
-     * não bloqueados, sem nenhum título vencido e não pago. A soma dos dois
-     * deve sempre bater com countActiveNotBlockedClients().
+     * Contagem dos três blocos em UMA consulta (mesmas condições da lista).
+     *
+     * @return array{bloqueados: int, atencao: int, em_dia: int}
      */
-    public function countActiveClientsInGoodStanding(): int
+    public function homeSituationCounts(int $graceDays): array
     {
-        return $this->countRows(
-            'SELECT COUNT(*) FROM sis_cliente c
+        $counts = ['bloqueados' => 0, 'atencao' => 0, 'em_dia' => 0];
+        if (!$this->isConfigured()) {
+            return $counts;
+        }
+
+        $params = [];
+        $selects = [];
+        foreach (array_keys($counts) as $index => $situation) {
+            $name = 'grace' . $index;
+            if ($situation !== 'bloqueados') {
+                $params[$name] = max(0, $graceDays); // só as condições que usam :grace (PDO recusa parâmetro sobrando)
+            }
+            $selects[] = 'COALESCE(SUM(CASE WHEN ' . $this->situationCondition($situation, ':' . $name) . ' THEN 1 ELSE 0 END), 0) AS ' . $situation;
+        }
+
+        $row = $this->fetchOne(
+            'SELECT ' . implode(', ', $selects) . '
+             FROM sis_cliente c
              LEFT JOIN (' . self::OVERDUE_LOGINS_SUBQUERY . ') AS overdue
                 ON overdue.login_norm = LOWER(TRIM(c.login))
-             WHERE c.login IS NOT NULL AND c.login <> ""
-               AND LOWER(TRIM(c.bloqueado)) <> "sim"
-               AND LOWER(TRIM(c.cli_ativado)) IN ("s", "sim", "1", "true", "yes")
-               AND overdue.login_norm IS NULL'
-        );
+             WHERE c.login IS NOT NULL AND c.login <> ""',
+            $params
+        ) ?? [];
+
+        foreach (array_keys($counts) as $situation) {
+            $counts[$situation] = (int) ($row[$situation] ?? 0);
+        }
+
+        return $counts;
     }
 
     public function countActivePlans(): int
@@ -601,35 +602,27 @@ final class MkAuthDatabase implements ClientPlanReadRepository
     }
 
     /**
-     * Lista de clientes de cada bloco da Home (mesmas condições das contagens
-     * countBlockedClients / countActiveClientsWithOverdueInvoice /
-     * countActiveClientsInGoodStanding, para o número do bloco bater com a lista).
-     * Usa o JOIN agregado de vencidos, sem subquery por cliente (online_now fica
-     * fora de propósito: seria um EXISTS em radacct por linha).
+     * Lista de clientes de cada bloco da Home, com a MESMA condição da contagem
+     * (situationCondition) e o motivo em texto simples em `situation_reason`.
+     * online_now fica fora de propósito: seria um EXISTS em radacct por linha.
      *
      * @param 'bloqueados'|'atencao'|'em_dia' $situation
      */
-    public function listClientsBySituation(string $situation, int $limit = 50, int $offset = 0): array
+    public function listClientsBySituation(string $situation, int $graceDays, int $limit = 50, int $offset = 0): array
     {
         if (!$this->isConfigured()) {
             return [];
         }
 
-        $active = 'LOWER(TRIM(c.cli_ativado)) IN ("s", "sim", "1", "true", "yes")';
-        $notBlocked = 'LOWER(TRIM(c.bloqueado)) <> "sim"';
-        $where = match ($situation) {
-            'bloqueados' => 'LOWER(TRIM(c.bloqueado)) = "sim"',
-            'atencao' => $notBlocked . ' AND ' . $active . ' AND overdue.login_norm IS NOT NULL',
-            'em_dia' => $notBlocked . ' AND ' . $active . ' AND overdue.login_norm IS NULL',
-            default => throw new \InvalidArgumentException('Situação de cliente desconhecida.'),
-        };
+        $where = $this->situationCondition($situation, ':grace');
         $limit = max(1, min(200, $limit));
         $offset = max(0, $offset);
 
         $rows = $this->fetchAll(
             'SELECT c.id, c.uuid_cliente, c.nome, c.login, c.cpf_cnpj, c.fone, c.celular, c.bairro, c.cidade,
-                    c.estado, c.cep, c.venc, c.plano, c.cli_ativado, c.bloqueado, c.endereco, c.numero,
+                    c.estado, c.cep, c.venc, c.plano, c.cli_ativado, c.bloqueado, c.status_corte, c.endereco, c.numero,
                     c.complemento, c.cadastro, c.last_update, 0 AS online_now,
+                    overdue.overdue_days,
                     COALESCE(NULLIF(p.nome, ""), NULLIF(c.plano, "")) AS plano_nome,
                     p.valor AS plano_valor, p.tecnologia AS plano_tecnologia
              FROM sis_cliente c
@@ -639,10 +632,37 @@ final class MkAuthDatabase implements ClientPlanReadRepository
                 ON LOWER(p.nome) = LOWER(c.plano) OR p.uuid_plano = c.plano
              WHERE c.login IS NOT NULL AND c.login <> "" AND ' . $where . '
              ORDER BY c.nome ASC
-             LIMIT ' . (int) $limit . ' OFFSET ' . (int) $offset
+             LIMIT ' . (int) $limit . ' OFFSET ' . (int) $offset,
+            $situation === 'bloqueados' ? [] : ['grace' => max(0, $graceDays)] // PDO recusa parâmetro não usado
         );
 
-        return array_map(fn (array $row): array => $this->normalizeClientProfileRow($row), $rows);
+        return array_map(function (array $row) use ($graceDays): array {
+            $normalized = $this->normalizeClientProfileRow($row);
+            $normalized['situation_reason'] = self::situationReason($row, $graceDays);
+
+            return $normalized;
+        }, $rows);
+    }
+
+    /** Motivo em texto simples, a partir da linha crua (bloqueado, status_corte, overdue_days). */
+    public static function situationReason(array $row, int $graceDays): string
+    {
+        if (strtolower(trim((string) ($row['bloqueado'] ?? ''))) === 'sim') {
+            return 'Bloqueado';
+        }
+        if (strtolower(trim((string) ($row['status_corte'] ?? ''))) === 'down') {
+            return 'Velocidade reduzida';
+        }
+        $days = $row['overdue_days'] ?? null;
+        if ($days === null || $days === '') {
+            return 'Em dia';
+        }
+        $days = (int) $days;
+        if ($days > $graceDays) {
+            return 'Fatura vencida há ' . $days . ($days === 1 ? ' dia' : ' dias');
+        }
+
+        return 'Em dia (fatura vencida há ' . $days . ($days === 1 ? ' dia, dentro do prazo)' : ' dias, dentro do prazo)');
     }
 
     public function listPlans(int $limit = 300): array
