@@ -35,14 +35,8 @@ final class DashboardController
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $this->resolveViewUser(),
-            'stats' => $this->dashboardStats(),
             'alertTiles' => $this->homeAlertTiles(),
             'recentActivities' => $this->recentInstallationActivities(),
-            'pipeline' => [
-                'Cadastrar novo cliente com fotos e assinatura',
-                'Validar conexão Radius antes de encerrar a instalação',
-                'Consultar evidências pelo link gravado no MkAuth',
-            ],
         ]);
 
         return Response::html($html);
@@ -188,27 +182,6 @@ final class DashboardController
         return $user;
     }
 
-    private function dashboardStats(): array
-    {
-        $pending = 0;
-        $completed = 0;
-
-        foreach ($this->installationRecords() as $record) {
-            if ((string) ($record['status'] ?? '') === 'completed') {
-                $completed++;
-            } else {
-                $pending++;
-            }
-        }
-
-        return [
-            ['label' => 'Instalações pendentes', 'value' => (string) $pending, 'hint' => 'Aguardando validação Radius'],
-            ['label' => 'Instalações finalizadas', 'value' => (string) $completed, 'hint' => 'Com conexão confirmada'],
-            ['label' => 'Evidências locais', 'value' => (string) $this->countEvidenceFolders(), 'hint' => 'Fotos, aceite e assinatura'],
-            ['label' => 'Planos ativos', 'value' => (string) $this->safeMkAuthCount('plans'), 'hint' => 'Carregados do MkAuth'],
-        ];
-    }
-
     private function recentInstallationActivities(): array
     {
         $records = $this->installationRecords();
@@ -251,17 +224,6 @@ final class DashboardController
         }
 
         return $records;
-    }
-
-    private function countEvidenceFolders(): int
-    {
-        $directory = dirname(__DIR__, 2) . '/storage/uploads/clientes';
-
-        if (!is_dir($directory)) {
-            return 0;
-        }
-
-        return count(array_filter(glob($directory . '/*') ?: [], 'is_dir'));
     }
 
     private function safeMkAuthCount(string $type): int

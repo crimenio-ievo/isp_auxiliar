@@ -34,4 +34,11 @@ $i = strpos($db, 'function listClientsBySituation');
 $body = substr($db, $i, 2600);
 $assert(!str_contains($body, 'EXISTS') && !str_contains($body, 'radacct'), 'lista não usa subquery por cliente');
 
+// Home limpa: só os 4 blocos no topo e o "Fluxo do dia" logo abaixo.
+$home = (string) file_get_contents($root . '/backend/Views/dashboard/index.php');
+foreach (['Dashboard de cadastro', 'Usuario atual', 'Integração', 'Rotina recomendada', 'hero-panel'] as $removed) {
+    $assert(!str_contains($home, $removed), "Home ainda contém: {$removed}");
+}
+$assert(strpos($home, 'alert-tiles') < strpos($home, 'Fluxo do dia'), 'blocos ficam acima do Fluxo do dia');
+
 echo "HomeAlertTilesRegression: {$n} checks passed\n";
