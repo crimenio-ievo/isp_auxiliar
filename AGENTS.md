@@ -96,3 +96,6 @@ Manter e evoluir o `isp_auxiliar` como plataforma auxiliar de ISP, separada do M
 - `isp_auxiliar` será o núcleo administrativo.
 - `isp_map2` será integrado futuramente como módulo de mapa.
 - Evitar decisões que dificultem essa integração.
+
+## Roadmap e pendências
+- Antes de qualquer tarefa, ler `docs/ROADMAP_E_PENDENCIAS.md`; ao concluir um item, atualizar o documento no mesmo commit.

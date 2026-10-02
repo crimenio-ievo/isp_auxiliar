@@ -26,3 +26,6 @@
 ## Comunicação
 - Responder em português do Brasil.
 - Distinguir explicitamente fato observado, hipótese e estimativa.
+
+## Roadmap e pendências
+- Antes de qualquer tarefa, ler `docs/ROADMAP_E_PENDENCIAS.md`; ao concluir um item, atualizar o documento no mesmo commit.
