@@ -19,6 +19,9 @@ Atualizado em 2026-10-02.
 7. **Contratos, processos e aceites** agrupados pelo fluxo real.
 8. **Financeiro,** evoluindo aos poucos.
 9. **Atendimento IA:** simulador primeiro; substituir o Evotrix.
+10. **Gestão de equipamentos (registro genérico):** equipamento + perfil por modelo (protocolo, OIDs/escalas, ritmo seguro, confirmação de identidade, capacidades) + coletores genéricos por protocolo. Modelo novo = perfil novo, não código. Configuração de equipamentos só depois da leitura segura, com permissão, aprovação, backup e reversão.
+11. **Gráfico de tráfego por interface/rota (MikroTik)** em tempo quase real. Ranking de consumo por cliente já é possível pelo Radius; não é prioridade.
+12. **ISP Map:** frente própria em chat separado, branch feature/mapa-fase1 (persistência NODE->PORT->LINK, cadastro pela interface, depois vínculo com cliente e equipamento).
 
 ## Pendências técnicas
 
@@ -32,6 +35,8 @@ Atualizado em 2026-10-02.
 - Identidade visual própria (adiada); extrair as cores reais do CSS antes de definir.
 - Botão de IA: painel lateral/tela cheia existe, sem conteúdo (nenhuma chamada de IA). Botão de chat/WhatsApp: ainda só em mockup.
 - Expor em Configurações a tolerância de dias da fatura vencida (home_overdue_grace_days, padrão 5).
+- OLT Hioso 192.168.0.88: houve dois equipamentos respondendo no mesmo IP (sysDescr 'Epon 7104' vs 'unknown'); uma volta ao estado anterior após reboot (provável configuração não salva). Investigar a causa e SALVAR a configuração de IP. Dados coletados antes da correção são inválidos.
+- Regras de coleta: confirmar identidade (sysName 'EPON HIOSO 1' + sysDescr 'unknown') antes de gravar; uma OID por pedido com intervalo; distinguir 'equipamento sem resposta' de 'ONU offline'; ifPhysAddress dessa OLT não traz MAC válido.
 
 ## Segurança (baixa urgência, não esquecer)
 
@@ -39,6 +44,7 @@ Atualizado em 2026-10-02.
 - Senha do banco do .89 exposta em relatório: trocar e verificar se o .86 usa a mesma. Remover /root/.my.cnf do .89.
 - Verificar o conteúdo da pasta backups/ versionada no git.
 - MariaDB do .89 escutando em 0.0.0.0:3306.
+- OLT Hioso com comunidades SNMP e senhas v3 de fábrica (a de escrita permite alterar a OLT): trocar. Não reutilizar senhas do sistema em equipamentos.
 
 ## Regras permanentes
 
