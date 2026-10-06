@@ -10,7 +10,7 @@ Atualizado em 2026-10-02.
 
 ## Prioridades (em ordem)
 
-1. **Interface limpa (casca feita: sem barra superior, busca grande na Home e compacta nas demais, Ctrl K, trilha com usuário/sair; botão de IA com painel "Assistente — em breve" (só interface, sem chamada de IA); login em seguida):** barra de busca única e dominante em todas as telas (estilo Google, base da futura IA); topo mínimo; botão de IA/chat no canto superior esquerdo abrindo painel sob demanda; ISP Map como item da trilha. Implementar só a partir de mockup aprovado.
+1. **Interface limpa (casca feita: sem barra superior, busca grande na Home e compacta nas demais, Ctrl K, trilha com usuário/sair; botão de IA com painel "Assistente — em breve" (só interface, sem chamada de IA); login limpo e centralizado):** barra de busca única e dominante em todas as telas (estilo Google, base da futura IA); topo mínimo; botão de IA/chat no canto superior esquerdo abrindo painel sob demanda; ISP Map como item da trilha. Implementar só a partir de mockup aprovado.
 2. **FEITO (2faa26b) — Regras dos blocos da Home:** vermelho = ativo + bloqueado ou status_corte='down'; amarelo = ativo, não bloqueado, vencido há mais de N dias (padrão 5); em dia = demais ativos; desativados fora.
 3. **ISP Map dentro do ISP_Auxiliar:** subir isp-network-map.html para o .89; banco próprio (NODE -> PORT -> LINK); integrar depois.
 4. **Telemetria:** OLT piloto (V-SOL ou Hioso, a definir), coleta determinística a cada ~5 min, lista de ONUs offline ou com sinal ruim por PON, com o cliente. UISP para a rede de rádio.

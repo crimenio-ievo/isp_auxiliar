@@ -4804,6 +4804,64 @@ button.app-nav__brand {
     }
 }
 
+/* ---------- Login: limpo e centralizado ---------- */
+.login {
+    min-height: 70vh;
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+}
+
+.login__card {
+    width: 100%;
+    max-width: 360px;
+    display: grid;
+    gap: 20px;
+    padding: 28px;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--ink);
+}
+
+.login__brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.login__brand strong {
+    font-size: 18px;
+}
+
+.login__logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: #0c4a36;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.login__form {
+    display: grid;
+    gap: 14px;
+}
+
+.login__form .button {
+    width: 100%;
+    justify-content: center;
+}
+
+.login__form .field-help:empty {
+    display: none;
+}
+
 @page {
     size: A4;
     margin: 12mm;
