@@ -11,7 +11,7 @@ Atualizado em 2026-10-02.
 ## Prioridades (em ordem)
 
 1. **Interface limpa:** barra de busca única e dominante em todas as telas (estilo Google, base da futura IA); topo mínimo; botão de IA/chat no canto superior esquerdo abrindo painel sob demanda; ISP Map como item da trilha. Implementar só a partir de mockup aprovado.
-2. **Regras dos blocos da Home:** vermelho = ativo + bloqueado ou status_corte='down'; amarelo = ativo, não bloqueado, vencido há mais de N dias (padrão 5); em dia = demais ativos; desativados fora.
+2. **FEITO (2faa26b) — Regras dos blocos da Home:** vermelho = ativo + bloqueado ou status_corte='down'; amarelo = ativo, não bloqueado, vencido há mais de N dias (padrão 5); em dia = demais ativos; desativados fora.
 3. **ISP Map dentro do ISP_Auxiliar:** subir isp-network-map.html para o .89; banco próprio (NODE -> PORT -> LINK); integrar depois.
 4. **Telemetria:** OLT piloto (V-SOL ou Hioso, a definir), coleta determinística a cada ~5 min, lista de ONUs offline ou com sinal ruim por PON, com o cliente. UISP para a rede de rádio.
 5. **Chamados + Kanban genérico:** Pendente / Em andamento / Aguardando / Concluído. "Atrasado" é selo, não coluna; "Aguardando" é marcado manualmente, com motivo. Chamados lidos do MkAuth, estado do quadro em tabelas próprias. Substitui o painel do addon appsuporte do MkAuth.
@@ -31,6 +31,7 @@ Atualizado em 2026-10-02.
 - .89 sem banco de teste isolado.
 - Identidade visual própria (adiada); extrair as cores reais do CSS antes de definir.
 - Botão de chat/WhatsApp: hoje só existe em mockup.
+- Expor em Configurações a tolerância de dias da fatura vencida (home_overdue_grace_days, padrão 5).
 
 ## Segurança (baixa urgência, não esquecer)
 
@@ -53,3 +54,5 @@ Atualizado em 2026-10-02.
 ## Visão de futuro
 
 Ecossistema único (agenda, execução de serviço, projetos, atendimento, financeiro), genérico e multiempresa, exportável para outros negócios. Alertas automáticos determinísticos separados da IA como agente.
+
+Blocos da Home com estado de rede (depende de telemetria): vermelho = desconectado ou atraso grave; amarelo = atraso leve ou sinal ruim; azul = pendência para acompanhar (chamado, aceite); verde = em dia e conectado. Blocos personalizáveis por perfil no futuro.
