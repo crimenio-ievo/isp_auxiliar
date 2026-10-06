@@ -8,6 +8,7 @@ use App\Controllers\ContractController;
 use App\Controllers\ClientController;
 use App\Controllers\ClientDocumentController;
 use App\Controllers\DashboardController;
+use App\Controllers\MapController;
 use App\Controllers\OperationalProcessController;
 use App\Controllers\SettingsController;
 use App\Controllers\SystemController;
@@ -88,6 +89,7 @@ return static function (Router $router): void {
     $router->post('/instalacoes/excluir', [SystemController::class, 'deleteInstallation'], 'installations.delete');
     $router->get('/usuarios', [SystemController::class, 'users'], 'users.index');
     $router->post('/usuarios/gestor', [SystemController::class, 'saveManager'], 'users.manager.save');
+    $router->get('/mapa', [MapController::class, 'show'], 'map.show');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');

@@ -1,0 +1,3478 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISP MAP — Gerenciamento de Rede</title>
+<style>
+:root{
+  --bg-app:#0a0d12;
+  --bg-panel:#11151c;
+  --bg-panel-alt:#161b23;
+  --bg-input:#0d1117;
+  --border:#232a35;
+  --border-soft:#1a1f28;
+  --text:#c7d1dc;
+  --text-dim:#7c8798;
+  --text-faint:#4d5666;
+  --accent:#4fd1c5;
+  --accent-dim:#2a6e68;
+  --green:#3fb950;
+  --yellow:#d29922;
+  --red:#f85149;
+  --gray:#6e7681;
+  --font-ui: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-mono: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0;background:var(--bg-app);color:var(--text);font-family:var(--font-ui);font-size:12.5px;overflow:hidden;}
+button{font-family:inherit;}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#2a3140;border-radius:4px;}
+
+#app{display:grid;grid-template-rows:40px 1fr;height:100vh;width:100vw;}
+
+/* ===== TOPBAR ===== */
+#topbar{
+  display:flex;align-items:center;gap:14px;
+  background:var(--bg-panel);border-bottom:1px solid var(--border);
+  padding:0 12px;position:relative;z-index:1200;
+}
+.brand{display:flex;align-items:center;gap:7px;font-weight:700;letter-spacing:.4px;font-size:13px;color:#e6edf3;white-space:nowrap;}
+.brand .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);}
+.kpis{display:flex;gap:2px;align-items:center;}
+.kpi{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:2px 10px;border-right:1px solid var(--border-soft);min-width:52px;cursor:default;
+}
+.kpi:last-child{border-right:none;}
+.kpi b{font-size:13px;font-weight:700;color:#e6edf3;line-height:1.1;font-family:var(--font-mono);}
+.kpi span{font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;}
+.kpi.alert b{color:var(--yellow);}
+.topbar-search{position:relative;flex:1;max-width:320px;margin-left:auto;}
+.topbar-search input{
+  width:100%;background:var(--bg-input);border:1px solid var(--border);color:var(--text);
+  padding:6px 10px 6px 26px;border-radius:4px;font-size:12px;outline:none;
+}
+.topbar-search input:focus{border-color:var(--accent-dim);}
+.topbar-search svg{position:absolute;left:7px;top:50%;transform:translateY(-50%);width:13px;height:13px;stroke:var(--text-dim);pointer-events:none;}
+.search-results{
+  position:absolute;top:32px;left:0;right:0;background:var(--bg-panel-alt);border:1px solid var(--border);
+  border-radius:4px;max-height:260px;overflow-y:auto;display:none;box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+.search-results.show{display:block;}
+.search-item{padding:7px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border-soft);}
+.search-item:hover{background:#1c232e;}
+.search-item small{color:var(--text-dim);font-family:var(--font-mono);}
+
+.btn{
+  background:var(--bg-input);border:1px solid var(--border);color:var(--text);
+  padding:6px 11px;border-radius:4px;cursor:pointer;font-size:11.5px;font-weight:600;
+  display:flex;align-items:center;gap:6px;white-space:nowrap;transition:border-color .1s;
+}
+.btn:hover{border-color:#3a4354;}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#04211f;}
+.btn-accent:hover{background:#66d9cf;}
+.btn-danger{color:var(--red);}
+.btn-ghost{background:transparent;border-color:transparent;}
+.btn-ghost:hover{background:var(--bg-panel-alt);}
+.btn-sm{padding:4px 8px;font-size:10.5px;}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ===== BODY LAYOUT ===== */
+#body{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:1fr;height:100%;min-height:0;position:relative;}
+
+/* ===== LEFT SIDEBAR ===== */
+#sidebar-left{
+  width:190px;background:var(--bg-panel);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;transition:width .15s;overflow:hidden;
+}
+#sidebar-left.collapsed{width:34px;}
+.sb-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border-soft);flex-shrink:0;}
+.sb-header span{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-dim);font-weight:700;}
+#sidebar-left.collapsed .sb-header span,
+#sidebar-left.collapsed .sb-section{display:none;}
+.sb-toggle{cursor:pointer;color:var(--text-dim);background:none;border:none;padding:4px;display:flex;}
+.sb-toggle:hover{color:var(--text);}
+.sb-content{overflow-y:auto;flex:1;padding:6px 0;}
+.sb-section{padding:4px 10px 12px;border-bottom:1px solid var(--border-soft);}
+.sb-section h4{margin:2px 0 6px;font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-faint);font-weight:700;}
+.layer-row{display:flex;align-items:center;gap:7px;padding:4px 2px;border-radius:3px;cursor:pointer;user-select:none;}
+.layer-row:hover{background:var(--bg-panel-alt);}
+.layer-row input{accent-color:var(--accent);width:12px;height:12px;}
+.layer-row .swatch{width:9px;height:9px;border-radius:2px;flex-shrink:0;}
+.layer-row label{flex:1;cursor:pointer;font-size:11.5px;color:var(--text);}
+.layer-row .count{font-family:var(--font-mono);color:var(--text-faint);font-size:10px;}
+
+/* ===== MAP ===== */
+#map-wrap{position:relative;min-width:0;height:100%;min-height:0;}
+#map{width:100%;height:100%;background:#0b0e13;}
+#map{position:relative;overflow:hidden;cursor:grab;
+  background:
+    linear-gradient(rgba(79,209,197,.045) 1px,transparent 1px) 0 0/34px 34px,
+    linear-gradient(90deg,rgba(79,209,197,.045) 1px,transparent 1px) 0 0/34px 34px,
+    #0b0e13;
+}
+#map.panning{cursor:grabbing;}
+#map.crosshair{cursor:crosshair;}
+#map svg{display:block;user-select:none;}
+.mlink{stroke-linecap:round;cursor:pointer;}
+.mlink-hit{stroke:transparent;stroke-width:14;fill:none;cursor:pointer;}
+.mnode{cursor:pointer;}
+.mnode-hit{fill:transparent;}
+.mlabel{fill:#dbe4ee;font-size:9.5px;font-family:var(--font-mono);pointer-events:none;}
+.mlabel.dim{opacity:.15;}
+.mhandle{fill:#4fd1c5;stroke:#04211f;stroke-width:2;cursor:crosshair;}
+.mhandle:hover{fill:#8be9e0;}
+.msnap{fill:none;stroke:#4fd1c5;stroke-width:3;}
+.mtemp{stroke:#4fd1c5;stroke-width:2.5;stroke-dasharray:5,4;fill:none;pointer-events:none;}
+.map-zoom{position:absolute;right:10px;bottom:36px;z-index:700;display:flex;flex-direction:column;gap:4px;}
+.map-zoom button{
+  width:30px;height:30px;border-radius:5px;border:1px solid var(--border);
+  background:rgba(17,21,28,.94);color:var(--text);font-size:16px;font-weight:700;cursor:pointer;line-height:1;
+}
+.map-zoom button:hover{border-color:var(--accent-dim);color:#fff;}
+
+#mode-banner{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:900;
+  background:var(--accent);color:#04211f;padding:6px 14px;border-radius:5px;font-weight:700;font-size:11.5px;
+  display:none;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(0,0,0,.4);
+}
+#mode-banner.show{display:flex;}
+#mode-banner button{background:rgba(0,0,0,.15);border:none;color:#04211f;border-radius:3px;padding:2px 8px;cursor:pointer;font-weight:700;font-size:10.5px;}
+
+.map-legend{
+  position:absolute;bottom:10px;left:10px;z-index:600;background:rgba(17,21,28,.92);border:1px solid var(--border);
+  border-radius:5px;padding:8px 10px;font-size:10.5px;color:var(--text-dim);display:flex;gap:12px;
+}
+.map-legend .lg-item{display:flex;align-items:center;gap:5px;}
+.map-legend .lg-dot{width:8px;height:8px;border-radius:50%;}
+
+.map-attrib{position:absolute;bottom:10px;right:10px;z-index:600;font-size:9.5px;color:var(--text-faint);background:rgba(17,21,28,.7);padding:2px 6px;border-radius:3px;}
+.map-fit-btn{position:absolute;top:10px;right:10px;z-index:700;background:rgba(17,21,28,.94);}
+.map-basemap{position:absolute;top:10px;right:150px;z-index:700;}
+.map-basemap select{
+  background:rgba(17,21,28,.94);border:1px solid var(--border);color:var(--text);
+  border-radius:4px;padding:6px 8px;font-size:11.5px;font-family:inherit;outline:none;cursor:pointer;
+}
+.map-basemap select:focus{border-color:var(--accent-dim);}
+.mtile{image-rendering:auto;}
+#map.has-tiles{background:#0b0e13;}
+.tile-warning{
+  position:absolute;bottom:34px;left:50%;transform:translateX(-50%);z-index:700;
+  background:rgba(210,153,34,.14);border:1px solid rgba(210,153,34,.35);color:#e8c874;
+  padding:6px 12px;border-radius:5px;font-size:11px;display:none;max-width:420px;text-align:center;line-height:1.45;
+}
+.tile-warning.show{display:block;}
+
+/* custom leaflet icon wrapper */
+.node-icon{display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--bg-panel);cursor:pointer;transition:transform .1s;}
+.node-icon:hover{transform:scale(1.12);}
+.node-icon.dimmed{opacity:.18;}
+.node-icon.selected{box-shadow:0 0 0 3px rgba(79,209,197,.55);}
+.node-icon svg{width:62%;height:62%;}
+.node-label{
+  font-size:9.5px;color:#dbe4ee;background:rgba(10,13,18,.72);padding:0 4px;border-radius:2px;
+  white-space:nowrap;font-family:var(--font-mono);pointer-events:none;
+}
+.node-label.dimmed{opacity:.15;}
+
+/* ===== CONNECTOR HANDLES (drag-to-link) ===== */
+.connector-handle{
+  position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;
+  background:var(--accent);border:2px solid #04211f;cursor:crosshair;z-index:750;
+  box-shadow:0 0 0 3px rgba(79,209,197,.25);pointer-events:auto;
+}
+.connector-handle:hover{background:#8be9e0;transform:scale(1.15);}
+#connector-drag-svg{position:absolute;inset:0;pointer-events:none;z-index:740;display:none;}
+#connector-drag-svg.active{display:block;}
+#connector-drag-svg line{stroke:var(--accent);stroke-width:2.5;stroke-dasharray:5,4;}
+.node-icon.snap-target{box-shadow:0 0 0 4px rgba(79,209,197,.85),0 0 16px 4px rgba(79,209,197,.6)!important;transform:scale(1.2);}
+.connect-hint{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:900;
+  background:#04211f;color:var(--accent);border:1px solid var(--accent-dim);padding:4px 12px;
+  border-radius:5px;font-size:10.5px;font-weight:600;display:none;pointer-events:none;
+}
+.connect-hint.show{display:block;}
+
+/* ===== DIAGRAMA UNIFILAR (nível 2) ===== */
+.diagram-overlay{position:fixed;inset:0;background:var(--bg-app);z-index:2500;display:none;flex-direction:column;}
+.diagram-overlay.show{display:flex;}
+.diagram-head{
+  display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
+  border-bottom:1px solid var(--border);background:var(--bg-panel);flex-shrink:0;
+}
+.diagram-eyebrow{font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);font-weight:700;}
+.diagram-title{font-size:15px;font-weight:700;color:#eef2f6;}
+.diagram-grid{flex:1;display:grid;grid-template-columns:220px 1fr 260px;min-height:0;}
+.diagram-col{overflow-y:auto;padding:12px;}
+.diagram-col-cables{border-right:1px solid var(--border-soft);background:var(--bg-panel);}
+.diagram-col-info{border-left:1px solid var(--border-soft);background:var(--bg-panel);}
+.diagram-col-canvas{padding:0;background:
+  linear-gradient(var(--border-soft) 1px,transparent 1px) 0 0/100% 28px,
+  linear-gradient(90deg,var(--border-soft) 1px,transparent 1px) 0 0/28px 100%,
+  var(--bg-app);display:flex;align-items:center;justify-content:center;}
+.diagram-col-canvas svg{width:100%;height:100%;}
+.cable-block{margin-bottom:14px;}
+.cable-block h5{margin:0 0 2px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-faint);font-weight:700;}
+.cable-meta{font-size:9.5px;color:var(--text-faint);font-family:var(--font-mono);margin-bottom:6px;}
+.tube-head{display:flex;align-items:center;gap:6px;margin:7px 0 3px;font-size:9.5px;text-transform:uppercase;
+  letter-spacing:.4px;color:var(--text-dim);font-weight:700;border-top:1px solid var(--border-soft);padding-top:6px;}
+.fiber-row{display:flex;align-items:center;gap:7px;padding:3px 5px;border-radius:3px;cursor:pointer;font-size:11px;}
+.fiber-row:hover{background:var(--bg-panel-alt);}
+.fiber-row.selected{background:rgba(79,209,197,.14);}
+.fiber-swatch{width:10px;height:10px;border-radius:50%;border:1px solid rgba(255,255,255,.25);flex-shrink:0;}
+.fiber-row .fn{font-family:var(--font-mono);color:var(--text-faint);width:16px;}
+.fiber-row .fs{margin-left:auto;font-size:9px;color:var(--text-faint);text-transform:uppercase;}
+.diagram-empty{padding:40px 16px;text-align:center;color:var(--text-faint);font-size:11.5px;line-height:1.6;}
+.diagram-tools{display:flex;align-items:center;gap:6px;}
+.dg-joinsel{display:flex;align-items:center;gap:4px;margin-right:6px;}
+.dg-joinsel label{font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-faint);font-weight:700;}
+.dg-joinsel .btn.active{background:var(--accent);border-color:var(--accent);color:#04211f;}
+.diagram-hint{
+  padding:5px 16px;font-size:11px;border-bottom:1px solid var(--border-soft);
+  background:var(--bg-panel-alt);color:var(--text-dim);display:none;
+}
+.diagram-hint.show{display:block;}
+.diagram-hint b{color:var(--accent);}
+.diagram-hint.locked{color:var(--yellow);background:rgba(210,153,34,.08);}
+.diagram-col-canvas{overflow:auto;align-items:flex-start;}
+/* ---- editor: blocos de cabo, pinos de fibra, splitters ---- */
+.cbox{fill:var(--bg-panel-alt);stroke:var(--border);stroke-width:1.5;}
+.cbox-title{fill:#eef2f6;font-size:11.5px;font-weight:700;font-family:var(--font-ui);}
+.cbox-sub{fill:var(--text-faint);font-size:9.5px;font-family:var(--font-mono);}
+.fpin{cursor:pointer;}
+.fpin-ring{stroke-width:2;}
+.fpin-num{font-size:8.5px;font-weight:700;font-family:var(--font-mono);pointer-events:none;}
+.fpin.sel .fpin-ring{stroke:#4fd1c5;stroke-width:3.5;}
+.fpin-label{fill:var(--text-dim);font-size:9px;font-family:var(--font-mono);pointer-events:none;}
+.dconn{fill:none;stroke-width:2.2;cursor:pointer;}
+.dconn:hover{stroke-width:4;}
+.dconn.sel{stroke:#4fd1c5!important;stroke-width:4;}
+.dconn.dim{opacity:.12;}
+.dconn.hl{stroke-width:4;filter:drop-shadow(0 0 3px rgba(79,209,197,.7));}
+.spl{cursor:pointer;}
+.spl-body{fill:#1b2430;stroke:#4fd1c5;stroke-width:1.6;}
+.spl.sel .spl-body{stroke-width:3;}
+.spl-label{font-size:10px;font-weight:700;font-family:var(--font-mono);pointer-events:none;}
+.spl-kind{font-size:8px;font-weight:700;letter-spacing:.5px;font-family:var(--font-ui);pointer-events:none;opacity:.8;}
+.emenda-lbl{fill:#c7d1dc;font-size:8.5px;font-family:var(--font-mono);pointer-events:none;}
+.emenda-lbl.conn{fill:#e8c874;}
+.emenda-lbl.pass{fill:#6e7681;font-style:italic;}
+.fpin-label.nofeed{fill:#4d5666;font-style:italic;}
+.dblock{cursor:grab;}
+.dblock:active{cursor:grabbing;}
+.diagram-col-canvas{position:relative;}
+.dg-zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:4px;z-index:5;}
+.dg-zoom button{
+  width:28px;height:28px;border-radius:5px;border:1px solid var(--border);
+  background:rgba(17,21,28,.95);color:var(--text);font-size:14px;cursor:pointer;line-height:1;
+}
+.dg-zoom button:hover{border-color:var(--accent-dim);color:#fff;}
+.pwr{fill:#7fd6cd;font-size:9px;font-family:var(--font-mono);pointer-events:none;}
+.pwr.bad{fill:var(--yellow);}
+.pwr.nosig{fill:#6e7681;font-style:italic;}
+.legend-chip{display:inline-flex;align-items:center;gap:4px;margin-right:9px;font-size:10px;color:var(--text-dim);}
+.legend-chip i{width:9px;height:9px;border-radius:50%;display:inline-block;}
+.spl-preview{margin-top:8px;background:var(--bg-input);border:1px solid var(--border-soft);border-radius:5px;padding:8px 9px;}
+.spl-preview .prev-title{font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-faint);font-weight:700;margin-bottom:5px;}
+.spl-preview .prev-row{display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono);padding:1.5px 0;}
+.spl-preview .prev-row b{color:#7fd6cd;}
+.spl-preview .prev-row b.bad{color:var(--yellow);}
+.spl-preview .prev-warn{margin-top:5px;font-size:10.5px;color:var(--yellow);}
+.spl-preview .muted{font-size:10.5px;color:var(--text-faint);}
+.diag-line{cursor:pointer;transition:opacity .15s;}
+.diag-line.dim{opacity:.12;}
+.diag-line.hl{stroke-width:4.5!important;filter:drop-shadow(0 0 3px rgba(79,209,197,.7));}
+.diag-node-box{fill:var(--bg-panel-alt);stroke:var(--border);stroke-width:1.5;}
+.diag-label{fill:#c7d1dc;font-size:10px;font-family:var(--font-ui);}
+.diag-label-bold{fill:#eef2f6;font-size:11px;font-weight:700;font-family:var(--font-ui);}
+.diag-plug{cursor:pointer;}
+.diag-plug.selected{filter:drop-shadow(0 0 4px rgba(79,209,197,.9));}
+@media (max-width:760px){
+  .diagram-grid{grid-template-columns:1fr;grid-template-rows:auto 1fr auto;}
+  .diagram-col-cables{border-right:none;border-bottom:1px solid var(--border-soft);max-height:120px;}
+  .diagram-col-info{border-left:none;border-top:1px solid var(--border-soft);max-height:160px;}
+  #panel-right{position:fixed;right:0;top:40px;bottom:0;z-index:1300;}
+  #sidebar-left{position:fixed;left:0;top:40px;bottom:0;z-index:1300;}
+}
+
+/* ===== RIGHT PANEL ===== */
+#panel-right{
+  width:300px;background:var(--bg-panel);border-left:1px solid var(--border);
+  display:none;flex-direction:column;overflow:hidden;
+}
+#panel-right.show{display:flex;}
+.panel-head{padding:11px 12px 9px;border-bottom:1px solid var(--border-soft);flex-shrink:0;}
+.panel-head-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.panel-type-tag{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);font-weight:700;margin-bottom:3px;}
+.panel-title{font-size:15px;font-weight:700;color:#eef2f6;line-height:1.25;}
+.panel-close{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;padding:0 2px;line-height:1;}
+.panel-close:hover{color:var(--text);}
+.status-pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;margin-top:7px;text-transform:uppercase;letter-spacing:.3px;}
+.status-pill .d{width:6px;height:6px;border-radius:50%;}
+.st-normal{background:rgba(63,185,80,.13);color:var(--green);}
+.st-normal .d{background:var(--green);}
+.st-alerta{background:rgba(210,153,34,.14);color:var(--yellow);}
+.st-alerta .d{background:var(--yellow);}
+.st-critico{background:rgba(248,81,73,.14);color:var(--red);}
+.st-critico .d{background:var(--red);}
+.st-offline{background:rgba(110,118,129,.16);color:var(--gray);}
+.st-offline .d{background:var(--gray);}
+
+.panel-body{flex:1;overflow-y:auto;padding:10px 12px 16px;}
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:12px;}
+.field{display:flex;flex-direction:column;gap:2px;}
+.field.full{grid-column:1/-1;}
+.field label{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);font-weight:700;}
+.field .val{font-size:12.5px;color:var(--text);font-family:var(--font-mono);}
+.field .val.big{font-size:15px;font-weight:700;color:#eef2f6;}
+
+.section-title{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);font-weight:700;margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--border-soft);}
+.section-title:first-child{margin-top:0;padding-top:0;border-top:none;}
+
+.port-list{display:flex;flex-direction:column;gap:3px;}
+.port-row{
+  display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg-input);border-radius:3px;border:1px solid var(--border-soft);
+  cursor:default;
+}
+.port-row .pn{width:16px;text-align:center;font-family:var(--font-mono);color:var(--text-faint);font-size:10.5px;flex-shrink:0;}
+.port-row .pd{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.port-row .pl{flex:1;font-size:11.5px;color:var(--text);}
+.port-row .pf{font-size:9.5px;color:var(--text-faint);}
+.port-row.occ .pd{background:var(--green);}
+.port-row.free .pd{background:var(--text-faint);}
+.port-row.free .pl{color:var(--text-faint);font-style:italic;}
+.port-row.alerta .pd{background:var(--yellow);}
+
+.pon-card{background:var(--bg-input);border:1px solid var(--border-soft);border-radius:5px;padding:8px 9px;margin-bottom:6px;}
+.pon-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+.pon-card-head b{font-size:11.5px;font-family:var(--font-mono);color:#eef2f6;}
+.usage-bar{height:5px;border-radius:3px;background:#1c232e;overflow:hidden;margin-top:5px;}
+.usage-bar > div{height:100%;border-radius:3px;}
+
+.action-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;}
+.action-row .btn{flex:1;min-width:80px;justify-content:center;}
+
+.alert-box{display:flex;gap:8px;align-items:flex-start;padding:8px 9px;border-radius:5px;font-size:11.5px;line-height:1.4;}
+.alert-box.none{background:rgba(63,185,80,.08);color:var(--text-dim);}
+.alert-box.has{background:rgba(210,153,34,.1);color:#e8c874;border:1px solid rgba(210,153,34,.25);}
+
+.empty-state{padding:30px 14px;text-align:center;color:var(--text-faint);font-size:11.5px;}
+
+/* form fields (edit / add) */
+.form-field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
+.form-field label{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);font-weight:700;}
+.form-field input,.form-field select,.form-field textarea{
+  background:var(--bg-input);border:1px solid var(--border);color:var(--text);border-radius:4px;
+  padding:7px 8px;font-size:12px;font-family:inherit;outline:none;resize:vertical;
+}
+.form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:var(--accent-dim);}
+
+/* ===== MODAL ===== */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(4,6,9,.6);z-index:3200;display:none;align-items:center;justify-content:center;
+}
+.modal-overlay.show{display:flex;}
+.modal{width:340px;max-height:82vh;overflow-y:auto;background:var(--bg-panel-alt);border:1px solid var(--border);border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.55);}
+.modal-head{padding:13px 15px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;}
+.modal-head h3{margin:0;font-size:13.5px;color:#eef2f6;}
+.modal-body{padding:14px 15px;}
+.modal-foot{padding:11px 15px;border-top:1px solid var(--border-soft);display:flex;justify-content:flex-end;gap:8px;}
+.type-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
+.type-opt{
+  display:flex;flex-direction:column;align-items:center;gap:5px;padding:11px 4px;border:1px solid var(--border);
+  border-radius:6px;background:var(--bg-input);cursor:pointer;color:var(--text-dim);
+}
+.type-opt:hover{border-color:var(--accent-dim);color:var(--text);}
+.type-opt svg{width:20px;height:20px;}
+.type-opt span{font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;font-weight:700;}
+
+/* toast */
+.ctxmenu{
+  position:fixed;z-index:3600;min-width:200px;max-width:280px;background:var(--bg-panel-alt);
+  border:1px solid var(--border);border-radius:6px;padding:5px;display:none;
+  box-shadow:0 12px 34px rgba(0,0,0,.6);
+  max-height:min(70vh,520px);overflow-y:auto;overscroll-behavior:contain;
+}
+.ctxmenu.show{display:block;}
+.ctxmenu-item svg{width:14px;height:14px;flex-shrink:0;opacity:.85;}
+.ctxmenu-item span{overflow:hidden;text-overflow:ellipsis;}
+.ctxmenu-head{position:sticky;top:-5px;background:var(--bg-panel-alt);z-index:1;}
+.ctxmenu-head{
+  padding:5px 9px 6px;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--text-faint);font-weight:700;border-bottom:1px solid var(--border-soft);margin-bottom:4px;
+}
+.ctxmenu-item{
+  display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:4px;
+  cursor:pointer;font-size:11.5px;color:var(--text);white-space:nowrap;
+}
+.ctxmenu-item:hover{background:#1e2530;}
+.ctxmenu-item.danger{color:var(--red);}
+.ctxmenu-item.disabled{color:var(--text-faint);cursor:default;}
+.ctxmenu-item.disabled:hover{background:transparent;}
+.ctxmenu-sep{height:1px;background:var(--border-soft);margin:4px 0;}
+.ctxmenu-item kbd{margin-left:auto;font-size:9px;color:var(--text-faint);font-family:var(--font-mono);}
+
+#toast{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(20px);z-index:3400;
+  background:#1c232e;border:1px solid var(--border);color:var(--text);padding:9px 16px;border-radius:6px;font-size:12px;
+  opacity:0;transition:all .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.4);
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+.add-menu{position:absolute;top:38px;right:12px;z-index:1500;background:var(--bg-panel-alt);border:1px solid var(--border);border-radius:6px;box-shadow:0 12px 30px rgba(0,0,0,.5);display:none;padding:6px;min-width:170px;}
+.add-menu.show{display:block;}
+.add-menu-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:4px;cursor:pointer;font-size:11.5px;color:var(--text);}
+.add-menu-item:hover{background:#1e2530;}
+.add-menu-item svg{width:15px;height:15px;flex-shrink:0;opacity:.8;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== TOPBAR ===== -->
+  <div id="topbar">
+    <div class="brand"><span class="dot" id="net-status-dot"></span> ISP MAP</div>
+    <div class="kpis">
+      <div class="kpi"><b id="kpi-pop">–</b><span>POPs</span></div>
+      <div class="kpi"><b id="kpi-cto">–</b><span>CTOs</span></div>
+      <div class="kpi"><b id="kpi-clients">–</b><span>Clientes</span></div>
+      <div class="kpi"><b id="kpi-links">–</b><span>Links</span></div>
+      <div class="kpi alert"><b id="kpi-alerts">–</b><span>Alertas</span></div>
+    </div>
+    <div class="topbar-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+      <input id="search-input" type="text" placeholder="Buscar elemento, cliente, ID..." autocomplete="off">
+      <div class="search-results" id="search-results"></div>
+    </div>
+    <button class="btn" id="btn-filters-toggle" title="Alternar painel de filtros">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+      Filtros
+    </button>
+    <button class="btn btn-accent" id="btn-add">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Adicionar
+    </button>
+  </div>
+
+  <div id="add-menu" class="add-menu"></div>
+
+  <!-- ===== BODY ===== -->
+  <div id="body">
+
+    <!-- LEFT SIDEBAR -->
+    <div id="sidebar-left">
+      <div class="sb-header">
+        <span>Camadas &amp; Filtros</span>
+        <button class="sb-toggle" id="sb-collapse-btn" title="Recolher">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
+      <div class="sb-content" id="sb-content"></div>
+    </div>
+
+    <!-- MAP -->
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="mode-banner"><span id="mode-banner-text"></span><button id="mode-banner-cancel">CANCELAR (ESC)</button></div>
+      <div class="map-legend">
+        <div class="lg-item"><div class="lg-dot" style="background:var(--green)"></div>Normal</div>
+        <div class="lg-item"><div class="lg-dot" style="background:var(--yellow)"></div>Atenção</div>
+        <div class="lg-item"><div class="lg-dot" style="background:var(--red)"></div>Crítico</div>
+        <div class="lg-item"><div class="lg-dot" style="background:var(--gray)"></div>Offline</div>
+      </div>
+      <div class="map-attrib">Protótipo — dados fictícios</div>
+      <div class="map-basemap">
+        <select id="sel-basemap" title="Mapa base"></select>
+      </div>
+      <button class="btn map-fit-btn" id="btn-fit" title="Enquadrar toda a rede">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V4h5M21 9V4h-5M3 15v5h5M21 15v5h-5"/></svg>
+        Enquadrar rede
+      </button>
+      <div class="connect-hint" id="connect-hint">Solte sobre o elemento destacado para conectar</div>
+      <div class="tile-warning" id="tile-warning"></div>
+      <div class="map-zoom">
+        <button id="btn-zoom-in" title="Aproximar">+</button>
+        <button id="btn-zoom-out" title="Afastar">−</button>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div id="panel-right"></div>
+  </div>
+</div>
+
+<!-- ===== DIAGRAMA UNIFILAR (nível 2) ===== -->
+<div class="diagram-overlay" id="diagram-overlay">
+  <div class="diagram-head">
+    <div>
+      <div class="diagram-eyebrow">Diagrama unifilar</div>
+      <div class="diagram-title" id="diagram-title">—</div>
+    </div>
+    <div class="diagram-tools">
+      <span class="dg-joinsel" id="dg-joinsel">
+        <label>Emenda:</label>
+        <button class="btn btn-sm active" data-join="fusao">Fusão</button>
+        <button class="btn btn-sm" data-join="conector">Conector</button>
+      </span>
+      <button class="btn btn-sm" id="dg-add-cable">+ Cabo</button>
+      <button class="btn btn-sm" id="dg-add-splitter">+ Splitter</button>
+      <button class="btn btn-sm" id="dg-role" title="Alternar perfil">Admin</button>
+      <button class="btn" id="diagram-back">← Voltar ao mapa</button>
+    </div>
+  </div>
+  <div class="diagram-hint" id="diagram-hint"></div>
+  <div class="diagram-grid">
+    <div class="diagram-col diagram-col-cables" id="diagram-cables"></div>
+    <div class="diagram-col diagram-col-canvas">
+      <svg id="diagram-svg" viewBox="0 0 960 560" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="dg-zoom">
+        <button id="dg-zoom-in" title="Aproximar">+</button>
+        <button id="dg-zoom-out" title="Afastar">−</button>
+        <button id="dg-fit" title="Enquadrar">⤢</button>
+        <button id="dg-reset-pos" title="Restaurar posições dos blocos">⟲</button>
+      </div>
+    </div>
+    <div class="diagram-col diagram-col-info" id="diagram-info"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-el"></div>
+</div>
+
+<div id="ctxmenu" class="ctxmenu"></div>
+
+<div id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   ICONS (SVG paths por tipo de elemento)
+   ============================================================ */
+const ICON_PATHS = {
+  pop:      '<rect x="3" y="3" width="18" height="18" rx="1.5"/><rect x="6.5" y="6.5" width="4" height="4"/><rect x="13.5" y="6.5" width="4" height="4"/><rect x="6.5" y="13.5" width="4" height="4"/><rect x="13.5" y="13.5" width="4" height="4"/>',
+  olt:      '<rect x="2" y="7" width="20" height="10" rx="1.5"/><circle cx="6.3" cy="12" r="1.3"/><circle cx="10.4" cy="12" r="1.3"/><circle cx="14.5" cy="12" r="1.3"/><circle cx="18.6" cy="12" r="1.3"/>',
+  switch:   '<rect x="2" y="9" width="20" height="8" rx="1.5"/><line x1="5.5" y1="9" x2="5.5" y2="4"/><line x1="10" y1="9" x2="10" y2="4"/><line x1="14.5" y1="9" x2="14.5" y2="4"/><line x1="19" y1="9" x2="19" y2="4"/>',
+  tower:    '<line x1="12" y1="1.5" x2="12" y2="22.5"/><line x1="6" y1="22.5" x2="12" y2="3.5"/><line x1="18" y1="22.5" x2="12" y2="3.5"/><line x1="8.3" y1="14.5" x2="15.7" y2="14.5"/><line x1="9.4" y1="9" x2="14.6" y2="9"/>',
+  radio:    '<circle cx="12" cy="17" r="1.8"/><line x1="12" y1="15.2" x2="12" y2="7"/><path d="M8 10.3a5.6 5.6 0 0 1 8 0"/><path d="M5 6.6a10 10 0 0 1 14 0"/>',
+  cto:      '<rect x="3.5" y="6" width="17" height="13" rx="1.5"/><line x1="3.5" y1="11" x2="20.5" y2="11"/><line x1="8" y1="11" x2="8" y2="19"/><line x1="12" y1="11" x2="12" y2="19"/><line x1="16" y1="11" x2="16" y2="19"/>',
+  splitter: '<path d="M3 12h5.5L15 5.5"/><path d="M8.5 12L15 18.5"/><path d="M15 5.5h6"/><path d="M15 18.5h6"/>',
+  client:   '<path d="M12 3 L21 10.5 V21 H3 V10.5 Z"/><rect x="9.7" y="13.5" width="4.6" height="7.5"/>',
+  ceo:      '<rect x="2.5" y="8.5" width="19" height="7" rx="3.5"/><circle cx="7" cy="12" r="1.15"/><circle cx="12" cy="12" r="1.15"/><circle cx="17" cy="12" r="1.15"/>'
+};
+const TYPE_LABEL = {pop:'POP',olt:'OLT',switch:'Switch',tower:'Torre',radio:'Rádio/AP',cto:'CTO',splitter:'Splitter',client:'Cliente',ceo:'CEO'};
+const TYPE_ORDER = ['pop','tower','olt','switch','radio','ceo','cto','splitter','client'];
+const STATUS_COLOR = {normal:'#3fb950',alerta:'#d29922',critico:'#f85149',offline:'#6e7681',livre:'#3a4353'};
+const STATUS_LABEL = {normal:'Online / Normal',alerta:'Atenção',critico:'Crítico',offline:'Offline',livre:'Livre'};
+const ICON_SIZE = {pop:30,tower:30,olt:26,switch:24,radio:22,ceo:22,cto:20,splitter:16,client:17};
+const FIBER_COLOR_HEX = {'Azul':'#3b82f6','Laranja':'#f97316','Verde':'#22c55e','Marrom':'#92400e','Cinza':'#9ca3af','Violeta':'#a855f7','Branco':'#f1f5f9','Vermelho':'#ef4444','Preto':'#111827','Amarelo':'#eab308','Rosa':'#ec4899','Aqua':'#06b6d4'};
+// Sequência de cores padrão ABNT (usada no Brasil). A fibra 6 = Violeta bate com o
+// exemplo que você descreveu, o que indica que sua rede segue esta sequência.
+const FIBER_COLOR_ORDER = ['Verde','Amarelo','Branco','Azul','Vermelho','Violeta','Marrom','Rosa','Preto','Cinza','Laranja','Aqua'];
+const FIBERS_PER_TUBE = 12;
+function tubeOf(numero){ return Math.floor((numero-1)/FIBERS_PER_TUBE)+1; }
+function tubeColor(numero){ return FIBER_COLOR_ORDER[(tubeOf(numero)-1)%FIBER_COLOR_ORDER.length]; }
+function isCoarsePointer(){ return window.matchMedia && window.matchMedia('(pointer: coarse)').matches; }
+
+const LINK_TYPE_LABEL = {backbone:'Backbone (fibra)',distribuicao:'Distribuição (fibra)',drop:'Drop (fibra)',ethernet:'Ethernet',wireless:'Enlace rádio'};
+const LINK_TYPE_STYLE = {
+  backbone:    {weight:4.5, dash:null,  color:'#5aa9ff'},
+  distribuicao:{weight:2.6, dash:null,  color:'#4fd1c5'},
+  drop:        {weight:1.6, dash:null,  color:'#7c8798'},
+  ethernet:    {weight:2,   dash:'2,4', color:'#8a92a3'},
+  wireless:    {weight:2,   dash:'6,5', color:'#c58cf2'}
+};
+
+function nodeIconSVG(type, color, size){
+  return `<g transform="translate(${-size/2},${-size/2}) scale(${size/24})" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">${ICON_PATHS[type]}</g>`;
+}
+
+/* ============================================================
+   GERAÇÃO DE DADOS MOCK (nodes / ports / links)
+   Estrutura estável: cada nó tem id único; portas referenciam nodeId;
+   links referenciam nodeId + portId (nunca por nome).
+   ============================================================ */
+let nodes = [], ports = [], links = [];
+let cables = [], fiberStrands = [], splitters = [], connections = [], measurements = [];
+let _nid=1,_pid=1,_lid=1,_cid=1,_fid=1,_spid=1,_cnid=1,_mid=1;
+const nid=()=> 'n'+(_nid++);
+const pid=()=> 'p'+(_pid++);
+const lid=()=> 'l'+(_lid++);
+const cid=()=> 'cb'+(_cid++);
+const fid=()=> 'fs'+(_fid++);
+const spid=()=> 'sp'+(_spid++);
+const cnid=()=> 'cn'+(_cnid++);
+const mid=()=> 'ms'+(_mid++);
+
+function addNode(type,name,lat,lng,status,extra){
+  const n = Object.assign({id:nid(),type,name,lat,lng,status:status||'normal',parent:null,parentLink:null},extra||{});
+  nodes.push(n);
+  return n;
+}
+function addPort(nodeId,label,status,extra){
+  const p = Object.assign({id:pid(),nodeId,label,status:status||'livre'},extra||{});
+  ports.push(p);
+  return p;
+}
+
+/* Redimensiona a bandeja de uma CTO. Aumentar é seguro: só acrescenta posições
+   vagas no fim. Diminuir remove as posições numeradas mais altas — bloqueado
+   se alguma delas tiver cliente (preserva o que funciona; não apaga cliente
+   em silêncio). Junto com a porta removida, some qualquer emenda que apontava
+   pra ela, senão fica ligação órfã no diagrama. Devolve true se aplicou. */
+function redimensionarPortasCTO(n, novaCap){
+  const atuais = portsOf(n.id).slice().sort((a,b)=>
+    parseInt(a.label.replace('Porta ',''),10) - parseInt(b.label.replace('Porta ',''),10));
+  if(novaCap > atuais.length){
+    for(let i=atuais.length+1;i<=novaCap;i++) addPort(n.id,'Porta '+i,'livre');
+    n.capacity = novaCap;
+    toast('Portas '+(atuais.length+1)+'–'+novaCap+' adicionadas.');
+    return true;
+  }
+  if(novaCap === atuais.length) return true;
+  const remover = atuais.slice(novaCap);              // as posições mais altas
+  const comCliente = remover.filter(p=>p.clientName);
+  if(comCliente.length){
+    alert('Não é possível reduzir para '+novaCap+' portas: '+
+      comCliente.map(p=>p.label+' — '+p.clientName).join(', ')+
+      ' ainda '+(comCliente.length>1?'têm':'tem')+' cliente. Migre ou remova o(s) cliente(s) primeiro.');
+    return false;
+  }
+  const idsRemover = new Set(remover.map(p=>p.id));
+  connections = connections.filter(cn=>
+    !(cn.origem.type==='port' && idsRemover.has(cn.origem.id)) &&
+    !(cn.destino.type==='port' && idsRemover.has(cn.destino.id)));
+  ports = ports.filter(p=>!idsRemover.has(p.id));
+  n.capacity = novaCap;
+  toast('Portas '+(novaCap+1)+'–'+atuais.length+' removidas.');
+  return true;
+}
+function addLink(type,fromNode,toNode,status,extra){
+  extra = Object.assign({}, extra||{});
+  const cableMeta = extra.cableMeta; delete extra.cableMeta;
+  const l = Object.assign({id:lid(),type,from:fromNode.id,to:toNode.id,status:status||'normal'},extra);
+  links.push(l);
+  toNode.parent = fromNode.id;
+  toNode.parentLink = l.id;
+  if(cableMeta) addCable(l, cableMeta.nome, cableMeta.tipo, cableMeta.totalFibras, cableMeta.coresOcupadas);
+  return l;
+}
+
+/* ---- infraestrutura óptica: CABLE / FIBER_STRAND / SPLITTER / CONNECTION / MEASUREMENT ---- */
+function addCable(linkOrNull, nome, tipo, totalFibras, overrides){
+  const codigo = 'CB-'+String(cables.length+1).padStart(3,'0');
+  const c = {id:cid(), codigo, linkId: linkOrNull?linkOrNull.id:null, nome, tipo, totalFibras, localAtNode:null};
+  cables.push(c);
+  for(let i=1;i<=totalFibras;i++){
+    // A cor se repete a cada tubo: a fibra 13 volta a ser Verde, no tubo 2.
+    const corPadrao = FIBER_COLOR_ORDER[(i-1)%FIBERS_PER_TUBE%FIBER_COLOR_ORDER.length];
+    const ov = (overrides||[]).find(o=>o.numero===i);
+    fiberStrands.push({
+      id:fid(), cableId:c.id, numero:i,
+      cor: ov&&ov.cor?ov.cor:corPadrao,
+      tubo: tubeOf(i), tuboCor: tubeColor(i),
+      status: ov?(ov.status||'livre'):'livre'
+    });
+  }
+  return c;
+}
+function fiberIn(cable, numero){ return fiberStrands.find(f=>f.cableId===cable.id && f.numero===numero); }
+function cablesAtNode(nodeId){
+  return cables.filter(c=>{
+    if(c.localAtNode===nodeId) return true;
+    const l = links.find(x=>x.id===c.linkId);
+    return l && (l.from===nodeId || l.to===nodeId);
+  });
+}
+// balanceado=false: saidas = percentuais (ex.: [10,90] num tap 10/90)
+// balanceado=true:  saidas = quantidade de vias (ex.: 8 num 1x8)
+function addSplitter(nodeId, razao, saidas, balanceado){
+  const s = {id:spid(), nodeId, razao, balanceado:!!balanceado, ports:[]};
+  s.ports.push({id:s.id+'-in', splitterId:s.id, papel:'entrada'});
+  const lista = balanceado ? Array.from({length:saidas},(_,i)=>i+1) : saidas;
+  lista.forEach((v,idx)=> s.ports.push({
+    id:s.id+'-out'+v, splitterId:s.id, papel:'saida',
+    percentual: balanceado?null:v, indice: idx+1
+  }));
+  splitters.push(s);
+  return s;
+}
+function splitterOutLabel(p, s){ return s.balanceado ? ('S'+p.indice) : (p.percentual+'%'); }
+function splitterPortById(portId){
+  for(const s of splitters){ const p=s.ports.find(pp=>pp.id===portId); if(p) return {port:p, splitter:s}; }
+  return null;
+}
+function addConnection(nodeId, tipo, origem, destino){
+  const c = {id:cnid(), nodeId, tipo, origem, destino};
+  connections.push(c);
+  return c;
+}
+function addMeasurement(targetType, targetId, kind, valorDbm, extra){
+  measurements.push(Object.assign({id:mid(), targetType, targetId, kind, valorDbm}, extra||{}));
+  return measurements[measurements.length-1];
+}
+function measurementsFor(targetId){ return measurements.filter(m=>m.targetId===targetId); }
+
+function buildNetwork(){
+  // ---- POPs ----
+  const popCentral = addNode('pop','POP Central', -21.0025,-42.8375,'normal',{ip:'192.168.0.1',desc:'POP principal — backbone e core.'});
+  const popNorte   = addNode('pop','POP Norte',   -20.9752,-42.8300,'normal',{ip:'192.168.1.1',desc:'POP secundário, atende zona norte.'});
+  const popSul     = addNode('pop','POP Sul',     -21.0300,-42.8452,'normal',{ip:'192.168.2.1',desc:'POP secundário, atende zona sul e área rural.'});
+
+  addLink('backbone', popCentral, popNorte, 'normal', {label:'Backbone Central–Norte'});
+  addLink('backbone', popCentral, popSul,   'normal', {label:'Backbone Central–Sul'});
+  // backbone links não devem sobrescrever "parent" de topo — mantemos POPs como raízes
+  popNorte.parent = null; popNorte.parentLink = null;
+  popSul.parent = null; popSul.parentLink = null;
+
+  // ---- OLT-01 (POP Central) ----
+  const olt01 = addNode('olt','OLT-01', -21.0032,-42.8384,'normal',{ip:'192.168.10.20',
+    pons:[
+      {ponId:'PON 1', onus:5, power:-18.3, status:'normal'},
+      {ponId:'PON 2', onus:2, power:-26.5, status:'alerta'},
+      {ponId:'PON 3', onus:0, power:null, status:'livre'},
+      {ponId:'PON 4', onus:0, power:null, status:'livre'}
+    ]});
+  addLink('ethernet', popCentral, olt01, 'normal', {label:'Uplink OLT-01'});
+
+  // ---- OLT-02 (POP Norte) ----
+  const olt02 = addNode('olt','OLT-02', -20.9758,-42.8308,'normal',{ip:'192.168.11.20',
+    pons:[
+      {ponId:'PON 1', onus:3, power:-19.8, status:'normal'},
+      {ponId:'PON 2', onus:1, power:-21.0, status:'normal'},
+      {ponId:'PON 3', onus:0, power:null, status:'livre'},
+      {ponId:'PON 4', onus:0, power:null, status:'livre'}
+    ]});
+  addLink('ethernet', popNorte, olt02, 'normal', {label:'Uplink OLT-02'});
+
+  // ---- Switch (POP Sul) ----
+  const swSul = addNode('switch','SW-SUL-01', -21.0308,-42.8458,'normal',{ip:'192.168.12.10', ports24:24, used:6});
+  addLink('ethernet', popSul, swSul, 'normal', {label:'Uplink SW-SUL-01'});
+
+  // ---- Torres + Rádios (PTP) ----
+  const torreNorte = addNode('tower','Torre Norte', -20.9598,-42.8148,'normal',{altura:'42m'});
+  addLink('wireless', popCentral, torreNorte, 'normal', {label:'PTP Central–Torre Norte',freq:'5.8GHz',distancia:'4.1km',sinal:-58});
+
+  const torreSul = addNode('tower','Torre Sul', -21.0502,-42.8602,'normal',{altura:'36m'});
+  addLink('wireless', popSul, torreSul, 'normal', {label:'PTP Sul–Torre Sul',freq:'5.8GHz',distancia:'2.6km',sinal:-61});
+
+  const apRural01 = addNode('radio','AP Rural 01', -20.9600,-42.8145,'normal',{ip:'192.168.20.11',ssid:'ISP-RURAL-01',freq:'5.8GHz',clientesMax:30});
+  addLink('ethernet', torreNorte, apRural01, 'normal', {label:'Setor A'});
+
+  const apRural02 = addNode('radio','AP Rural 02', -20.9596,-42.8151,'normal',{ip:'192.168.20.12',ssid:'ISP-RURAL-02',freq:'2.4GHz',clientesMax:30});
+  addLink('ethernet', torreNorte, apRural02, 'normal', {label:'Setor B'});
+
+  const apSul01 = addNode('radio','AP Sul 01', -21.0500,-42.8598,'normal',{ip:'192.168.21.11',ssid:'ISP-SUL-01',freq:'5.8GHz',clientesMax:30});
+  addLink('ethernet', torreSul, apSul01, 'normal', {label:'Setor A'});
+
+  const apSul02 = addNode('radio','AP Sul 02', -21.0504,-42.8606,'offline',{ip:'192.168.21.12',ssid:'ISP-SUL-02',freq:'2.4GHz',clientesMax:30});
+  addLink('ethernet', torreSul, apSul02, 'offline', {label:'Setor B'});
+
+  // ---- CEO-01 / CEO-02 (caixas de emenda — infraestrutura óptica) ----
+  const ceo01 = addNode('ceo','CEO-01', -21.0048,-42.8398,'normal',{desc:'Caixa de emenda — fusão + splitter 10/90.'});
+  const linkOltCeo1 = addLink('distribuicao', olt01, ceo01, 'normal', {label:'CEO-01 via PON 1', pon:'PON 1',
+    cableMeta:{nome:'CABO-01', tipo:'12FO', totalFibras:12, coresOcupadas:[{numero:6,status:'ocupada'}]}});
+  const cable01 = cables.find(c=>c.linkId===linkOltCeo1.id);
+  const cable02 = addCable(null, 'CABO-02', '12FO', 12, [{numero:2,status:'ocupada'}]);
+  cable02.localAtNode = ceo01.id;
+
+  const ceo02 = addNode('ceo','CEO-02', -21.0074,-42.8424,'normal',{desc:'Caixa de emenda — passagem direta (sem splitter).'});
+  const linkCeo1Ceo2 = addLink('distribuicao', ceo01, ceo02, 'normal', {label:'CEO-01 → CEO-02',
+    cableMeta:{nome:'CABO-03', tipo:'24FO', totalFibras:24, coresOcupadas:[{numero:4,status:'ocupada'},{numero:15,status:'reservada'}]}});
+  const cable03 = cables.find(c=>c.linkId===linkCeo1Ceo2.id);
+
+  // ---- CTOs ----
+  // Cada CTO recebe um cabo de chegada, um splitter balanceado e as conexões
+  // internas fibra → splitter → portas. É isso que permite abrir o diagrama dela.
+  function makeCTO(name,lat,lng,status,parentEquip,ponId,capacity){
+    const cap = capacity||8;
+    const c = addNode('cto',name,lat,lng,status,{capacity:cap, powerIn: -16 - Math.random()*4});
+    const l = addLink('distribuicao', parentEquip, c, status==='offline'?'offline':'normal', {
+      label:name+' via '+(ponId||'uplink'), pon:ponId||null,
+      cableMeta:{nome:'CABO '+name, tipo:'6FO', totalFibras:6, coresOcupadas:[{numero:1,status:'ocupada'}]}
+    });
+    const cab = cables.find(x=>x.linkId===l.id);
+    const portList = [];
+    for(let i=1;i<=cap;i++) portList.push(addPort(c.id, 'Porta '+i, 'livre'));
+    const sp = addSplitter(c.id, '1x'+cap, cap, true);
+    addConnection(c.id, 'splitter_in', {type:'fiber', id: fiberIn(cab,1).id}, {type:'splitterPort', id: sp.id+'-in'});
+    sp.ports.filter(p=>p.papel==='saida').forEach((p,i)=>{
+      addConnection(c.id, 'splitter_out', {type:'splitterPort', id:p.id}, {type:'port', id: portList[i].id});
+    });
+    return c;
+  }
+  const cto01 = makeCTO('CTO-01', -21.0062,-42.8412,'normal', ceo01, null);
+  const cto02 = makeCTO('CTO-02', -21.0082,-42.8432,'normal', ceo02, null);
+  const cto03 = makeCTO('CTO-03', -21.0002,-42.8342,'normal', olt01, 'PON 2');
+  const cto04 = makeCTO('CTO-04', -20.9782,-42.8332,'normal', olt02, 'PON 1');
+  const cto05 = makeCTO('CTO-05', -20.9802,-42.8352,'alerta', olt02, 'PON 1');
+  const cto06 = makeCTO('CTO-06', -20.9722,-42.8282,'normal', olt02, 'PON 2');
+  const cto07 = makeCTO('CTO-07', -21.0332,-42.8482,'normal', swSul, null);
+  const cto08 = makeCTO('CTO-08', -21.0352,-42.8502,'normal', swSul, null);
+
+  // ---- Clientes fibra (ligados a portas de CTO) ----
+  function jitter(v){ return v + (Math.random()-0.5)*0.0025; }
+  function fiberClient(name,cto,portNum,plano,status){
+    status = status || 'normal';
+    const cl = addNode('client', name, jitter(cto.lat), jitter(cto.lng), status, {
+      plano, tecnologia:'Fibra (GPON)', equipamento:'ONU '+ (Math.random()>0.5?'Huawei HG8245':'Fiberhome AN5506'),
+      sinal: status==='offline' ? null : Math.round((-19 - Math.random()*8)*10)/10,
+      lastSeen: status==='offline' ? 'há 2 dias' : 'há 2 min'
+    });
+    const port = ports.find(p=>p.nodeId===cto.id && p.label==='Porta '+portNum);
+    if(port){ port.status = status==='offline' ? 'alerta' : 'ocupada'; port.clientId = cl.id; port.clientName = name; }
+    addLink('drop', cto, cl, status, {label:'Drop '+name, portLabel:'Porta '+portNum});
+    return cl;
+  }
+  fiberClient('João Pereira', cto01, 1, '300 Mbps', 'normal');
+  fiberClient('Maria Souza',  cto01, 2, '300 Mbps', 'normal');
+  fiberClient('Carlos Nunes', cto01, 5, '200 Mbps', 'offline');
+  fiberClient('Ana Ribeiro',  cto02, 1, '500 Mbps', 'normal');
+  fiberClient('Pedro Alves',  cto02, 3, '300 Mbps', 'normal');
+  fiberClient('Lucas Martins',cto03, 1, '300 Mbps', 'normal');
+  fiberClient('Beatriz Lima', cto03, 2, '200 Mbps', 'normal');
+  fiberClient('Fernanda Dias',cto04, 1, '300 Mbps', 'normal');
+  fiberClient('Rafael Costa', cto04, 4, '300 Mbps', 'normal');
+  fiberClient('Gustavo Melo', cto05, 1, '200 Mbps', 'alerta');
+  fiberClient('Juliana Rocha',cto06, 1, '500 Mbps', 'normal');
+
+  // ---- Clientes rádio ----
+  function radioClient(name,ap,plano,sinal,status){
+    status = status || 'normal';
+    const cl = addNode('client', name, jitter(ap.lat+0.004), jitter(ap.lng+0.004), status, {
+      plano, tecnologia:'Rádio', equipamento:'CPE Ubiquiti LiteBeam',
+      sinal, lastSeen: status==='offline' ? 'há 5 horas' : 'há 1 min'
+    });
+    addLink('wireless', ap, cl, status, {label:'Acesso '+name});
+    return cl;
+  }
+  radioClient('Fazenda Boa Vista', apRural01, '10 Mbps', -63, 'normal');
+  radioClient('Fazenda Santa Rita', apRural01, '10 Mbps', -67, 'normal');
+  radioClient('Fazenda Três Irmãos', apRural02, '10 Mbps', -71, 'alerta');
+  radioClient('Sítio Alegre', apSul01, '15 Mbps', -59, 'normal');
+
+  // ---- Splitter + fusão + connections dentro da CEO-01 (exemplo trabalhado) ----
+  const linkCeo1Cto1 = links.find(l=>l.from===ceo01.id && l.to===cto01.id);
+  const linkCeo2Cto2 = links.find(l=>l.from===ceo02.id && l.to===cto02.id);
+  const splCeo1 = addSplitter(ceo01.id, '10/90', [10,90]);
+  addConnection(ceo01.id, 'fusao', {type:'fiber', id: fiberIn(cable01,6).id}, {type:'fiber', id: fiberIn(cable02,2).id});
+  addConnection(ceo01.id, 'splitter_in', {type:'fiber', id: fiberIn(cable02,2).id}, {type:'splitterPort', id: splCeo1.id+'-in'});
+  const cabCeo1Cto1 = cables.find(x=>x.linkId===linkCeo1Cto1.id);
+  addConnection(ceo01.id, 'splitter_out', {type:'splitterPort', id: splCeo1.id+'-out10'}, {type:'fiber', id: fiberIn(cabCeo1Cto1,1).id});
+  addConnection(ceo01.id, 'splitter_out', {type:'splitterPort', id: splCeo1.id+'-out90'}, {type:'fiber', id: fiberIn(cable03,4).id});
+  // CEO-02: passagem direta (sem splitter) — demonstra o tipo de conexão "passante"
+  const cabCeo2Cto2 = cables.find(x=>x.linkId===linkCeo2Cto2.id);
+  addConnection(ceo02.id, 'passante', {type:'fiber', id: fiberIn(cable03,4).id}, {type:'fiber', id: fiberIn(cabCeo2Cto2,1).id});
+
+  // ---- Potência: calculada × medida (campo) ----
+  addMeasurement('node', cto01.id, 'calculado', -19.5);
+  addMeasurement('node', cto01.id, 'medido', -20.1, {data:'14/08/2026', tecnico:'Carlos (campo)', equipamento:'Power meter EXFO FOT-930'});
+  addMeasurement('node', cto05.id, 'calculado', -21.0);
+  addMeasurement('node', cto05.id, 'medido', -27.4, {data:'02/09/2026', tecnico:'Marcos (campo)', equipamento:'Power meter EXFO FOT-930', observacao:'Sinal bem abaixo do esperado — possível perda extra na fusão ou splitter fora da faixa.'});
+
+  return {popCentral,popNorte,popSul};
+}
+buildNetwork();
+
+/* ============================================================
+   MAPA — renderizador SVG próprio (sem biblioteca externa)
+   Projeção equiretangular simples. lat/lng continuam sendo a verdade dos dados;
+   a projeção é só a forma de desenhar. Trocar por tiles reais depois é direto.
+   ============================================================ */
+const mapEl = document.getElementById('map');
+
+/* --- Projeção Web Mercator (mesma dos tiles de OSM/Google/Esri) ---
+   Mundo normalizado em [0,1]. view.scale = pixels por unidade de mundo,
+   equivalente a 256 * 2^zoom. Isso permite casar os tiles pixel a pixel. */
+function lngToWorldX(lng){ return (lng+180)/360; }
+function latToWorldY(lat){
+  const s = Math.sin(lat*Math.PI/180);
+  return 0.5 - Math.log((1+s)/(1-s))/(4*Math.PI);
+}
+function worldXToLng(x){ return x*360-180; }
+function worldYToLat(y){ return Math.atan(Math.sinh(Math.PI*(1-2*y)))*180/Math.PI; }
+
+const MIN_SCALE = 256*Math.pow(2,3), MAX_SCALE = 256*Math.pow(2,20);
+let view = {cx:0.5, cy:0.5, scale:256*Math.pow(2,13)};
+let mapW = 900, mapH = 700;
+
+function toScreen(lat,lng){
+  return { x:(lngToWorldX(lng)-view.cx)*view.scale + mapW/2,
+           y:(latToWorldY(lat)-view.cy)*view.scale + mapH/2 };
+}
+function toLatLng(sx,sy){
+  const wx=(sx-mapW/2)/view.scale+view.cx, wy=(sy-mapH/2)/view.scale+view.cy;
+  return { lat:worldYToLat(wy), lng:worldXToLng(wx) };
+}
+function measureMap(){
+  const r = mapEl.getBoundingClientRect();
+  if(r.width>0)  mapW = r.width;
+  if(r.height>0) mapH = r.height;
+}
+function currentZoom(){ return Math.log(view.scale/256)/Math.LN2; }
+
+/* --- Mapas base disponíveis ---
+   Trocar de provedor é só acrescentar uma entrada aqui. O Google exige
+   chave de API e contrato próprio, por isso fica registrado mas desativado. */
+const BASEMAPS = {
+  none:   {label:'Grade técnica (sem mapa)', url:null, attrib:'Protótipo — dados fictícios', dark:true},
+  osm:    {label:'OpenStreetMap (ruas)',
+           url:(z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+           attrib:'© OpenStreetMap contributors', maxZoom:19, dim:0.72},
+  dark:   {label:'Mapa escuro (Carto)',
+           url:(z,x,y)=>`https://basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`,
+           attrib:'© OpenStreetMap · © CARTO', maxZoom:19, dim:1, dark:true},
+  sat:    {label:'Satélite (Esri)',
+           url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+           attrib:'© Esri, Maxar, Earthstar Geographics', maxZoom:19, dim:0.85}
+};
+let basemap = 'osm';
+let tileErrors = 0, tileTried = 0;
+
+function renderTiles(parts){
+  const bm = BASEMAPS[basemap];
+  if(!bm || !bm.url) return;
+  let z = Math.round(currentZoom());
+  z = Math.max(0, Math.min(bm.maxZoom||19, z));
+  const n = Math.pow(2,z);
+  const tileScreen = view.scale/n;                       // tamanho do tile na tela
+  const x0 = Math.floor((view.cx - (mapW/2)/view.scale)*n);
+  const x1 = Math.floor((view.cx + (mapW/2)/view.scale)*n);
+  const y0 = Math.floor((view.cy - (mapH/2)/view.scale)*n);
+  const y1 = Math.floor((view.cy + (mapH/2)/view.scale)*n);
+  if((x1-x0+1)*(y1-y0+1) > 400) return;                  // proteção contra excesso
+  parts.push(`<g opacity="${bm.dim||1}">`);
+  for(let ty=y0; ty<=y1; ty++){
+    if(ty<0||ty>=n) continue;
+    for(let tx=x0; tx<=x1; tx++){
+      const wx = ((tx%n)+n)%n;
+      const sx = (tx/n - view.cx)*view.scale + mapW/2;
+      const sy = (ty/n - view.cy)*view.scale + mapH/2;
+      tileTried++;
+      parts.push(`<image class="mtile" href="${bm.url(z,wx,ty)}" x="${sx}" y="${sy}" width="${tileScreen+1}" height="${tileScreen+1}" preserveAspectRatio="none" onerror="window.__tileFail&&window.__tileFail()"/>`);
+    }
+  }
+  parts.push('</g>');
+}
+
+function setBasemap(key){
+  basemap = key;
+  tileErrors = 0; tileTried = 0;
+  const bm = BASEMAPS[key];
+  mapEl.classList.toggle('has-tiles', !!bm.url);
+  const at = document.querySelector('.map-attrib');
+  if(at) at.textContent = bm.url ? bm.attrib : 'Protótipo — dados fictícios';
+  renderAll();
+}
+
+let selectedNodeId = null;
+let selectedLinkId = null;
+let linkPoint = null;   // {linkId, lat, lng} — marcador deixado por um clique esquerdo na fibra
+let pathHighlight = null;
+let activeTypeFilters = new Set(TYPE_ORDER);
+let activeLinkFilters = new Set(Object.keys(LINK_TYPE_LABEL));
+let alertsOnly = false;
+
+/* ---- estado de edição/criação ---- */
+let mode = 'idle';     // idle | placing | linking-dest
+let placingType = null;
+let linkOrigin = null;
+
+function nodeById(id){ return nodes.find(n=>n.id===id); }
+function linkById(id){ return links.find(l=>l.id===id); }
+function portsOf(nodeId){ return ports.filter(p=>p.nodeId===nodeId); }
+function linksOfNode(nodeId){ return links.filter(l=>l.from===nodeId || l.to===nodeId); }
+
+function nodeVisible(n){
+  if(!activeTypeFilters.has(n.type)) return false;
+  if(alertsOnly && !(n.status==='alerta'||n.status==='critico'||n.status==='offline')) return false;
+  return true;
+}
+function linkVisible(l){
+  if(!activeLinkFilters.has(l.type)) return false;
+  const a=nodeById(l.from), b=nodeById(l.to);
+  if(!a||!b) return false;
+  if(!activeTypeFilters.has(a.type) || !activeTypeFilters.has(b.type)) return false;
+  if(alertsOnly && !(l.status==='alerta'||l.status==='critico'||l.status==='offline')) return false;
+  return true;
+}
+
+function fitToNetwork(){
+  measureMap();
+  let pts = nodes.filter(n=> n.type!=='client' && nodeVisible(n));
+  if(!pts.length) pts = nodes.filter(nodeVisible);
+  if(!pts.length) return;
+  const xs = pts.map(n=>lngToWorldX(n.lng)), ys = pts.map(n=>latToWorldY(n.lat));
+  const minX=Math.min.apply(null,xs), maxX=Math.max.apply(null,xs);
+  const minY=Math.min.apply(null,ys), maxY=Math.max.apply(null,ys);
+  view.cx=(minX+maxX)/2; view.cy=(minY+maxY)/2;
+  const pad=70;
+  const sx=(mapW-pad*2)/Math.max(1e-9,maxX-minX);
+  const sy=(mapH-pad*2)/Math.max(1e-9,maxY-minY);
+  let s=Math.min(sx,sy);
+  if(!isFinite(s)||s<=0) s=256*Math.pow(2,13);
+  view.scale=Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+  renderAll();
+}
+function zoomBy(factor, ax, ay){
+  measureMap();
+  if(ax===undefined) ax=mapW/2;
+  if(ay===undefined) ay=mapH/2;
+  const before = toLatLng(ax,ay);
+  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, view.scale*factor));
+  const after = toLatLng(ax,ay);
+  view.cx += lngToWorldX(before.lng)-lngToWorldX(after.lng);
+  view.cy += latToWorldY(before.lat)-latToWorldY(after.lat);
+  renderAll();
+}
+
+/* ---- render ---- */
+function renderAll(){
+  measureMap();
+  const parts = [];
+  parts.push(`<svg id="map-svg" width="${mapW}" height="${mapH}" viewBox="0 0 ${mapW} ${mapH}">`);
+  renderTiles(parts);
+
+  // links (abaixo dos nós)
+  links.forEach(l=>{
+    if(!linkVisible(l)) return;
+    const a=nodeById(l.from), b=nodeById(l.to);
+    const st = LINK_TYPE_STYLE[l.type];
+    let color=st.color, opacity=.85, weight=st.weight;
+    if(l.status==='offline') color=STATUS_COLOR.offline;
+    if(l.status==='critico') color=STATUS_COLOR.critico;
+    if(pathHighlight){
+      if(pathHighlight.linkIds.has(l.id)){ opacity=1; weight=st.weight+1.5; color='#4fd1c5'; }
+      else opacity=.08;
+    } else if(selectedLinkId){
+      if(l.id===selectedLinkId){ opacity=1; weight=st.weight+1.5; color='#4fd1c5'; }
+      else opacity=.12;
+    }
+    const p1=toScreen(a.lat,a.lng), p2=toScreen(b.lat,b.lng);
+    const dash = st.dash ? `stroke-dasharray="${st.dash}"` : '';
+    parts.push(`<line class="mlink-hit" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"/>`);
+    parts.push(`<line class="mlink" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${weight}" opacity="${opacity}" ${dash}/>`);
+  });
+
+  // nós
+  nodes.forEach(n=>{
+    if(!nodeVisible(n)) return;
+    const p = toScreen(n.lat,n.lng);
+    if(p.x<-120||p.x>mapW+120||p.y<-120||p.y>mapH+120) return;   // fora da tela: não desenha
+    const dim = pathHighlight && !pathHighlight.nodeIds.has(n.id);
+    const size = ICON_SIZE[n.type]||18;
+    const r = size/2+5;
+    const color = STATUS_COLOR[n.status]||'#8a92a3';
+    const op = dim ? .18 : 1;
+    parts.push(`<g class="mnode" data-node="${n.id}" transform="translate(${p.x},${p.y})" opacity="${op}">`);
+    parts.push(`<circle class="mnode-hit" r="${r+8}"/>`);
+    if(n.id===selectedNodeId) parts.push(`<circle r="${r+4}" fill="none" stroke="#4fd1c5" stroke-width="2.5" opacity=".75"/>`);
+    parts.push(`<circle r="${r}" fill="#11151c" stroke="${color}" stroke-width="2"/>`);
+    parts.push(nodeIconSVG(n.type, color, size*0.62));
+    parts.push(`</g>`);
+    if(['pop','olt','switch','tower','cto','ceo'].includes(n.type)){
+      parts.push(`<text class="mlabel${dim?' dim':''}" x="${p.x+r+6}" y="${p.y+4}">${escapeHtml(n.name)}</text>`);
+    }
+  });
+
+  // conectores visuais do nó selecionado (arrastar para criar link)
+  if(mode==='idle' && selectedNodeId){
+    const n = nodeById(selectedNodeId);
+    if(n && nodeVisible(n)){
+      const p = toScreen(n.lat,n.lng);
+      [[0,-32],[32,0],[0,32],[-32,0]].forEach(o=>{
+        parts.push(`<circle class="mhandle" data-handle="${n.id}" cx="${p.x+o[0]}" cy="${p.y+o[1]}" r="6"><title>Arraste até outro elemento para conectar</title></circle>`);
+      });
+    }
+  }
+  if(linkPoint){
+    const lpL = linkById(linkPoint.linkId);
+    if(lpL && linkVisible(lpL)){
+      const pm = toScreen(linkPoint.lat, linkPoint.lng);
+      parts.push(`<circle class="mlinkpoint" cx="${pm.x}" cy="${pm.y}" r="6" fill="#4fd1c5" stroke="#0b0e13" stroke-width="2"/>`);
+    }
+  }
+  parts.push(`<g id="overlay-temp"></g>`);
+  parts.push('</svg>');
+  mapEl.innerHTML = parts.join('');
+  updateKPIs();
+  renderSidebar();
+}
+
+/* ---- interação (pointer events: funciona com mouse e toque) ---- */
+let ptr = null;
+function localPt(e){
+  const r = mapEl.getBoundingClientRect();
+  return {x:e.clientX-r.left, y:e.clientY-r.top};
+}
+function snapTargetAt(x,y,excludeId){
+  let best=null, bestD=34;
+  nodes.forEach(n=>{
+    if(n.id===excludeId || !nodeVisible(n)) return;
+    const p=toScreen(n.lat,n.lng);
+    const d=Math.hypot(p.x-x,p.y-y);
+    if(d<bestD){ bestD=d; best=n.id; }
+  });
+  return best;
+}
+function drawTemp(html){
+  const g = document.getElementById('overlay-temp');
+  if(g) g.innerHTML = html;
+}
+
+mapEl.addEventListener('pointerdown', (e)=>{
+  if(e.button===2 || e.button===1) return;   // direito/meio: não inicia pan, arraste nem seleção
+  const t = e.target;
+  const handle = t.closest ? t.closest('.mhandle') : null;
+  const nodeG  = t.closest ? t.closest('.mnode') : null;
+  const linkEl = t.closest ? t.closest('.mlink-hit, .mlink') : null;
+  const p = localPt(e);
+  if(handle){
+    ptr = {kind:'connect', originId:handle.getAttribute('data-handle'), x0:p.x, y0:p.y, moved:false, snap:null};
+  } else if(nodeG){
+    ptr = {kind:'node', id:nodeG.getAttribute('data-node'), x0:p.x, y0:p.y, moved:false};
+  } else if(linkEl){
+    ptr = {kind:'link', id:linkEl.getAttribute('data-link'), x0:p.x, y0:p.y, moved:false, ll:toLatLng(p.x,p.y)};
+  } else {
+    ptr = {kind:'pan', x0:p.x, y0:p.y, cx0:view.cx, cy0:view.cy, moved:false};
+  }
+  try{ mapEl.setPointerCapture(e.pointerId); }catch(err){}
+});
+
+mapEl.addEventListener('pointermove', (e)=>{
+  if(!ptr) return;
+  const p = localPt(e);
+  const dist = Math.hypot(p.x-ptr.x0, p.y-ptr.y0);
+  if(dist>4) ptr.moved = true;
+  if(ptr.kind==='pan' && ptr.moved){
+    mapEl.classList.add('panning');
+    view.cx = ptr.cx0 - (p.x-ptr.x0)/view.scale;
+    view.cy = ptr.cy0 - (p.y-ptr.y0)/view.scale;
+    renderAll();
+  } else if(ptr.kind==='node' && ptr.moved && ptr.id===selectedNodeId){
+    const ll = toLatLng(p.x,p.y);
+    const n = nodeById(ptr.id);
+    n.lat = ll.lat; n.lng = ll.lng;
+    renderAll();
+  } else if(ptr.kind==='connect'){
+    const origin = nodeById(ptr.originId);
+    const o = toScreen(origin.lat, origin.lng);
+    ptr.snap = snapTargetAt(p.x, p.y, ptr.originId);
+    let html = `<line class="mtemp" x1="${o.x}" y1="${o.y}" x2="${p.x}" y2="${p.y}"/>`;
+    if(ptr.snap){
+      const sn = nodeById(ptr.snap), sp = toScreen(sn.lat,sn.lng);
+      const rr = (ICON_SIZE[sn.type]||18)/2+11;
+      html += `<circle class="msnap" cx="${sp.x}" cy="${sp.y}" r="${rr}"/>`;
+    }
+    drawTemp(html);
+    connectHint.classList.toggle('show', !!ptr.snap);
+  }
+});
+
+mapEl.addEventListener('pointerup', (e)=>{
+  if(!ptr) return;
+  const p = localPt(e);
+  const st = ptr; ptr = null;
+  mapEl.classList.remove('panning');
+  connectHint.classList.remove('show');
+  try{ mapEl.releasePointerCapture(e.pointerId); }catch(err){}
+
+  if(st.kind==='connect'){
+    drawTemp('');
+    if(st.snap) openLinkTypeModal(nodeById(st.originId), nodeById(st.snap));
+    else renderAll();
+    return;
+  }
+  if(st.moved){ if(st.kind==='node') toast('Posição atualizada.'); return; }
+
+  // clique simples
+  if(mode==='placing'){
+    openCreateModal(placingType, toLatLng(p.x,p.y));
+    return;
+  }
+  if(st.kind==='node'){ onNodeClick(st.id); return; }
+  if(mode==='linking-dest') return;
+  if(st.kind==='link'){ onLinkPointClick(st.id, st.ll); return; }
+  if(selectedNodeId||selectedLinkId||pathHighlight) closePanel();
+});
+
+mapEl.addEventListener('pointercancel', ()=>{ ptr=null; drawTemp(''); mapEl.classList.remove('panning'); });
+mapEl.addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  const p = localPt(e);
+  zoomBy(e.deltaY<0 ? 1.18 : 1/1.18, p.x, p.y);
+}, {passive:false});
+
+function centerOn(n, targetScale){
+  view.cx = lngToWorldX(n.lng); view.cy = latToWorldY(n.lat);
+  if(targetScale) view.scale = targetScale;
+  renderAll();
+}
+
+/* ============================================================
+   KPIs / TOPBAR
+   ============================================================ */
+function updateKPIs(){
+  document.getElementById('kpi-pop').textContent = nodes.filter(n=>n.type==='pop').length;
+  document.getElementById('kpi-cto').textContent = nodes.filter(n=>n.type==='cto').length;
+  document.getElementById('kpi-clients').textContent = nodes.filter(n=>n.type==='client').length;
+  document.getElementById('kpi-links').textContent = links.length;
+  const alertCount = nodes.filter(n=> n.status==='alerta'||n.status==='critico'||n.status==='offline').length;
+  document.getElementById('kpi-alerts').textContent = alertCount;
+  const dot = document.getElementById('net-status-dot');
+  dot.style.background = alertCount>0 ? 'var(--yellow)' : 'var(--green)';
+  dot.style.boxShadow = alertCount>0 ? '0 0 6px var(--yellow)' : '0 0 6px var(--green)';
+}
+
+/* ============================================================
+   SIDEBAR ESQUERDA — filtros / camadas
+   ============================================================ */
+function renderSidebar(){
+  const c = document.getElementById('sb-content');
+  const typeCounts = {};
+  TYPE_ORDER.forEach(t=> typeCounts[t] = nodes.filter(n=>n.type===t).length);
+
+  let html = '<div class="sb-section"><h4>Elementos</h4>';
+  TYPE_ORDER.forEach(t=>{
+    const checked = activeTypeFilters.has(t) ? 'checked' : '';
+    html += `<div class="layer-row" data-type="${t}">
+      <input type="checkbox" ${checked} data-filter-type="${t}">
+      <div class="swatch" style="background:${STATUS_COLOR.normal}22;border:1.5px solid ${STATUS_COLOR.normal}"></div>
+      <label>${TYPE_LABEL[t]}</label>
+      <span class="count">${typeCounts[t]}</span>
+    </div>`;
+  });
+  html += '</div>';
+
+  html += '<div class="sb-section"><h4>Enlaces</h4>';
+  Object.keys(LINK_TYPE_LABEL).forEach(t=>{
+    const checked = activeLinkFilters.has(t) ? 'checked' : '';
+    const cnt = links.filter(l=>l.type===t).length;
+    html += `<div class="layer-row">
+      <input type="checkbox" ${checked} data-filter-link="${t}">
+      <div class="swatch" style="background:${LINK_TYPE_STYLE[t].color}"></div>
+      <label>${LINK_TYPE_LABEL[t]}</label>
+      <span class="count">${cnt}</span>
+    </div>`;
+  });
+  html += '</div>';
+
+  html += `<div class="sb-section"><h4>Estado</h4>
+    <div class="layer-row"><input type="checkbox" id="chk-alerts-only" ${alertsOnly?'checked':''}>
+      <div class="swatch" style="background:${STATUS_COLOR.alerta}"></div>
+      <label for="chk-alerts-only">Somente alertas / offline</label>
+    </div>
+  </div>`;
+
+  c.innerHTML = html;
+
+  c.querySelectorAll('[data-filter-type]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const t = cb.getAttribute('data-filter-type');
+      if(cb.checked) activeTypeFilters.add(t); else activeTypeFilters.delete(t);
+      renderAll();
+    });
+  });
+  c.querySelectorAll('[data-filter-link]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const t = cb.getAttribute('data-filter-link');
+      if(cb.checked) activeLinkFilters.add(t); else activeLinkFilters.delete(t);
+      renderAll();
+    });
+  });
+  const chkAlerts = document.getElementById('chk-alerts-only');
+  if(chkAlerts) chkAlerts.addEventListener('change', ()=>{ alertsOnly = chkAlerts.checked; renderAll(); });
+}
+
+document.getElementById('sb-collapse-btn').addEventListener('click', ()=>{
+  document.getElementById('sidebar-left').classList.toggle('collapsed');
+});
+document.getElementById('btn-filters-toggle').addEventListener('click', ()=>{
+  document.getElementById('sidebar-left').classList.toggle('collapsed');
+});
+
+/* Dica visual do arraste de conexão (usada pelo motor de pointer events do mapa) */
+const connectHint = document.getElementById('connect-hint');
+
+/* ============================================================
+   PAINEL DIREITO — detalhes por tipo
+   ============================================================ */
+function statusPill(status){
+  return `<span class="status-pill st-${status}"><span class="d"></span>${STATUS_LABEL[status]||status}</span>`;
+}
+
+function onNodeClick(nodeId){
+  if(mode==='placing') return; // ignora cliques em nós durante posicionamento
+  if(mode==='linking-dest'){
+    if(nodeId===linkOrigin.id){ toast('Selecione um nó diferente da origem.'); return; }
+    openLinkTypeModal(linkOrigin, nodeById(nodeId));
+    return;
+  }
+  selectedLinkId = null;
+  selectedNodeId = nodeId;
+  pathHighlight = null;
+  renderAll();
+  openNodePanel(nodeId);
+}
+function onLinkClick(linkId){
+  if(mode!=='idle') return;
+  selectedNodeId = null;
+  selectedLinkId = linkId;
+  pathHighlight = null;
+  linkPoint = null;
+  renderAll();
+  openLinkPanel(linkId);
+}
+
+/* Clique esquerdo NUM PONTO da fibra: marca o ponto exato e mostra, no
+   painel, a fibra e as distâncias até as duas pontas a partir dali — sem
+   abrir modal. "Inserir caixa aqui" usa a mesma coordenada, sem perguntar
+   posição. */
+function onLinkPointClick(linkId, ll){
+  if(mode!=='idle') return;
+  const l = linkById(linkId); if(!l) return;
+  selectedNodeId = null;
+  selectedLinkId = linkId;
+  pathHighlight = null;
+  linkPoint = {linkId, lat:ll.lat, lng:ll.lng};
+  renderAll();
+  openLinkPointPanel(l, linkPoint);
+}
+
+function openLinkPointPanel(l, pt){
+  const a = nodeById(l.from), b = nodeById(l.to);
+  const cab = cables.find(x=>x.linkId===l.id);
+  const dA = distanciaKm(a, {lat:pt.lat,lng:pt.lng});
+  const dB = distanciaKm({lat:pt.lat,lng:pt.lng}, b);
+  const panel = document.getElementById('panel-right');
+  panel.classList.add('show');
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <div>
+          <div class="panel-type-tag">Ponto na fibra</div>
+          <div class="panel-title">${escapeHtml(l.label||'Trecho')}</div>
+        </div>
+        <button class="panel-close" id="panel-close-btn">✕</button>
+      </div>
+      ${statusPill(l.status)}
+    </div>
+    <div class="panel-body">
+      ${fieldsHtml([
+        {label:'Cabo', value: cab ? escapeHtml(cab.nome)+' · '+cab.tipo+' ('+cab.totalFibras+' fibras)' : 'sem cabo documentado', full:true},
+        {label:'Até '+escapeHtml(a.name), value: dA.toFixed(3)+' km'},
+        {label:'Até '+escapeHtml(b.name), value: dB.toFixed(3)+' km'}
+      ])}
+      <div class="cable-meta">Distância acumulada até a OLT de origem: ainda não calculada (pendente).</div>
+      <div class="action-row">
+        <button class="btn btn-accent" id="btn-sangria-ponto" style="flex:1 1 100%;">Inserir caixa aqui (sangria)</button>
+        <button class="btn" id="btn-ver-trecho" style="flex:1 1 100%;">Ver detalhes do trecho inteiro</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('panel-close-btn').addEventListener('click', closePanel);
+  document.getElementById('btn-sangria-ponto').addEventListener('click', ()=> abrirSangria(l, {lat:pt.lat,lng:pt.lng}));
+  document.getElementById('btn-ver-trecho').addEventListener('click', ()=> onLinkClick(l.id));
+}
+
+function closePanel(){
+  selectedNodeId=null; selectedLinkId=null; pathHighlight=null; linkPoint=null;
+  document.getElementById('panel-right').classList.remove('show');
+  document.getElementById('panel-right').innerHTML='';
+  renderAll();
+}
+
+function openNodePanel(nodeId){
+  const n = nodeById(nodeId);
+  const panel = document.getElementById('panel-right');
+  panel.classList.add('show');
+
+  let body = '';
+  if(n.type==='cto') body = renderCTOBody(n);
+  else if(n.type==='ceo') body = renderCeoBody(n);
+  else if(n.type==='olt') body = renderOLTBody(n);
+  else if(n.type==='switch') body = renderSwitchBody(n);
+  else if(n.type==='pop') body = renderPopBody(n);
+  else if(n.type==='tower') body = renderTowerBody(n);
+  else if(n.type==='radio') body = renderRadioBody(n);
+  else if(n.type==='splitter') body = renderSplitterBody(n);
+  else if(n.type==='client') body = renderClientBody(n);
+
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <div>
+          <div class="panel-type-tag">${TYPE_LABEL[n.type]}</div>
+          <div class="panel-title">${escapeHtml(n.name)}</div>
+        </div>
+        <button class="panel-close" id="panel-close-btn">✕</button>
+      </div>
+      ${statusPill(n.status)}
+    </div>
+    <div class="panel-body">${body}</div>
+  `;
+  document.getElementById('panel-close-btn').addEventListener('click', closePanel);
+  bindPanelActions(n);
+}
+
+function fieldsHtml(fields){
+  return '<div class="field-grid">' + fields.map(f=>{
+    if(!f) return '';
+    return `<div class="field${f.full?' full':''}"><label>${f.label}</label><div class="val${f.big?' big':''}">${f.value}</div></div>`;
+  }).join('') + '</div>';
+}
+
+function renderPopBody(n){
+  const children = links.filter(l=>l.from===n.id);
+  return `
+    ${fieldsHtml([
+      {label:'IP de gerência', value:n.ip||'—'},
+      {label:'Elementos conectados', value:children.length},
+      {label:'Observação', value:n.desc||'—', full:true}
+    ])}
+    <div class="section-title">Equipamentos / enlaces</div>
+    <div class="port-list">
+      ${children.map(l=>{
+        const dst = nodeById(l.to);
+        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR[dst.status]}"></span><span class="pl">${escapeHtml(dst.name)}</span><span class="pf">${TYPE_LABEL[dst.type]}</span></div>`;
+      }).join('') || '<div class="empty-state">Nenhum elemento conectado.</div>'}
+    </div>
+    ${actionRow(n)}
+  `;
+}
+
+function renderOLTBody(n){
+  return `
+    ${fieldsHtml([
+      {label:'IP', value:n.ip||'—'},
+      {label:'PONs ativas', value:n.pons.filter(p=>p.onus>0).length+' / '+n.pons.length}
+    ])}
+    <div class="section-title">Portas PON</div>
+    ${n.pons.map(p=>{
+      const pct = Math.min(100, (p.onus/32)*100);
+      const barColor = p.status==='alerta' ? 'var(--yellow)' : (p.status==='livre' ? 'var(--text-faint)' : 'var(--green)');
+      return `<div class="pon-card">
+        <div class="pon-card-head"><b>${p.ponId}</b>${statusPill(p.status)}</div>
+        <div class="field-grid" style="margin-bottom:0;">
+          <div class="field"><label>ONUs</label><div class="val">${p.onus}</div></div>
+          <div class="field"><label>Potência média</label><div class="val">${p.power!==null?p.power+' dBm':'—'}</div></div>
+        </div>
+        <div class="usage-bar"><div style="width:${pct}%;background:${barColor}"></div></div>
+      </div>`;
+    }).join('')}
+    ${actionRow(n)}
+  `;
+}
+
+function renderSwitchBody(n){
+  const children = links.filter(l=>l.from===n.id);
+  const pct = Math.round((n.used/n.ports24)*100);
+  return `
+    ${fieldsHtml([
+      {label:'IP', value:n.ip||'—'},
+      {label:'Portas em uso', value:n.used+' / '+n.ports24}
+    ])}
+    <div class="usage-bar" style="margin-bottom:14px;"><div style="width:${pct}%;background:var(--accent)"></div></div>
+    <div class="section-title">Conectados</div>
+    <div class="port-list">
+      ${children.map(l=>{
+        const dst = nodeById(l.to);
+        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR[dst.status]}"></span><span class="pl">${escapeHtml(dst.name)}</span><span class="pf">${TYPE_LABEL[dst.type]}</span></div>`;
+      }).join('') || '<div class="empty-state">Nenhum elemento conectado.</div>'}
+    </div>
+    ${actionRow(n)}
+  `;
+}
+
+function renderTowerBody(n){
+  const children = links.filter(l=>l.from===n.id && nodeById(l.to).type==='radio');
+  const upstream = n.parentLink ? linkById(n.parentLink) : null;
+  return `
+    ${fieldsHtml([
+      {label:'Altura', value:n.altura||'—'},
+      {label:'Rádios instalados', value:children.length},
+      upstream ? {label:'Enlace upstream', value:(upstream.freq||'')+' · '+(upstream.distancia||''), full:true} : null
+    ])}
+    <div class="section-title">Rádios / APs</div>
+    <div class="port-list">
+      ${children.map(l=>{
+        const dst = nodeById(l.to);
+        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR[dst.status]}"></span><span class="pl">${escapeHtml(dst.name)}</span><span class="pf">${dst.freq||''}</span></div>`;
+      }).join('') || '<div class="empty-state">Nenhum rádio instalado.</div>'}
+    </div>
+    ${actionRow(n)}
+  `;
+}
+
+function renderRadioBody(n){
+  const clients = links.filter(l=>l.from===n.id && nodeById(l.to).type==='client');
+  return `
+    ${fieldsHtml([
+      {label:'IP', value:n.ip||'—'},
+      {label:'SSID', value:n.ssid||'—'},
+      {label:'Frequência', value:n.freq||'—'},
+      {label:'Clientes conectados', value:clients.length+' / '+(n.clientesMax||'—')}
+    ])}
+    <div class="section-title">Clientes</div>
+    <div class="port-list">
+      ${clients.map(l=>{
+        const dst = nodeById(l.to);
+        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR[dst.status]}"></span><span class="pl">${escapeHtml(dst.name)}</span><span class="pf">${dst.sinal!==undefined&&dst.sinal!==null?dst.sinal+' dBm':''}</span></div>`;
+      }).join('') || '<div class="empty-state">Nenhum cliente conectado.</div>'}
+    </div>
+    ${actionRow(n)}
+  `;
+}
+
+function renderSplitterBody(n){
+  return `
+    ${fieldsHtml([{label:'Tipo', value:n.desc||'Splitter óptico'}])}
+    <div class="alert-box none">Elemento passivo — sem telemetria própria.</div>
+    ${actionRow(n)}
+  `;
+}
+
+function renderCeoBody(n){
+  const cablesHere = cablesAtNode(n.id);
+  const splitterHere = splitters.find(s=>s.nodeId===n.id);
+  const upstream = n.parentLink ? linkById(n.parentLink) : null;
+  const origin = upstream ? nodeById(upstream.from) : null;
+  return `
+    ${fieldsHtml([
+      {label:'Origem', value: origin?escapeHtml(origin.name):'—'},
+      {label:'Cabos presentes', value: cablesHere.length},
+      {label:'Splitter interno', value: splitterHere ? splitterHere.razao : 'Não possui'},
+      {label:'Observação', value: n.desc||'—', full:true}
+    ])}
+    <div class="section-title">Cabos</div>
+    <div class="port-list">
+      ${cablesHere.map(c=>{
+        const occ = fiberStrands.filter(f=>f.cableId===c.id && f.status==='ocupada').length;
+        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR.normal}"></span><span class="pl">${escapeHtml(c.nome)}</span><span class="pf">${c.tipo} · ${occ}/${c.totalFibras} em uso</span></div>`;
+      }).join('') || '<div class="empty-state">Nenhum cabo registrado ainda. Use "Conectar" para ligar esta CEO à rede.</div>'}
+    </div>
+    ${actionRow(n)}
+  `;
+}
+
+function renderCTOBody(n){
+  const originLink = n.parentLink ? linkById(n.parentLink) : null;
+  const origin = originLink ? nodeById(originLink.from) : null;
+  const nodePorts = portsOf(n.id);
+  const clientCount = nodePorts.filter(p=>p.status==='ocupada'||p.status==='alerta').length;
+  const alertPorts = nodePorts.filter(p=>p.status==='alerta');
+  const mCalc = measurementsFor(n.id).find(m=>m.kind==='calculado');
+  const mMeds = measurementsFor(n.id).filter(m=>m.kind==='medido');
+  const mMed = mMeds.length ? mMeds[mMeds.length-1] : null;
+  const gap = (mCalc && mMed) ? Math.abs(mMed.valorDbm - mCalc.valorDbm) : 0;
+
+  return `
+    ${fieldsHtml([
+      {label:'Tipo', value:'CTO '+n.capacity+'x'+' portas'},
+      {label:'Origem', value:origin?(escapeHtml(origin.name)+(originLink.pon?(' / '+originLink.pon):'')):'—'},
+      {label:'Potência de entrada', value:(n.powerIn?n.powerIn.toFixed(1):'—')+' dBm'},
+      {label:'Clientes', value:clientCount}
+    ])}
+    ${(mCalc||mMed) ? `
+    <div class="section-title">Potência — esperada × medida</div>
+    <div class="field-grid">
+      <div class="field"><label>Esperada (calculada)</label><div class="val big">${mCalc?mCalc.valorDbm+' dBm':'—'}</div></div>
+      <div class="field"><label>Última medição</label><div class="val big" style="${gap>3?'color:var(--yellow)':''}">${mMed?mMed.valorDbm+' dBm':'—'}</div></div>
+      ${mMed ? `<div class="field full"><label>Registrado por</label><div class="val">${escapeHtml(mMed.tecnico||'—')} · ${mMed.data||'—'} · ${escapeHtml(mMed.equipamento||'—')}</div></div>` : ''}
+      ${mMed && mMed.observacao ? `<div class="field full"><label>Observação</label><div class="val" style="color:var(--yellow)">${escapeHtml(mMed.observacao)}</div></div>` : ''}
+    </div>` : ''}
+    <div class="section-title">Portas</div>
+    <div class="port-list">
+      ${nodePorts.map(p=>{
+        const cls = p.status==='ocupada' ? 'occ' : (p.status==='alerta' ? 'alerta' : 'free');
+        const label = p.clientName ? escapeHtml(p.clientName) : 'livre';
+        return `<div class="port-row ${cls}"><span class="pn">${p.label.replace('Porta ','')}</span><span class="pd"></span><span class="pl">${label}</span></div>`;
+      }).join('')}
+    </div>
+    <div class="section-title">Alertas</div>
+    ${alertPorts.length
+      ? `<div class="alert-box has">${alertPorts.length} porta(s) com sinal degradado / cliente instável.</div>`
+      : `<div class="alert-box none">Nenhum alerta ativo.</div>`}
+    ${actionRow(n)}
+  `;
+}
+
+function renderClientBody(n){
+  const l = n.parentLink ? linkById(n.parentLink) : null;
+  const origin = l ? nodeById(l.from) : null;
+  return `
+    ${fieldsHtml([
+      {label:'Código', value:'#'+n.id.toUpperCase()},
+      {label:'Plano', value:n.plano||'—'},
+      {label:'Tecnologia', value:n.tecnologia||'—'},
+      {label:'Equipamento', value:n.equipamento||'—', full:true},
+      {label:'Origem da conexão', value:origin?escapeHtml(origin.name):'—'},
+      {label:'Sinal / potência', value:n.sinal!==null&&n.sinal!==undefined?n.sinal+' dBm':'—'},
+      {label:'Última leitura', value:n.lastSeen||'—'}
+    ])}
+    <div class="action-row">
+      <button class="btn btn-accent" id="btn-show-path" style="flex:1 1 100%;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M4 19 L10 8 L14 14 L20 5"/></svg>
+        Mostrar caminho até a origem
+      </button>
+    </div>
+    ${actionRow(n)}
+  `;
+}
+
+function actionRow(n){
+  const diagramBtn = ['ceo','cto'].includes(n.type)
+    ? `<button class="btn btn-accent" id="btn-open-diagram">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
+        Diagrama
+      </button>` : '';
+  return `
+    <div class="action-row">
+      ${diagramBtn}
+      <button class="btn" id="btn-edit-node">Editar</button>
+      <button class="btn" id="btn-add-link-from">Conectar</button>
+      <button class="btn btn-danger" id="btn-delete-node">Excluir</button>
+    </div>
+  `;
+}
+
+function bindPanelActions(n){
+  const btnPath = document.getElementById('btn-show-path');
+  if(btnPath) btnPath.addEventListener('click', ()=> showPathForClient(n));
+
+  const btnEdit = document.getElementById('btn-edit-node');
+  if(btnEdit) btnEdit.addEventListener('click', ()=> openEditModal(n));
+
+  const btnDiagram = document.getElementById('btn-open-diagram');
+  if(btnDiagram) btnDiagram.addEventListener('click', ()=> openDiagram(n.id));
+
+  const btnAddLink = document.getElementById('btn-add-link-from');
+  if(btnAddLink) btnAddLink.addEventListener('click', ()=> startLinking(n));
+
+  const btnDelete = document.getElementById('btn-delete-node');
+  if(btnDelete) btnDelete.addEventListener('click', ()=>{
+    if(confirm('Excluir "'+n.name+'" e todos os links associados?')){
+      deleteNode(n.id);
+    }
+  });
+}
+
+function openLinkPanel(linkId){
+  const l = linkById(linkId);
+  const a = nodeById(l.from), b = nodeById(l.to);
+  const panel = document.getElementById('panel-right');
+  panel.classList.add('show');
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <div>
+          <div class="panel-type-tag">${LINK_TYPE_LABEL[l.type]}</div>
+          <div class="panel-title">${escapeHtml(l.label||'Link')}</div>
+        </div>
+        <button class="panel-close" id="panel-close-btn">✕</button>
+      </div>
+      ${statusPill(l.status)}
+    </div>
+    <div class="panel-body">
+      ${fieldsHtml([
+        {label:'Origem', value:escapeHtml(a.name)},
+        {label:'Destino', value:escapeHtml(b.name)},
+        (()=>{ const c=cables.find(cc=>cc.linkId===l.id); return c?{label:'Cabo físico', value:escapeHtml(c.nome)+' · '+c.tipo+' ('+c.totalFibras+' fibras)', full:true}:null; })(),
+        l.freq ? {label:'Frequência', value:l.freq} : null,
+        l.distancia ? {label:'Distância', value:l.distancia} : null,
+        l.sinal ? {label:'Sinal', value:l.sinal+' dBm'} : null
+      ])}
+      <div class="action-row">
+        <button class="btn btn-accent" id="btn-sangria" style="flex:1 1 100%;">Inserir caixa neste trecho (sangria)</button>
+        <button class="btn btn-danger" id="btn-delete-link" style="flex:1 1 100%;">Excluir trecho</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('panel-close-btn').addEventListener('click', closePanel);
+  const btnSangria=document.getElementById('btn-sangria');
+  if(btnSangria) btnSangria.addEventListener('click', ()=> abrirSangria(l));
+  document.getElementById('btn-delete-link').addEventListener('click', ()=>{
+    if(confirm('Excluir este link?')){
+      links = links.filter(x=>x.id!==l.id);
+      closePanel();
+      toast('Link excluído.');
+    }
+  });
+}
+
+/* ---- SANGRIA: inserir uma caixa no meio de um trecho existente ----
+   O cabo é cortado em dois segmentos no ponto da caixa. Por padrão TODAS as
+   fibras ficam passantes (o cabo apenas atravessa a caixa, sem ser tocado).
+   Depois, no diagrama, o admin escolhe quais fibras sangrar. */
+/* ll (lat/lng do clique) é opcional: quando vem do botão direito na linha, o ponto
+   é o do próprio clique. Sem ll (ex.: botão do painel lateral), cai no meio do trecho. */
+function abrirSangria(link, ll){
+  const a=nodeById(link.from), b=nodeById(link.to);
+  const cab = cables.find(x=>x.linkId===link.id);
+  const pos = ll || {lat:(a.lat+b.lat)/2, lng:(a.lng+b.lng)/2};
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Inserir caixa no trecho</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      ${fieldsHtml([
+        {label:'Trecho', value:escapeHtml(a.name)+' → '+escapeHtml(b.name), full:true},
+        {label:'Cabo', value: cab ? escapeHtml(cab.nome)+' · '+cab.tipo : 'sem cabo documentado', full:true},
+        {label:'Posição', value: ll ? 'ponto clicado no mapa' : 'meio do trecho (sem ponto exato)', full:true}
+      ])}
+      <div class="form-field"><label>Tipo de caixa</label>
+        <select id="f-sg-tipo"><option value="ceo">CEO (caixa de emenda)</option><option value="cto">CTO</option></select>
+      </div>
+      <div class="form-field"><label>Nome</label><input id="f-sg-nome" type="text" placeholder="CEO-SANGRIA"></div>
+      <div class="form-field" id="f-sg-cap-wrap" style="display:none;"><label>Número de portas</label><input id="f-sg-cap" type="number" min="1" max="144" value="16"></div>
+      <div class="form-field"><label>Como entram as fibras</label>
+        <select id="f-sg-modo">
+          <option value="passante">Passante — cabo só descascado, perda zero (padrão)</option>
+          <option value="fusao_massa">Fusão em massa — simula rompimento, todas emendadas já</option>
+        </select>
+      </div>
+      <div class="cable-meta" id="f-sg-modo-hint">Todas as fibras entram como <b>passantes</b>. No diagrama você escolhe quais sangrar — as demais seguem intactas.</div>
+    </div>
+    <div class="modal-foot"><button class="btn" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-accent" id="modal-save">Inserir caixa</button></div>`;
+  overlay.classList.add('show');
+  const capWrap = document.getElementById('f-sg-cap-wrap');
+  const tipoSel = document.getElementById('f-sg-tipo');
+  const syncCapField = ()=> capWrap.style.display = (tipoSel.value==='cto') ? '' : 'none';
+  syncCapField();
+  tipoSel.addEventListener('change', syncCapField);
+  const modoSel = document.getElementById('f-sg-modo');
+  const hint = document.getElementById('f-sg-modo-hint');
+  modoSel.addEventListener('change', ()=>{
+    hint.innerHTML = modoSel.value==='fusao_massa'
+      ? 'Todas as fibras entram <b>já fusionadas</b> (perda de fusão em cada uma) — use pra registrar um reparo/rompimento já emendado.'
+      : 'Todas as fibras entram como <b>passantes</b>. No diagrama você escolhe quais sangrar — as demais seguem intactas.';
+  });
+  document.getElementById('modal-x').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    const tipo=tipoSel.value;
+    const nome=document.getElementById('f-sg-nome').value.trim() ||
+      (tipo==='ceo'?'CEO-SANGRIA-':'CTO-SANGRIA-')+(nodes.filter(n=>n.type===tipo).length+1);
+    const cap = tipo==='cto' ? Math.max(1, Math.min(144, parseInt(document.getElementById('f-sg-cap').value,10)||16)) : null;
+    executarSangria(link, tipo, nome, pos, cap, modoSel.value);
+    closeModal();
+  });
+}
+
+function executarSangria(link, tipoCaixa, nome, pos, capacidade, modoFibra){
+  const a=nodeById(link.from), b=nodeById(link.to);
+  const cabOrig = cables.find(x=>x.linkId===link.id);
+  const lat = pos.lat, lng = pos.lng;
+
+  const caixa = addNode(tipoCaixa, nome, lat, lng, 'normal', {desc:'Inserida por sangria no trecho '+a.name+' → '+b.name});
+  if(tipoCaixa==='cto'){
+    const cap = capacidade || 16;
+    caixa.capacity=cap; caixa.powerIn=-20;
+    for(let i=1;i<=cap;i++) addPort(caixa.id,'Porta '+i,'livre');
+  }
+
+  const fo = cabOrig ? cabOrig.totalFibras : 12;
+  const meta = (sufixo)=> ({nome:(cabOrig?cabOrig.nome:'CABO')+' '+sufixo, tipo:fo+'FO', totalFibras:fo,
+                            construtivo: cabOrig?cabOrig.construtivo:undefined});
+  const km1 = distanciaKm(a,caixa), km2 = distanciaKm(caixa,b);
+
+  const l1 = addLink(link.type, a, caixa, link.status, {label:a.name+' → '+nome, km:+km1.toFixed(3), cableMeta:meta('(trecho 1)')});
+  const l2 = addLink(link.type, caixa, b, link.status, {label:nome+' → '+b.name, km:+km2.toFixed(3), cableMeta:meta('(trecho 2)')});
+  const c1 = cables.find(x=>x.linkId===l1.id), c2 = cables.find(x=>x.linkId===l2.id);
+  if(c1){ c1.km=+km1.toFixed(3); if(cabOrig) c1.construtivo=cabOrig.construtivo; }
+  if(c2){ c2.km=+km2.toFixed(3); if(cabOrig) c2.construtivo=cabOrig.construtivo; }
+
+  // 'passante' (padrão): fibra atravessa sem ser tocada, perda zero — você
+  // escolhe depois quais sangrar. 'fusao_massa': simula rompimento — TODAS as
+  // fibras já entram fusionadas (perda de fusão em cada uma), como um técnico
+  // faria emendando o cabo inteiro de uma vez no reparo.
+  const emendaMassa = modoFibra==='fusao_massa' ? 'fusao' : null;
+  if(c1&&c2){
+    for(let i=1;i<=fo;i++){
+      const f1=fiberIn(c1,i), f2=fiberIn(c2,i);
+      if(!f1||!f2) continue;
+      const cn = addConnection(caixa.id,'passante',{type:'fiber',id:f1.id},{type:'fiber',id:f2.id});
+      cn.emenda = emendaMassa;
+      const orig = cabOrig ? fiberIn(cabOrig,i) : null;
+      const st = orig ? orig.status : 'livre';
+      f1.status = st; f2.status = st;
+    }
+  }
+
+  // o trecho original deixa de existir; as fibras dele também
+  if(cabOrig){
+    const fids = fiberStrands.filter(f=>f.cableId===cabOrig.id).map(f=>f.id);
+    connections = connections.filter(cn=>
+      !(cn.origem.type==='fiber'&&fids.includes(cn.origem.id)) &&
+      !(cn.destino.type==='fiber'&&fids.includes(cn.destino.id)));
+    fiberStrands = fiberStrands.filter(f=>f.cableId!==cabOrig.id);
+    cables = cables.filter(x=>x.id!==cabOrig.id);
+  }
+  links = links.filter(x=>x.id!==link.id);
+  if(b.parentLink===link.id){ b.parent=caixa.id; b.parentLink=l2.id; }
+
+  closePanel();
+  renderAll();
+  toast(nome+' inserida: '+fo+' fibras passantes. Abra o diagrama para sangrar as que precisar.');
+  onNodeClick(caixa.id);
+}
+
+/* ---- caminho do cliente até a origem ---- */
+function showPathForClient(clientNode){
+  const nodeIds = new Set(); const linkIds = new Set();
+  let cur = clientNode;
+  nodeIds.add(cur.id);
+  let guard=0;
+  while(cur.parent && guard<30){
+    linkIds.add(cur.parentLink);
+    const parent = nodeById(cur.parent);
+    if(!parent) break;
+    nodeIds.add(parent.id);
+    if(parent.type==='pop') break; // origem alcançada
+    cur = parent;
+    guard++;
+  }
+  pathHighlight = {nodeIds, linkIds};
+  selectedLinkId = null;
+  renderAll();
+  toast('Caminho até a origem destacado no mapa.');
+}
+
+/* ============================================================
+   EXCLUSÃO
+   ============================================================ */
+function deleteNode(nodeId){
+  // remove links relacionados, portas, e reparenta filhos (opcional: apenas remove)
+  links = links.filter(l=> l.from!==nodeId && l.to!==nodeId);
+  ports = ports.filter(p=> p.nodeId!==nodeId);
+  nodes = nodes.filter(n=> n.id!==nodeId);
+  // remove referências de portas que apontavam para o node excluído
+  ports.forEach(p=>{ if(p.clientId===nodeId){ p.status='livre'; delete p.clientId; delete p.clientName; }});
+  closePanel();
+  toast('Elemento excluído.');
+}
+
+/* ============================================================
+   BUSCA
+   ============================================================ */
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', ()=>{
+  const q = searchInput.value.trim().toLowerCase();
+  if(!q){ searchResults.classList.remove('show'); return; }
+  const matches = nodes.filter(n=> n.name.toLowerCase().includes(q)).slice(0,10);
+  if(!matches.length){ searchResults.innerHTML = '<div class="search-item">Nenhum resultado</div>'; searchResults.classList.add('show'); return; }
+  searchResults.innerHTML = matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}</small></div>`).join('');
+  searchResults.classList.add('show');
+  searchResults.querySelectorAll('.search-item[data-id]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const n = nodeById(el.getAttribute('data-id'));
+      centerOn(n, Math.max(view.scale, 256*Math.pow(2,17)));
+      searchResults.classList.remove('show');
+      searchInput.value='';
+      onNodeClick(n.id);
+    });
+  });
+});
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.topbar-search')) searchResults.classList.remove('show');
+});
+
+/* ============================================================
+   ADICIONAR ELEMENTO
+   ============================================================ */
+const addMenu = document.getElementById('add-menu');
+const ADDABLE = ['pop','olt','switch','radio','tower','ceo','cto','splitter','client'];
+addMenu.innerHTML = ADDABLE.map(t=>`
+  <div class="add-menu-item" data-type="${t}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="${STATUS_COLOR.normal}" stroke-width="1.8">${ICON_PATHS[t]}</svg>
+    ${TYPE_LABEL[t]}
+  </div>`).join('');
+document.getElementById('btn-add').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  addMenu.classList.toggle('show');
+});
+document.addEventListener('click', ()=> addMenu.classList.remove('show'));
+addMenu.querySelectorAll('.add-menu-item').forEach(el=>{
+  el.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    placingType = el.getAttribute('data-type');
+    mode='placing';
+    addMenu.classList.remove('show');
+    setModeBanner(`Clique no mapa para posicionar: ${TYPE_LABEL[placingType]}`);
+    mapEl.classList.add('crosshair');
+  });
+});
+
+function setModeBanner(text){
+  const b = document.getElementById('mode-banner');
+  document.getElementById('mode-banner-text').textContent = text;
+  b.classList.add('show');
+}
+function clearMode(){
+  mode='idle'; placingType=null; linkOrigin=null;
+  document.getElementById('mode-banner').classList.remove('show');
+  mapEl.classList.remove('crosshair');
+}
+document.getElementById('mode-banner-cancel').addEventListener('click', clearMode);
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') clearMode(); });
+
+/* ============================================================
+   MODAL — criar elemento
+   ============================================================ */
+const overlay = document.getElementById('modal-overlay');
+const modalEl = document.getElementById('modal-el');
+function closeModal(){ overlay.classList.remove('show'); modalEl.innerHTML=''; }
+overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
+
+function openCreateModal(type, latlng){
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Novo elemento — ${TYPE_LABEL[type]}</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      <div class="form-field"><label>Nome</label><input id="f-name" type="text" placeholder="${TYPE_LABEL[type]}-${(nodes.filter(n=>n.type===type).length+1).toString().padStart(2,'0')}"></div>
+      <div class="form-field"><label>Status</label>
+        <select id="f-status">
+          <option value="normal">Normal</option>
+          <option value="alerta">Atenção</option>
+          <option value="critico">Crítico</option>
+          <option value="offline">Offline</option>
+        </select>
+      </div>
+      <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2" placeholder="Opcional"></textarea></div>
+      ${type==='cto' ? `<div class="form-field"><label>Número de portas</label><input id="f-cap" type="number" min="1" max="144" value="16"></div>` : ''}
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-accent" id="modal-save">Salvar elemento</button>
+    </div>
+  `;
+  overlay.classList.add('show');
+  document.getElementById('modal-x').addEventListener('click', ()=>{ closeModal(); clearMode(); });
+  document.getElementById('modal-cancel').addEventListener('click', ()=>{ closeModal(); clearMode(); });
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    const name = document.getElementById('f-name').value.trim() || (TYPE_LABEL[type]+'-NOVO');
+    const status = document.getElementById('f-status').value;
+    const obs = document.getElementById('f-obs').value.trim();
+    const extra = {desc:obs};
+    const cap = type==='cto' ? Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||16)) : null;
+    if(type==='cto'){ extra.capacity=cap; extra.powerIn=-18; }
+    if(type==='olt'){ extra.ip='192.168.99.'+Math.floor(Math.random()*250); extra.pons=[{ponId:'PON 1',onus:0,power:null,status:'livre'},{ponId:'PON 2',onus:0,power:null,status:'livre'},{ponId:'PON 3',onus:0,power:null,status:'livre'},{ponId:'PON 4',onus:0,power:null,status:'livre'}]; }
+    if(type==='switch'){ extra.ip='192.168.99.'+Math.floor(Math.random()*250); extra.ports24=24; extra.used=0; }
+    if(type==='radio'){ extra.ip='192.168.99.'+Math.floor(Math.random()*250); extra.ssid='ISP-NOVO'; extra.freq='5.8GHz'; extra.clientesMax=30; }
+    if(type==='client'){ extra.plano='—'; extra.tecnologia='—'; extra.equipamento='—'; extra.sinal=null; extra.lastSeen='agora'; }
+    const n = addNode(type, name, latlng.lat, latlng.lng, status, extra);
+    if(type==='cto'){ for(let i=1;i<=cap;i++) addPort(n.id,'Porta '+i,'livre'); }
+    closeModal();
+    clearMode();
+    renderAll();
+    toast('Elemento "'+name+'" criado. Use "Adicionar conexão" para ligá-lo à rede.');
+    onNodeClick(n.id);
+  });
+}
+
+/* ============================================================
+   MODAL — editar elemento
+   ============================================================ */
+function openEditModal(n){
+  const isCTO = n.type==='cto';
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Editar — ${escapeHtml(n.name)}</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      <div class="form-field"><label>Nome</label><input id="f-name" type="text" value="${escapeHtml(n.name)}"></div>
+      <div class="form-field"><label>Status</label>
+        <select id="f-status">
+          <option value="normal" ${n.status==='normal'?'selected':''}>Normal</option>
+          <option value="alerta" ${n.status==='alerta'?'selected':''}>Atenção</option>
+          <option value="critico" ${n.status==='critico'?'selected':''}>Crítico</option>
+          <option value="offline" ${n.status==='offline'?'selected':''}>Offline</option>
+        </select>
+      </div>
+      <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2">${escapeHtml(n.desc||'')}</textarea></div>
+      ${isCTO ? `<div class="form-field"><label>Número de portas (atual: ${n.capacity||0})</label><input id="f-cap" type="number" min="1" max="144" value="${n.capacity||16}"></div>` : ''}
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-accent" id="modal-save">Salvar alterações</button>
+    </div>
+  `;
+  overlay.classList.add('show');
+  document.getElementById('modal-x').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    n.name = document.getElementById('f-name').value.trim() || n.name;
+    n.status = document.getElementById('f-status').value;
+    n.desc = document.getElementById('f-obs').value.trim();
+    if(isCTO){
+      const novaCap = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||n.capacity));
+      if(novaCap !== n.capacity && !redimensionarPortasCTO(n, novaCap)) return; // bloqueado, modal segue aberto
+    }
+    closeModal();
+    renderAll();
+    openNodePanel(n.id);
+    toast('Alterações salvas.');
+  });
+}
+
+/* ============================================================
+   ADICIONAR CONEXÃO (link)
+   ============================================================ */
+function startLinking(originNode){
+  linkOrigin = originNode;
+  mode='linking-dest';
+  setModeBanner(`Origem: ${originNode.name} — toque no elemento de destino`);
+  mapEl.classList.add('crosshair');
+}
+
+/* Distância em linha reta entre dois nós (km) — base para a perda por km.
+   Quando existir rota com pontos intermediários, o comprimento vem da rota. */
+function distanciaKm(a,b){
+  const R=6371, rad=Math.PI/180;
+  const dLat=(b.lat-a.lat)*rad, dLng=(b.lng-a.lng)*rad;
+  const la1=a.lat*rad, la2=b.lat*rad;
+  const h=Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+/* O cabo nasce aqui, no mapa: junto com o trecho definimos fibras, tipo
+   construtivo e distância. O diagrama da caixa só consome o que existe. */
+function openLinkTypeModal(origin, dest){
+  const km = distanciaKm(origin,dest);
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Novo trecho</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      ${fieldsHtml([
+        {label:'Origem',value:escapeHtml(origin.name)},
+        {label:'Destino',value:escapeHtml(dest.name)},
+        {label:'Distância (linha reta)', value:km.toFixed(2)+' km', full:true}
+      ])}
+      <div class="form-field"><label>Tipo de trecho</label>
+        <select id="f-linktype">
+          <option value="backbone">Fibra backbone</option>
+          <option value="distribuicao" selected>Fibra distribuição</option>
+          <option value="drop">Drop</option>
+          <option value="ethernet">Ethernet</option>
+          <option value="wireless">Wireless / enlace rádio</option>
+        </select>
+      </div>
+      <div id="f-cablewrap">
+        <div class="form-field"><label>Cabo — nº de fibras</label>
+          <select id="f-linkfo">
+            <option>2</option><option>4</option><option>6</option>
+            <option selected>12</option><option>24</option><option>36</option><option>48</option>
+          </select>
+        </div>
+        <div class="form-field"><label>Tipo construtivo</label>
+          <select id="f-linkconstr">
+            <option>AS (auto-sustentado)</option><option>Drop</option>
+            <option>Espinado</option><option>Subterrâneo</option>
+          </select>
+        </div>
+        <div class="cable-meta">As fibras são criadas já numeradas e na sequência de cores ABNT.</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-accent" id="modal-save">Criar trecho</button>
+    </div>
+  `;
+  overlay.classList.add('show');
+  const selType=document.getElementById('f-linktype');
+  const wrap=document.getElementById('f-cablewrap');
+  function atualizaCampos(){
+    const fibra = ['backbone','distribuicao','drop'].includes(selType.value);
+    wrap.style.display = fibra ? '' : 'none';
+  }
+  selType.addEventListener('change', atualizaCampos); atualizaCampos();
+
+  document.getElementById('modal-x').addEventListener('click', ()=>{ closeModal(); clearMode(); });
+  document.getElementById('modal-cancel').addEventListener('click', ()=>{ closeModal(); clearMode(); });
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    const type = selType.value;
+    const ehFibra = ['backbone','distribuicao','drop'].includes(type);
+    const extra = {label:origin.name+' → '+dest.name, km:+km.toFixed(3)};
+    if(ehFibra){
+      const fo = parseInt(document.getElementById('f-linkfo').value,10);
+      extra.cableMeta = {
+        nome:'CABO '+origin.name+'→'+dest.name, tipo:fo+'FO', totalFibras:fo,
+        construtivo: document.getElementById('f-linkconstr').value
+      };
+    }
+    const l = addLink(type, origin, dest, 'normal', extra);
+    const cb = cables.find(x=>x.linkId===l.id);
+    if(cb){ cb.construtivo = extra.cableMeta.construtivo; cb.km = extra.km; }
+    closeModal(); clearMode(); renderAll();
+    toast(ehFibra
+      ? `Trecho criado com cabo de ${extra.cableMeta.totalFibras} fibras · ${km.toFixed(2)} km.`
+      : `Trecho criado entre "${origin.name}" e "${dest.name}".`);
+    onNodeClick(dest.id);
+  });
+}
+
+/* ============================================================
+   DIAGRAMA UNIFILAR (nível 2) — EDITOR
+   Representa o interior de uma caixa: cabos que entram/saem, fibras
+   individuais, fusões, splitters e portas. Admin edita; técnico só consulta.
+   ============================================================ */
+let diagramNodeId = null;
+let dgSelPin = null;      // pino selecionado (origem de uma nova conexão)
+let dgSelConn = null;     // conexão selecionada
+let dgSelSplitter = null; // splitter selecionado
+let dgTraceFiber = null;  // fibra em destaque (tracing)
+let isAdmin = true;
+
+/* --- Perdas de referência ---
+   Valores típicos de datasheet de fabricante (splitters PLC). São padrões do
+   sistema, NÃO vieram da Planilha Fibra. Servem para estimar potência; a medição
+   real de campo continua sendo registrada em separado. */
+const IL_BALANCEADO = {'1x2':3.6,'1x4':7.2,'1x8':10.4,'1x16':13.7,'1x32':17.1,'1x64':21.5};
+const IL_SAIDA_TAP  = {1:21.0,2:18.7,5:13.4,10:10.9,15:9.6,20:8.0,25:6.8,30:5.9,35:5.2,40:4.6,
+                       45:4.0,50:3.6,55:3.2,60:2.6,65:2.3,70:2.0,75:1.6,80:1.3,85:1.0,90:0.7,95:0.5,98:0.4,99:0.3};
+const PERDA_FUSAO = 0.2;     // dB por fusão (constante de projeto — confirmar em campo)
+const PERDA_CONECTOR = 0.35; // dB por par conectorizado (valor de catálogo)
+let dgJoinMode = 'fusao';    // como a próxima emenda será feita: fusao | conector
+const CATALOGO_SPLITTERS = {
+  balanceado:    ['1x2','1x4','1x8','1x16','1x32','1x64'],
+  desbalanceado: ['1/99','2/98','5/95','10/90','15/85','20/80','25/75','30/70','35/65','40/60','45/55','50/50']
+};
+const TIPOS_SPLITTER = CATALOGO_SPLITTERS.balanceado.concat(CATALOGO_SPLITTERS.desbalanceado);
+
+function connectionsAtNode(nid2){ return connections.filter(c=>c.nodeId===nid2); }
+function refEq(a,b){ return a && b && a.type===b.type && a.id===b.id; }
+function pinKey(ref){ return ref ? ref.type+':'+ref.id : null; }
+
+function splitterLoss(splitter, port){
+  if(splitter.balanceado) return IL_BALANCEADO[splitter.razao] || 10.4;
+  const p = port.percentual;
+  if(IL_SAIDA_TAP[p]!==undefined) return IL_SAIDA_TAP[p];
+  return 10*Math.log10(100/Math.max(1,p));   // fallback teórico
+}
+
+/* --- Potência: propaga do ponto de entrada por fusões e splitters --- */
+function computeBoxPowers(node){
+  const pow = {};
+  const conns = connectionsAtNode(node.id);
+  // entrada: fibra do cabo que vem de montante
+  const entryCable = cables.find(cb=>{
+    const l = links.find(x=>x.id===cb.linkId);
+    return l && l.to===node.id;
+  });
+  if(!entryCable) return pow;
+  const entryFiber = fiberStrands.find(f=>f.cableId===entryCable.id && f.status!=='livre');
+  if(!entryFiber) return pow;
+  const base = (typeof node.powerIn==='number') ? node.powerIn : -18;
+  pow['fiber:'+entryFiber.id] = base;
+
+  const queue = [{type:'fiber', id:entryFiber.id}];
+  const seen = new Set([pinKey(queue[0])]);
+  let guard = 0;
+  while(queue.length && guard++ < 500){
+    const item = queue.shift();
+    const val = pow[pinKey(item)];
+    if(val===undefined) continue;
+    conns.forEach(cn=>{
+      let other=null;
+      if(refEq(cn.origem,item)) other=cn.destino;
+      else if(refEq(cn.destino,item)) other=cn.origem;
+      if(!other) return;
+      const k = pinKey(other);
+      if(seen.has(k)) return;
+      let next = val;
+      next = val - perdaDaConexao(cn);   // fusão, conector ou passante (0 dB)
+      if(other.type==='splitterPort'){
+        const fo = splitterPortById(other.id);
+        if(fo && fo.port.papel==='saida') next = val - splitterLoss(fo.splitter, fo.port);
+      }
+      seen.add(k); pow[k]=next; queue.push(other);
+      // atravessa o splitter: entrada alimenta todas as saídas
+      if(other.type==='splitterPort'){
+        const fo = splitterPortById(other.id);
+        if(fo && fo.port.papel==='entrada'){
+          fo.splitter.ports.filter(p=>p.papel==='saida').forEach(p=>{
+            const kk='splitterPort:'+p.id;
+            if(seen.has(kk)) return;
+            seen.add(kk);
+            pow[kk] = next - splitterLoss(fo.splitter, p);
+            queue.push({type:'splitterPort', id:p.id});
+          });
+        }
+      }
+    });
+  }
+  return pow;
+}
+
+/* --- Tracing dentro da caixa a partir de um pino --- */
+function traceFromPin(nodeIdX, startRef){
+  const conns = connectionsAtNode(nodeIdX);
+  const pins=new Set([pinKey(startRef)]), used=new Set();
+  const queue=[startRef]; let guard=0;
+  while(queue.length && guard++<500){
+    const item=queue.shift();
+    conns.forEach(cn=>{
+      if(used.has(cn.id)) return;
+      let other=null;
+      if(refEq(cn.origem,item)) other=cn.destino;
+      else if(refEq(cn.destino,item)) other=cn.origem;
+      if(!other) return;
+      used.add(cn.id);
+      const k=pinKey(other);
+      if(!pins.has(k)){ pins.add(k); queue.push(other); }
+      if(other.type==='splitterPort'){
+        const fo=splitterPortById(other.id);
+        if(fo){
+          const irmaos = fo.port.papel==='entrada'
+            ? fo.splitter.ports.filter(p=>p.papel==='saida')
+            : fo.splitter.ports.filter(p=>p.papel==='entrada');
+          irmaos.forEach(p=>{
+            const kk='splitterPort:'+p.id;
+            if(!pins.has(kk)){ pins.add(kk); queue.push({type:'splitterPort',id:p.id}); }
+          });
+        }
+      }
+    });
+  }
+  return {pins, conns:used};
+}
+// mantém compatibilidade com o tracing por fibra
+function traceFromFiber(nodeIdX, startFiberId){
+  const r = traceFromPin(nodeIdX, {type:'fiber', id:startFiberId});
+  const fibers=new Set(), terminalPorts=new Set(), terminalLinks=new Set();
+  r.pins.forEach(k=>{
+    const [t,id]=k.split(':');
+    if(t==='fiber') fibers.add(id);
+    if(t==='port') terminalPorts.add(id);
+    if(t==='link') terminalLinks.add(id);
+  });
+  return {fibers, conns:r.conns, ports:new Set(), terminalLinks, terminalPorts, pins:r.pins};
+}
+
+/* ============================================================
+   LAYOUT do diagrama — com posições editáveis por caixa
+   ============================================================ */
+const DG = {W:960, H:560, padX:40, blockW:190, splW:74, pinGap:22};
+let dgView = {x:0, y:0, k:1};          // zoom/pan do diagrama
+let dgDrag = null;                      // arraste de bloco ou pan
+
+function classifyCables(node){
+  const entrada=[], saida=[], local=[];
+  cablesAtNode(node.id).forEach(cb=>{
+    const l = links.find(x=>x.id===cb.linkId);
+    if(cb.localAtNode===node.id) local.push(cb);
+    else if(l && l.to===node.id) entrada.push(cb);
+    else saida.push(cb);
+  });
+  return {entrada, saida, local};
+}
+
+/* posições salvas por caixa: node.dgPos['cable:xx'] = {x,y} */
+function dgPosOf(node, key, fallback){
+  if(node.dgPos && node.dgPos[key]) return node.dgPos[key];
+  return fallback;
+}
+function dgSetPos(node, key, x, y){
+  if(!node.dgPos) node.dgPos = {};
+  node.dgPos[key] = {x, y};
+}
+
+function buildLayout(node){
+  const {entrada, saida, local} = classifyCables(node);
+  const spls = splitters.filter(s=>s.nodeId===node.id);
+  const nodePorts = portsOf(node.id);
+  const pins = {}, blocks = [], splBoxes = [];
+  const blockH = n => 40 + n*DG.pinGap + 12;
+
+  /* Item A: sem cabo de entrada nem local, o 1º cabo de saída assume o papel
+     visual de "lado esquerdo" — evita as duas colunas caindo no mesmo lado e
+     o outro ficar vazio. Só o primeiro; o resto de saída segue à direita. */
+  let saidaEsquerda = null, saidaRestante = saida;
+  if(entrada.length===0 && local.length===0 && saida.length>0){
+    saidaEsquerda = saida[0];
+    saidaRestante = saida.slice(1);
+  }
+
+  /* Item B: o lado de um bloco (e, com ele, o lado dos pinos que ele carrega)
+     não é mais fixo pela classificação — é recalculado pela posição atual
+     (dgPos, se o bloco foi arrastado). Arrastar um cabo pro lado oposto do
+     diagrama já vira a marcação dos pinos automaticamente. */
+  const ladoPor = x => x < DG.W/2 ? 'left' : 'right';
+
+  // ---- coluna esquerda: cabos de entrada, locais e (se for o caso) o 1º de saída
+  let y = 30;
+  entrada.concat(local).concat(saidaEsquerda?[saidaEsquerda]:[]).forEach(cb=>{
+    const fibs = fiberStrands.filter(f=>f.cableId===cb.id).sort((a,b)=>a.numero-b.numero);
+    const h = blockH(fibs.length);
+    const key = 'cable:'+cb.id;
+    const p = dgPosOf(node, key, {x:DG.padX, y});
+    const side = ladoPor(p.x);
+    blocks.push({key, cable:cb, fibers:fibs, x:p.x, y:p.y, w:DG.blockW, h, side});
+    fibs.forEach((f,i)=> pins['fiber:'+f.id] = {x: side==='left'?p.x+DG.blockW:p.x, y:p.y+40+i*DG.pinGap, side, fiber:f});
+    y += h + 26;
+  });
+
+  // ---- coluna direita: cabos de saída restantes + bloco de portas
+  let y2 = 30;
+  const rightX = DG.W - DG.padX - DG.blockW;
+  saidaRestante.forEach(cb=>{
+    const fibs = fiberStrands.filter(f=>f.cableId===cb.id).sort((a,b)=>a.numero-b.numero);
+    const h = blockH(fibs.length);
+    const key = 'cable:'+cb.id;
+    const p = dgPosOf(node, key, {x:rightX, y:y2});
+    const side = ladoPor(p.x);
+    blocks.push({key, cable:cb, fibers:fibs, x:p.x, y:p.y, w:DG.blockW, h, side});
+    fibs.forEach((f,i)=> pins['fiber:'+f.id] = {x: side==='left'?p.x+DG.blockW:p.x, y:p.y+40+i*DG.pinGap, side, fiber:f});
+    y2 += h + 26;
+  });
+  if(nodePorts.length){
+    const h = blockH(nodePorts.length);
+    const p = dgPosOf(node, 'ports', {x:rightX, y:y2});
+    const side = ladoPor(p.x);
+    blocks.push({key:'ports', portsBlock:true, ports:nodePorts, x:p.x, y:p.y, w:DG.blockW, h, side});
+    nodePorts.forEach((pt,i)=> pins['port:'+pt.id] = {x: side==='left'?p.x+DG.blockW:p.x, y:p.y+40+i*DG.pinGap, side, port:pt});
+    y2 += h + 26;
+  }
+
+  // ---- centro: splitters (desenhados como triângulo)
+  let y3 = 70;
+  const midX = (DG.padX+DG.blockW + rightX)/2 - DG.splW/2;
+  spls.forEach(s=>{
+    const outs = s.ports.filter(p=>p.papel==='saida');
+    const h = Math.max(64, outs.length*18+26);
+    const key = 'spl:'+s.id;
+    const p = dgPosOf(node, key, {x:midX, y:y3});
+    splBoxes.push({key, splitter:s, x:p.x, y:p.y, w:DG.splW, h, outs});
+    const inP = s.ports.find(q=>q.papel==='entrada');
+    pins['splitterPort:'+inP.id] = {x:p.x, y:p.y+h/2, side:'right', splIn:true};
+    outs.forEach((q,i)=>{
+      const yy = outs.length===1 ? p.y+h/2 : p.y+14+i*((h-28)/(outs.length-1));
+      pins['splitterPort:'+q.id] = {x:p.x+DG.splW, y:yy, side:'left', port:q, splitter:s};
+    });
+    y3 += h + 34;
+  });
+
+  return {blocks, splBoxes, pins};
+}
+
+function pinColor(key, layout){
+  const p = layout.pins[key];
+  if(!p) return '#6e7681';
+  if(p.fiber) return FIBER_COLOR_HEX[p.fiber.cor] || '#888';
+  if(p.port)  return p.port.clientName ? '#3fb950' : '#3a4353';
+  return '#4fd1c5';
+}
+function isPinConnected(key, node){
+  return connectionsAtNode(node.id).some(cn=> pinKey(cn.origem)===key || pinKey(cn.destino)===key);
+}
+/* uma porta só é vendável se houver saída de splitter alimentando ela */
+function portaAlimentada(portId, node){
+  return connectionsAtNode(node.id).some(cn=>
+    cn.tipo==='splitter_out' && cn.destino.type==='port' && cn.destino.id===portId);
+}
+
+/* rota ortogonal; devolve os dois trechos separados pelo ponto da emenda,
+   para a cor poder mudar exatamente ali (ex.: violeta vira vermelha) */
+function routeParts(a,b){
+  const outA = a.side==='left' ? 22 : -22;
+  const outB = b.side==='right' ? -22 : 22;
+  const ax=a.x+outA, bx=b.x+outB;
+  const mx = ax + (bx-ax)/2;
+  const my = (a.y+b.y)/2;
+  return {
+    mx, my,
+    dA:`M ${a.x} ${a.y} L ${ax} ${a.y} L ${mx} ${a.y} L ${mx} ${my}`,
+    dB:`M ${mx} ${my} L ${mx} ${b.y} L ${bx} ${b.y} L ${b.x} ${b.y}`
+  };
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function renderDiagram(){
+  const node = nodeById(diagramNodeId);
+  if(!node) return;
+  document.getElementById('diagram-title').textContent = TYPE_LABEL[node.type]+' — '+node.name;
+  document.getElementById('dg-role').textContent = isAdmin ? 'Admin' : 'Técnico';
+  ['dg-add-cable','dg-add-splitter','dg-joinsel'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display = isAdmin?'':'none';
+  });
+
+  const layout = buildLayout(node);
+  const powers = computeBoxPowers(node);
+  const trace  = dgTraceFiber ? traceFromPin(node.id, dgTraceFiber) : null;
+  const conns  = connectionsAtNode(node.id);
+  const svgEl  = document.getElementById('diagram-svg');
+  svgEl.setAttribute('viewBox', `0 0 ${DG.W} ${DG.H}`);
+
+  const out = [];
+  out.push(`<g id="dg-root" transform="translate(${dgView.x},${dgView.y}) scale(${dgView.k})">`);
+
+  // ---- conexões (com marcador de emenda e troca de cor no ponto)
+  conns.forEach(cn=>{
+    const ka=pinKey(cn.origem), kb=pinKey(cn.destino);
+    const a=layout.pins[ka], b=layout.pins[kb];
+    if(!a||!b) return;
+    const rp = routeParts(a,b);
+    const colorA = pinColor(ka,layout), colorB = pinColor(kb,layout);
+    let cls='dconn';
+    if(dgSelConn===cn.id) cls+=' sel';
+    else if(trace) cls += trace.conns.has(cn.id) ? ' hl' : ' dim';
+    out.push(`<path class="${cls}" data-conn="${cn.id}" d="${rp.dA}" stroke="${colorA}"/>`);
+    out.push(`<path class="${cls}" data-conn="${cn.id}" d="${rp.dB}" stroke="${colorB}"/>`);
+
+    const em = cn.emenda;
+    if(em==='fusao'){
+      out.push(`<g class="emenda" data-conn="${cn.id}">
+        <rect x="${rp.mx-6}" y="${rp.my-5}" width="12" height="10" rx="2" fill="#0d1117" stroke="#c7d1dc" stroke-width="1.3"/>
+        <text class="emenda-lbl" x="${rp.mx+11}" y="${rp.my+3}">fusão</text></g>`);
+    } else if(em==='conector'){
+      out.push(`<g class="emenda" data-conn="${cn.id}">
+        <path d="M ${rp.mx-8} ${rp.my-6} L ${rp.mx-2.5} ${rp.my-6} L ${rp.mx-2.5} ${rp.my+6} L ${rp.mx-8} ${rp.my+6}" fill="none" stroke="#e8c874" stroke-width="1.7"/>
+        <path d="M ${rp.mx+8} ${rp.my-6} L ${rp.mx+2.5} ${rp.my-6} L ${rp.mx+2.5} ${rp.my+6} L ${rp.mx+8} ${rp.my+6}" fill="none" stroke="#e8c874" stroke-width="1.7"/>
+        <text class="emenda-lbl conn" x="${rp.mx+13}" y="${rp.my+3}">conector</text></g>`);
+    } else if(cn.tipo==='passante'){
+      out.push(`<text class="emenda-lbl pass" x="${rp.mx+6}" y="${rp.my-4}">passante</text>`);
+    }
+  });
+
+  // ---- blocos
+  layout.blocks.forEach(bl=>{
+    const drag = isAdmin ? `data-drag="${bl.key}"` : '';
+    out.push(`<g class="dblock" data-block="${bl.key}" ${drag}>`);
+    out.push(`<rect class="cbox" x="${bl.x}" y="${bl.y}" width="${bl.w}" height="${bl.h}" rx="6"/>`);
+    if(bl.portsBlock){
+      const alim   = bl.ports.filter(p=>portaAlimentada(p.id,node));
+      const ocup   = bl.ports.filter(p=>p.clientName);
+      const orfas  = ocup.filter(p=>!portaAlimentada(p.id,node));   // cliente SEM alimentação
+      const livres = alim.filter(p=>!p.clientName).length;          // alimentada E sem cliente
+      const semAlim = bl.ports.length - alim.length - orfas.length; // vaga, sem alimentação
+      out.push(`<text class="cbox-title" x="${bl.x+12}" y="${bl.y+20}">PORTAS</text>`);
+      out.push(`<text class="cbox-sub" x="${bl.x+12}" y="${bl.y+33}">${ocup.length} em uso · ${livres} livres · ${semAlim} sem alimentação</text>`);
+      if(orfas.length) out.push(`<text class="cbox-sub" x="${bl.x+12}" y="${bl.y+45}" fill="#f85149">${orfas.length} cliente(s) em porta sem alimentação</text>`);
+    } else {
+      const cb=bl.cable;
+      const livres=bl.fibers.filter(f=>f.status==='livre').length;
+      const extra = cb.semRota ? ' · SEM ROTA' : (cb.km!==undefined ? ' · '+cb.km.toFixed(2)+' km' : '');
+      out.push(`<text class="cbox-title" x="${bl.x+12}" y="${bl.y+20}">${escapeHtml(cb.nome)}</text>`);
+      out.push(`<text class="cbox-sub" x="${bl.x+12}" y="${bl.y+33}" ${cb.semRota?'fill="#d29922"':''}>${cb.tipo} · ${cb.codigo} · ${livres} livres${extra}</text>`);
+    }
+    out.push(`</g>`);
+
+    // pinos
+    if(bl.portsBlock){
+      bl.ports.forEach((p,i)=>{
+        const key='port:'+p.id, pin=layout.pins[key];
+        const occ=!!p.clientName, alim=portaAlimentada(p.id,node);
+        const dim = trace && !trace.pins.has(key);
+        const fill = occ ? '#3fb950' : (alim ? '#161b23' : '#11151c');
+        const stroke = occ ? '#3fb950' : (alim ? '#4fd1c5' : '#3a4353');
+        out.push(`<g class="fpin${dgSelPin===key?' sel':''}" data-pin="${key}" opacity="${dim?0.25:1}">
+          <circle class="fpin-ring" cx="${pin.x}" cy="${pin.y}" r="7" fill="${fill}" stroke="${stroke}" ${alim?'':'stroke-dasharray="2,2"'}/>
+          <text class="fpin-num" x="${pin.x}" y="${pin.y+3}" text-anchor="middle" fill="${occ?'#04211f':'#7c8798'}">${i+1}</text>
+          <title>${p.label} — ${occ?p.clientName:(alim?'livre (alimentada)':'sem alimentação')}</title></g>`);
+        const txt = occ ? p.clientName : (alim ? 'livre' : 'sem alimentação');
+        out.push(`<text class="fpin-label${alim?'':' nofeed'}" x="${pin.x+14}" y="${pin.y+3}">${escapeHtml(txt)}</text>`);
+      });
+    } else {
+      bl.fibers.forEach(f=>{
+        const key='fiber:'+f.id, pin=layout.pins[key];
+        const conn=isPinConnected(key,node);
+        const px = powers['fiber:'+f.id];
+        const temSinal = px!==undefined;
+        const hex=FIBER_COLOR_HEX[f.cor]||'#888';
+        const dark=['Branco','Amarelo','Aqua','Rosa','Cinza'].includes(f.cor);
+        const dim = trace && !trace.pins.has(key);
+        const extra = (conn && !temSinal)
+          ? `<circle cx="${pin.x}" cy="${pin.y}" r="11.5" fill="none" stroke="#6e7681" stroke-width="1.2" stroke-dasharray="2,2"/>` : '';
+        out.push(`<g class="fpin${dgSelPin===key?' sel':''}" data-pin="${key}" opacity="${dim?0.25:1}">
+          ${extra}
+          <circle class="fpin-ring" cx="${pin.x}" cy="${pin.y}" r="8" fill="${conn?hex:'#161b23'}" fill-opacity="${conn&&!temSinal?0.45:1}" stroke="${hex}" ${conn?'':'stroke-dasharray="2.5,2"'}/>
+          <text class="fpin-num" x="${pin.x}" y="${pin.y+3}" text-anchor="middle" fill="${conn&&temSinal?(dark?'#0b0e13':'#fff'):hex}">${f.numero}</text>
+          <title>F${f.numero} ${f.cor} — ${f.status}${conn?(temSinal?' · com sinal ('+px.toFixed(1)+' dBm)':' · emendada, SEM sinal'):''}</title></g>`);
+        const lx = bl.side==='left' ? pin.x-14 : pin.x+14;
+        const anc = bl.side==='left' ? 'end' : 'start';
+        if(temSinal) out.push(`<text class="pwr${px<-27?' bad':''}" x="${lx}" y="${pin.y+3}" text-anchor="${anc}">${px.toFixed(1)}</text>`);
+        else if(conn) out.push(`<text class="pwr nosig" x="${lx}" y="${pin.y+3}" text-anchor="${anc}">sem sinal</text>`);
+      });
+    }
+  });
+
+  // ---- splitters em forma de triângulo (símbolo clássico)
+  layout.splBoxes.forEach(sb=>{
+    const s=sb.splitter, x=sb.x, y=sb.y, w=sb.w, h=sb.h;
+    const desbal = !s.balanceado;
+    const cor = desbal ? '#d29922' : '#4fd1c5';
+    const drag = isAdmin ? `data-drag="${sb.key}"` : '';
+    out.push(`<g class="spl${dgSelSplitter===s.id?' sel':''}" data-spl="${s.id}" ${drag}>
+      <polygon class="spl-body" points="${x},${y+h/2} ${x+w},${y} ${x+w},${y+h}" fill="#1b2430" stroke="${cor}" stroke-width="${dgSelSplitter===s.id?3:1.7}"/>
+      <text class="spl-label" x="${x+w*0.62}" y="${y+h/2+3}" text-anchor="middle" fill="${cor}">${s.razao}</text>
+      <text class="spl-kind" x="${x+w/2}" y="${y-6}" text-anchor="middle" fill="${cor}">${desbal?'DESBALANCEADO':'balanceado'}</text>
+    </g>`);
+    s.ports.forEach(p=>{
+      const key='splitterPort:'+p.id, pin=layout.pins[key];
+      if(!pin) return;
+      const dim = trace && !trace.pins.has(key);
+      out.push(`<g class="fpin${dgSelPin===key?' sel':''}" data-pin="${key}" opacity="${dim?0.25:1}">
+        <circle class="fpin-ring" cx="${pin.x}" cy="${pin.y}" r="5" fill="#0d1117" stroke="${cor}"/></g>`);
+      if(p.papel==='saida'){
+        out.push(`<text class="fpin-label" x="${pin.x+9}" y="${pin.y-5}">${splitterOutLabel(p,s)}</text>`);
+        const px=powers[key];
+        if(px!==undefined) out.push(`<text class="pwr${px<-27?' bad':''}" x="${pin.x+9}" y="${pin.y+8}">${px.toFixed(1)}</text>`);
+      }
+    });
+  });
+
+  out.push('</g>');
+  svgEl.innerHTML = out.join('');
+  renderDiagramSidePanels(node, layout, powers, trace);
+  updateDiagramHint();
+}
+
+function updateDiagramHint(){
+  const el = document.getElementById('diagram-hint');
+  if(!isAdmin){
+    el.className='diagram-hint show locked';
+    el.innerHTML='Perfil <b>Técnico</b>: consulta e medições. A edição da caixa é restrita a administradores.';
+    return;
+  }
+  el.className='diagram-hint show';
+  if(dgSelPin) el.innerHTML='Pino selecionado — clique em <b>outro pino</b> para emendar, ou no mesmo para cancelar.';
+  else if(dgSelConn) el.innerHTML='Emenda selecionada — troque entre <b>fusão e conector</b> no painel à direita.';
+  else el.innerHTML='Clique numa <b>fibra</b> para ver o caminho · arraste <b>blocos e splitters</b> para organizar · roda do mouse dá <b>zoom</b>.';
+}
+
+/* ---- interação: clique, arraste de blocos, pan e zoom ---- */
+function dgPointFromEvent(e){
+  const svgEl=document.getElementById('diagram-svg');
+  const r=svgEl.getBoundingClientRect();
+  const sx=(e.clientX-r.left)*(DG.W/r.width);
+  const sy=(e.clientY-r.top)*(DG.H/r.height);
+  return {x:(sx-dgView.x)/dgView.k, y:(sy-dgView.y)/dgView.k, sx, sy};
+}
+
+/* A seleção no diagrama é resolvida no pointerdown/pointerup, e NÃO por eventos
+   'click'. Motivo: o pointerdown chama setPointerCapture no <svg>; com a captura
+   ativa o navegador reencaminha os eventos de mouse de compatibilidade (o click
+   inclusive) para o elemento capturador, então um listener no pino/conexão/splitter
+   nunca era disparado. É o mesmo desenho que o mapa já usa: decide o alvo na
+   descida e age na subida. */
+function alvoDiagrama(t){
+  if(!t || !t.closest) return null;
+  const pin = t.closest('[data-pin]');   if(pin) return {tipo:'pin',  id:pin.getAttribute('data-pin')};
+  const cn  = t.closest('[data-conn]');  if(cn)  return {tipo:'conn', id:cn.getAttribute('data-conn')};
+  const sp  = t.closest('[data-spl]');   if(sp)  return {tipo:'spl',  id:sp.getAttribute('data-spl')};
+  return null;
+}
+
+function initDiagramCanvas(){
+  const svgEl=document.getElementById('diagram-svg');
+
+  svgEl.addEventListener('pointerdown',(e)=>{
+    if(e.button===2 || e.button===1) return;  // direito/meio: reservado ao menu de contexto
+    const node = nodeById(diagramNodeId); if(!node) return;
+    const p = dgPointFromEvent(e);
+    const alvo = alvoDiagrama(e.target);                    // o que foi clicado, decidido aqui
+    const dragEl = e.target.closest ? e.target.closest('[data-drag]') : null;
+    if(dragEl && isAdmin && (!alvo || alvo.tipo==='spl')){  // pino e conexão não arrastam
+      const key = dragEl.getAttribute('data-drag');
+      const layout = buildLayout(node);
+      const bl = layout.blocks.find(b=>b.key===key) || layout.splBoxes.find(b=>b.key===key);
+      if(bl) dgDrag = {kind:'block', key, alvo, offX:p.x-bl.x, offY:p.y-bl.y, cx0:e.clientX, cy0:e.clientY, moved:false};
+    }
+    if(!dgDrag) dgDrag = {kind:'pan', alvo, x0:p.sx, y0:p.sy, vx:dgView.x, vy:dgView.y, moved:false};
+    try{ svgEl.setPointerCapture(e.pointerId); }catch(err){}
+  });
+
+  svgEl.addEventListener('pointermove',(e)=>{
+    if(!dgDrag) return;
+    const node = nodeById(diagramNodeId); if(!node) return;
+    const p = dgPointFromEvent(e);
+    if(dgDrag.kind==='block'){
+      // sem limiar, um pointermove de 0px já redesenhava o SVG e engolia o clique
+      if(!dgDrag.moved && Math.hypot(e.clientX-dgDrag.cx0, e.clientY-dgDrag.cy0) <= 4) return;
+      dgDrag.moved = true;
+      dgSetPos(node, dgDrag.key, Math.round(p.x-dgDrag.offX), Math.round(p.y-dgDrag.offY));
+      renderDiagram();
+    } else {
+      if(Math.hypot(p.sx-dgDrag.x0, p.sy-dgDrag.y0) > 4){
+        dgDrag.moved = true;
+        dgView.x = dgDrag.vx + (p.sx-dgDrag.x0);
+        dgView.y = dgDrag.vy + (p.sy-dgDrag.y0);
+        renderDiagram();
+      }
+    }
+  });
+
+  svgEl.addEventListener('pointerup',(e)=>{
+    const st = dgDrag; dgDrag = null;
+    try{ svgEl.releasePointerCapture(e.pointerId); }catch(err){}
+    if(!st || st.moved) return;                    // foi arraste ou pan: não seleciona
+    const node = nodeById(diagramNodeId); if(!node) return;
+    const alvo = st.alvo;
+    if(!alvo){                                     // área vazia: limpa a seleção
+      dgSelPin=null; dgSelConn=null; dgSelSplitter=null; dgTraceFiber=null; renderDiagram(); return;
+    }
+    if(alvo.tipo==='pin')  { onPinClick(alvo.id, node); return; }
+    if(alvo.tipo==='conn') { dgSelConn=alvo.id; dgSelPin=null; dgSelSplitter=null; renderDiagram(); return; }
+    if(alvo.tipo==='spl')  { dgSelSplitter=alvo.id; dgSelConn=null; dgSelPin=null; renderDiagram(); return; }
+  });
+
+  svgEl.addEventListener('pointercancel',()=>{ dgDrag=null; });
+
+  svgEl.addEventListener('wheel',(e)=>{
+    e.preventDefault();
+    const p = dgPointFromEvent(e);
+    const f = e.deltaY<0 ? 1.15 : 1/1.15;
+    const k2 = Math.max(0.3, Math.min(3.5, dgView.k*f));
+    dgView.x = p.sx - (p.sx - dgView.x)*(k2/dgView.k);
+    dgView.y = p.sy - (p.sy - dgView.y)*(k2/dgView.k);
+    dgView.k = k2;
+    renderDiagram();
+  },{passive:false});
+
+  document.getElementById('dg-zoom-in').addEventListener('click',()=>{ dgView.k=Math.min(3.5,dgView.k*1.25); renderDiagram(); });
+  document.getElementById('dg-zoom-out').addEventListener('click',()=>{ dgView.k=Math.max(0.3,dgView.k/1.25); renderDiagram(); });
+  document.getElementById('dg-fit').addEventListener('click',()=>{ dgView={x:0,y:0,k:1}; renderDiagram(); });
+  document.getElementById('dg-reset-pos').addEventListener('click',()=>{
+    const node=nodeById(diagramNodeId); if(!node) return;
+    node.dgPos={}; dgView={x:0,y:0,k:1};
+    toast('Posições do diagrama restauradas.');
+    renderDiagram();
+  });
+}
+
+function rotuloTipoConexao(t){
+  return {fusao:'fusão', conector:'conectorizado', drop:'drop', splitter_in:'entrada do splitter',
+          splitter_out:'saída do splitter', passante:'passante'}[t] || t;
+}
+function perdaDaConexao(cn){
+  const em = (typeof cn==='string') ? cn : (cn && cn.emenda);
+  if(em==='fusao') return PERDA_FUSAO;
+  if(em==='conector') return PERDA_CONECTOR;
+  return 0;
+}
+function refFromKey(k){ const i=k.indexOf(':'); return {type:k.slice(0,i), id:k.slice(i+1)}; }
+
+function onPinClick(key, node){
+  const ref = refFromKey(key);
+  // técnico: clique só destaca o caminho
+  if(!isAdmin){
+    dgTraceFiber = ref; dgSelPin=null; renderDiagram(); return;
+  }
+  if(!dgSelPin){
+    dgSelPin = key;
+    dgTraceFiber = ref;
+    dgSelConn=null; dgSelSplitter=null;
+    renderDiagram();
+    return;
+  }
+  if(dgSelPin===key){ dgSelPin=null; renderDiagram(); return; }
+  const a = refFromKey(dgSelPin), b = ref;
+  const erro = validarConexao(a,b,node);
+  if(erro){ toast(erro); return; }
+  criarConexao(a,b,node);
+}
+
+function validarConexao(a,b,node){
+  const existe = connectionsAtNode(node.id).some(cn=>
+    (refEq(cn.origem,a)&&refEq(cn.destino,b)) || (refEq(cn.origem,b)&&refEq(cn.destino,a)));
+  if(existe) return 'Esses dois pontos já estão conectados.';
+  if(a.type==='port' && b.type==='port') return 'Duas portas de cliente não se conectam entre si.';
+  const ocupado = (r)=> connectionsAtNode(node.id).filter(cn=> pinKey(cn.origem)===pinKey(r)||pinKey(cn.destino)===pinKey(r)).length;
+  if(a.type==='splitterPort' && ocupado(a)>=1) return 'Essa via do splitter já está ocupada.';
+  if(b.type==='splitterPort' && ocupado(b)>=1) return 'Essa via do splitter já está ocupada.';
+  if(a.type==='fiber' && ocupado(a)>=2) return 'Essa fibra já tem conexões nas duas pontas.';
+  if(b.type==='fiber' && ocupado(b)>=2) return 'Essa fibra já tem conexões nas duas pontas.';
+  return null;
+}
+
+function criarConexao(a,b,node,emendaForcada){
+  // "papel" = função topológica; "emenda" = como foi feito fisicamente. São independentes.
+  let papel='fusao';
+  if(a.type==='splitterPort'||b.type==='splitterPort'){
+    const sp = a.type==='splitterPort'?a:b;
+    const info = splitterPortById(sp.id);
+    papel = (info && info.port.papel==='entrada') ? 'splitter_in' : 'splitter_out';
+  } else if(a.type==='port'||b.type==='port'){
+    papel='drop';
+  }
+  let origem=a, destino=b;
+  if(papel==='splitter_out' && a.type!=='splitterPort'){ origem=b; destino=a; }
+  if(papel==='splitter_in'  && a.type==='splitterPort'){ origem=b; destino=a; }
+  const cn = addConnection(node.id, papel, origem, destino);
+  // saída de splitter pro cliente: por padrão é conectorizado (é raríssimo fusionar
+  // direto no splitter em campo). O toggle Fusão/Conector da barra continua valendo
+  // pros outros papéis (passante, splitter_in); pra forçar fusão numa saída específica,
+  // use "Emendar por fusão" no menu de botão direito (emendaForcada).
+  cn.emenda = emendaForcada || (papel==='splitter_out' ? 'conector' : dgJoinMode);
+  [a,b].forEach(r=>{ if(r.type==='fiber'){ const f=fiberStrands.find(x=>x.id===r.id); if(f&&f.status==='livre') f.status='ocupada'; }});
+  dgSelPin=null; dgTraceFiber=null;
+  toast('Emenda criada: '+(cn.emenda==='fusao'?'fusão':'conectorizada')+'.');
+  renderDiagram();
+}
+
+/* ---- painéis laterais do diagrama ---- */
+function renderDiagramSidePanels(node, layout, powers, trace){
+  // esquerda: cabos da caixa
+  const {entrada, saida, local} = classifyCables(node);
+  const colL = document.getElementById('diagram-cables');
+  function cableRow(cb, papel){
+    const fibs=fiberStrands.filter(f=>f.cableId===cb.id);
+    const livres=fibs.filter(f=>f.status==='livre').length;
+    const tubos=[...new Set(fibs.map(f=>f.tubo))];
+    return `<div class="cable-block">
+      <h5>${escapeHtml(cb.nome)}</h5>
+      <div class="cable-meta">${papel} · ${cb.tipo} · ${cb.codigo}</div>
+      <div class="cable-meta">${livres}/${fibs.length} livres · ${tubos.length} tubo(s)${cb.construtivo?' · '+cb.construtivo:''}</div>
+      <div class="cable-meta" ${cb.semRota?'style="color:var(--yellow)"':''}>${cb.semRota?'sem rota no mapa':(cb.km!==undefined?cb.km.toFixed(2)+' km':'rota no mapa')}</div>
+      ${isAdmin?`<button class="btn btn-sm" data-delcable="${cb.id}" style="margin-top:5px;width:100%;justify-content:center;">Remover cabo</button>`:''}
+    </div>`;
+  }
+  colL.innerHTML =
+    (entrada.map(cb=>cableRow(cb,'entrada')).join('')) +
+    (local.map(cb=>cableRow(cb,'local')).join('')) +
+    (saida.map(cb=>cableRow(cb,'saída')).join('')) +
+    `<div class="sb-section"><h4>Legenda</h4>
+      <div class="legend-chip"><i style="background:#3fb950"></i>fibra com sinal</div>
+      <div class="legend-chip"><i style="background:#3fb950;opacity:.45;box-shadow:0 0 0 2px #2a3140"></i>emendada, sem sinal</div>
+      <div class="legend-chip"><i style="border:1.5px dashed #7c8798"></i>livre</div>
+      <div class="cable-meta" style="margin-top:8px;">Marcador <b>▭</b> = fusão · <b>] [</b> = conectorizado.</div>
+      <div class="cable-meta" style="margin-top:4px;">dBm é <b>estimado</b> por perdas de catálogo (fusão ${PERDA_FUSAO} dB · conector ${PERDA_CONECTOR} dB).</div>
+    </div>`;
+  colL.querySelectorAll('[data-delcable]').forEach(b=>{
+    b.addEventListener('click',()=> removerCabo(b.getAttribute('data-delcable'), node));
+  });
+
+  // direita: propriedades da seleção
+  const colR = document.getElementById('diagram-info');
+  if(dgSelConn){
+    const cn = connections.find(x=>x.id===dgSelConn);
+    const dA = describeRef(cn.origem), dB = describeRef(cn.destino);
+    colR.innerHTML = `
+      ${fieldsHtml([
+        {label:'Função', value: rotuloTipoConexao(cn.tipo)},
+        {label:'Perda aplicada', value: perdaDaConexao(cn) ? perdaDaConexao(cn)+' dB' : '—'},
+        {label:'Ponto A', value: dA, full:true},
+        {label:'Ponto B', value: dB, full:true}
+      ])}
+      ${isAdmin?`
+      <div class="form-field"><label>Como está emendado</label>
+        <select id="dg-emenda">
+          <option value="fusao" ${cn.emenda==='fusao'?'selected':''}>Fusão (${PERDA_FUSAO} dB)</option>
+          <option value="conector" ${cn.emenda==='conector'?'selected':''}>Conectorizado (${PERDA_CONECTOR} dB)</option>
+          <option value="passante" ${(!cn.emenda||cn.emenda==='passante')?'selected':''}>Passante / sem emenda (0 dB)</option>
+        </select>
+      </div>
+      <div class="action-row"><button class="btn btn-danger" id="dg-del-conn" style="flex:1 1 100%;">Excluir conexão</button></div>`:''}`;
+    const selEm=document.getElementById('dg-emenda');
+    if(selEm) selEm.addEventListener('change',()=>{
+      cn.emenda = selEm.value==='passante' ? null : selEm.value;
+      toast('Emenda alterada para '+(selEm.value==='passante'?'passante':selEm.value==='fusao'?'fusão':'conectorizada')+'. Potências recalculadas.');
+      renderDiagram();
+    });
+    const b=document.getElementById('dg-del-conn');
+    if(b) b.addEventListener('click',()=>{
+      connections = connections.filter(x=>x.id!==dgSelConn);
+      dgSelConn=null; toast('Conexão removida.'); renderDiagram();
+    });
+    return;
+  }
+  if(dgSelSplitter){
+    const s = splitters.find(x=>x.id===dgSelSplitter);
+    const outs = s.ports.filter(p=>p.papel==='saida');
+    const outsLivres = outs.filter(p=>!isPinConnected('splitterPort:'+p.id, node));
+    const portasLivres = portsOf(node.id).filter(p=>p.status==='livre' && !portaAlimentada(p.id,node));
+    const podeLigar = isAdmin && outsLivres.length && portasLivres.length;
+    colR.innerHTML = `
+      ${fieldsHtml([
+        {label:'Splitter', value:s.razao},
+        {label:'Tipo', value:s.balanceado?'Balanceado':'Desbalanceado (tap)'},
+        {label:'Vias de saída', value:outs.length}
+      ])}
+      <div class="section-title">Perda por via (catálogo)</div>
+      <div class="port-list">
+        ${outs.map(p=>`<div class="port-row"><span class="pl">${splitterOutLabel(p,s)}</span><span class="pf">-${splitterLoss(s,p).toFixed(1)} dB</span></div>`).join('')}
+      </div>
+      ${podeLigar ? `
+      <div class="action-row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="dg-spl-autowire" style="flex:1 1 100%;">Ligar saídas às portas livres (${Math.min(outsLivres.length,portasLivres.length)})</button>
+      </div>` : ''}
+      ${isAdmin?`
+      <div class="form-field" style="margin-top:12px;"><label>Simular troca — categoria</label>
+        <select id="dg-spl-cat">
+          <option value="balanceado"${s.balanceado?' selected':''}>Balanceado (1xN)</option>
+          <option value="desbalanceado"${!s.balanceado?' selected':''}>Desbalanceado (tap)</option>
+        </select>
+      </div>
+      <div class="form-field"><label>Modelo</label><select id="dg-spl-tipo"></select></div>
+      <div id="dg-spl-preview" class="spl-preview"></div>
+      <div class="action-row">
+        <button class="btn btn-accent" id="dg-spl-apply">Aplicar troca</button>
+        <button class="btn btn-danger" id="dg-spl-del">Remover</button>
+      </div>`:''}`;
+    const selT=document.getElementById('dg-spl-tipo');
+    const selC=document.getElementById('dg-spl-cat');
+    const prev=document.getElementById('dg-spl-preview');
+    function preencherModelos(){
+      if(!selC||!selT) return;
+      selT.innerHTML = CATALOGO_SPLITTERS[selC.value].map(t=>`<option value="${t}"${t===s.razao?' selected':''}>${t}</option>`).join('');
+    }
+    preencherModelos();
+    if(selC) selC.addEventListener('change', ()=>{ preencherModelos(); desenharPrevia(); });
+    const entradaP = powers['splitterPort:'+s.ports.find(p=>p.papel==='entrada').id];
+    function desenharPrevia(){
+      if(!selT||!prev) return;
+      const t=selT.value;
+      const nv = /^1x/.test(t) ? vias(t) : 2;
+      const ocupadas = s.ports.filter(p=>p.papel==='saida').filter(p=>
+        connections.some(cn=>cn.tipo==='splitter_out'&&cn.origem.type==='splitterPort'&&cn.origem.id===p.id
+          && cn.destino.type==='port')).length;
+      if(t===s.razao){ prev.innerHTML='<span class="muted">Tipo atual — nada muda.</span>'; return; }
+      if(entradaP===undefined){ prev.innerHTML='<span class="muted">Sem sinal na entrada: não dá para prever a potência.</span>'; return; }
+      const linhas = Array.from({length:nv},(_,i)=>{
+        const p = entradaP - perdaPrevista(t,i);
+        const rot = /^1x/.test(t) ? ('S'+(i+1)) : (t.split('/')[i]+'%');
+        return `<div class="prev-row"><span>${rot}</span><b class="${p<-27?'bad':''}">${p.toFixed(1)} dBm</b></div>`;
+      }).join('');
+      const perde = ocupadas>nv ? `<div class="prev-warn">${ocupadas-nv} cliente(s) ficariam sem via.</div>` : '';
+      prev.innerHTML = `<div class="prev-title">Se aplicar ${t}:</div>${linhas}${perde}`;
+    }
+    if(selT){ selT.addEventListener('change', desenharPrevia); desenharPrevia(); }
+    const ap=document.getElementById('dg-spl-apply');
+    if(ap) ap.addEventListener('click',()=> trocarSplitter(s, selT.value, node));
+    const dl=document.getElementById('dg-spl-del');
+    if(dl) dl.addEventListener('click',()=> removerSplitter(s, node));
+    const aw=document.getElementById('dg-spl-autowire');
+    if(aw) aw.addEventListener('click',()=> ligarSaidasAsPortasLivres(s, node));
+    return;
+  }
+  if(dgTraceFiber && dgTraceFiber.type==='fiber'){
+    const f = fiberStrands.find(x=>x.id===dgTraceFiber.id);
+    const cb = cables.find(x=>x.id===f.cableId);
+    const px = powers['fiber:'+f.id];
+    const alcancados = trace ? [...trace.pins].filter(k=>k.startsWith('port:')) : [];
+    colR.innerHTML = `
+      ${fieldsHtml([
+        {label:'Cabo', value:escapeHtml(cb.nome)+' · '+cb.tipo},
+        {label:'Código', value:cb.codigo},
+        {label:'Fibra', value:'nº '+f.numero},
+        {label:'Cor', value:f.cor},
+        {label:'Tubo', value:f.tubo+' · '+f.tuboCor},
+        {label:'Status', value:f.status},
+        {label:'Origem do cabo', value: origemDoCabo(cb, node), full:true},
+        {label:'Sinal nesta caixa', value: px!==undefined ? 'sim' : 'sem sinal de origem'},
+        px!==undefined?{label:'Potência estimada', value:px.toFixed(1)+' dBm'}:null
+      ])}
+      ${px===undefined && f.status!=='livre' ? '<div class="alert-box has">Esta fibra está emendada, mas não há caminho com sinal até ela dentro desta caixa. Verifique a fusão a montante.</div>' : ''}
+      ${alcancados.length?`<div class="section-title">Portas alcançadas</div><div class="port-list">${
+        alcancados.map(k=>{const p=ports.find(x=>x.id===k.split(':')[1]);
+          return `<div class="port-row ${p.clientName?'occ':'free'}"><span class="pn">${p.label.replace('Porta ','')}</span><span class="pd"></span><span class="pl">${escapeHtml(p.clientName||'livre')}</span></div>`;}).join('')
+      }</div>`:''}`;
+    return;
+  }
+  const mCalc = measurementsFor(node.id).find(m=>m.kind==='calculado');
+  const mMed  = measurementsFor(node.id).filter(m=>m.kind==='medido').pop();
+  colR.innerHTML = `
+    ${fieldsHtml([
+      {label:'Caixa', value:escapeHtml(node.name)},
+      {label:'Tipo', value:TYPE_LABEL[node.type]},
+      {label:'Potência de entrada', value:(typeof node.powerIn==='number'?node.powerIn.toFixed(1):'—')+' dBm'},
+      mCalc?{label:'Esperada (cálculo)', value:mCalc.valorDbm+' dBm'}:null,
+      mMed?{label:'Última medição', value:mMed.valorDbm+' dBm'}:null
+    ])}
+    <div class="diagram-empty">Clique em uma fibra, conexão ou splitter para ver os detalhes.</div>`;
+}
+
+function origemDoCabo(cb, node){
+  if(cb.semRota || !cb.linkId) return 'cabo local, sem rota definida';
+  const l = links.find(x=>x.id===cb.linkId);
+  if(!l) return '—';
+  const outro = nodeById(l.from===node.id ? l.to : l.from);
+  const sentido = l.to===node.id ? 'vem de ' : 'vai para ';
+  return outro ? (sentido+outro.name+(cb.km!==undefined?' · '+cb.km.toFixed(2)+' km':'')) : '—';
+}
+function describeRef(r){
+  if(r.type==='fiber'){
+    const f=fiberStrands.find(x=>x.id===r.id); const cb=cables.find(x=>x.id===f.cableId);
+    return escapeHtml(cb.nome)+' · F'+f.numero+' '+f.cor;
+  }
+  if(r.type==='port'){ const p=ports.find(x=>x.id===r.id); return p?(p.label+(p.clientName?' — '+escapeHtml(p.clientName):' (livre)')):'?'; }
+  if(r.type==='splitterPort'){ const i=splitterPortById(r.id);
+    return i ? ('Splitter '+i.splitter.razao+' · '+(i.port.papel==='entrada'?'entrada':splitterOutLabel(i.port,i.splitter))) : '?'; }
+  if(r.type==='link'){ const l=links.find(x=>x.id===r.id); return l?('Trecho '+l.id):'?'; }
+  return '?';
+}
+
+/* ---- ações de edição ---- */
+function vias(tipo){
+  return /^1x/.test(tipo) ? parseInt(tipo.split('x')[1],10) : 2;
+}
+function perdaPrevista(tipo, viaIdx){
+  if(/^1x/.test(tipo)) return IL_BALANCEADO[tipo] || 10.4;
+  const pcts = tipo.split('/').map(v=>parseInt(v,10));
+  const p = pcts[viaIdx] !== undefined ? pcts[viaIdx] : pcts[0];
+  return IL_SAIDA_TAP[p]!==undefined ? IL_SAIDA_TAP[p] : 10*Math.log10(100/Math.max(1,p));
+}
+
+/* Troca o splitter PRESERVANDO os destinos já ligados (clientes continuam
+   associados). Se o novo tipo tiver menos vias, o que sobra é informado. */
+function trocarSplitter(s, novoTipo, node){
+  if(novoTipo===s.razao) return;
+  const balanceado = /^1x/.test(novoTipo);
+  const saidas = balanceado ? parseInt(novoTipo.split('x')[1],10)
+                            : novoTipo.split('/').map(v=>parseInt(v,10));
+  const nNovas = balanceado ? saidas : saidas.length;
+
+  // guarda os destinos atuais, na ordem das vias
+  const antigas = s.ports.filter(p=>p.papel==='saida');
+  const destinos = antigas.map(p=>{
+    const cn = connections.find(x=>x.tipo==='splitter_out' &&
+      x.origem.type==='splitterPort' && x.origem.id===p.id);
+    return cn ? cn.destino : null;
+  });
+
+  // remove as conexões de saída antigas
+  const idsAntigos = antigas.map(p=>p.id);
+  connections = connections.filter(cn=>
+    !(cn.tipo==='splitter_out' && cn.origem.type==='splitterPort' && idsAntigos.includes(cn.origem.id)));
+
+  s.razao = novoTipo; s.balanceado = balanceado;
+  const inPort = s.ports.find(p=>p.papel==='entrada');
+  s.ports = [inPort];
+  const lista = balanceado ? Array.from({length:saidas},(_,i)=>i+1) : saidas;
+  lista.forEach((v,idx)=> s.ports.push({id:s.id+'-out'+v+'_'+idx, splitterId:s.id, papel:'saida',
+    percentual: balanceado?null:v, indice: idx+1}));
+
+  // religa os destinos preservados, via a via
+  const novas = s.ports.filter(p=>p.papel==='saida');
+  let religados=0; const orfaos=[];
+  destinos.forEach((d,i)=>{
+    if(!d) return;
+    if(i < novas.length){
+      const cn = addConnection(node.id,'splitter_out',{type:'splitterPort',id:novas[i].id}, d);
+      cn.emenda = 'conector';   // mesma regra do resto do sistema: saída de splitter é conectorizada por padrão
+      religados++;
+    }
+    else orfaos.push(describeRef(d));
+  });
+
+  dgSelSplitter=s.id;
+  let msg = 'Splitter trocado para '+novoTipo+'. '+religados+' saída(s) religada(s) automaticamente.';
+  if(orfaos.length) msg += ' Sem via para: '+orfaos.join(', ')+'.';
+  toast(msg);
+  renderDiagram();
+}
+function removerSplitter(s, node){
+  if(!confirm('Remover o splitter '+s.razao+' e suas conexões?')) return;
+  const ids = s.ports.map(p=>p.id);
+  connections = connections.filter(cn=>
+    !(cn.origem.type==='splitterPort'&&ids.includes(cn.origem.id)) &&
+    !(cn.destino.type==='splitterPort'&&ids.includes(cn.destino.id)));
+  splitters = splitters.filter(x=>x.id!==s.id);
+  dgSelSplitter=null; toast('Splitter removido.'); renderDiagram();
+}
+function removerCabo(cableId, node){
+  const cb = cables.find(x=>x.id===cableId);
+  if(!cb) return;
+  if(!confirm('Remover '+cb.nome+' desta caixa e suas conexões?')) return;
+  const fids = fiberStrands.filter(f=>f.cableId===cableId).map(f=>f.id);
+  connections = connections.filter(cn=>
+    !(cn.origem.type==='fiber'&&fids.includes(cn.origem.id)) &&
+    !(cn.destino.type==='fiber'&&fids.includes(cn.destino.id)));
+  fiberStrands = fiberStrands.filter(f=>f.cableId!==cableId);
+  cables = cables.filter(x=>x.id!==cableId);
+  toast('Cabo removido.'); renderDiagram();
+}
+
+/* ---- toolbar do diagrama ---- */
+function initDiagramToolbar(){
+  document.querySelectorAll('#dg-joinsel [data-join]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      dgJoinMode = b.getAttribute('data-join');
+      document.querySelectorAll('#dg-joinsel [data-join]').forEach(x=>
+        x.classList.toggle('active', x.getAttribute('data-join')===dgJoinMode));
+      toast('Próximas emendas: '+(dgJoinMode==='fusao'?'fusão':'conectorizadas')+'.');
+    });
+  });
+  document.getElementById('dg-role').addEventListener('click', ()=>{
+    isAdmin=!isAdmin; dgSelPin=null; dgSelConn=null; dgSelSplitter=null;
+    toast(isAdmin?'Perfil administrador: edição liberada.':'Perfil técnico: somente consulta.');
+    renderDiagram();
+  });
+  document.getElementById('dg-add-splitter').addEventListener('click', ()=>{
+    const node=nodeById(diagramNodeId);
+    // passo 1: escolher a categoria, para não abrir uma lista enorme de uma vez
+    modalEl.innerHTML = `
+      <div class="modal-head"><h3>Adicionar splitter</h3><button class="panel-close" id="modal-x">✕</button></div>
+      <div class="modal-body">
+        <div class="form-field"><label>Categoria</label>
+          <select id="f-spl-cat">
+            <option value="balanceado">Balanceado (1xN) — atendimento</option>
+            <option value="desbalanceado">Desbalanceado (tap) — derivar mantendo o tronco</option>
+          </select>
+        </div>
+        <div class="form-field"><label>Modelo</label><select id="f-spl"></select></div>
+        <div id="f-spl-info" class="cable-meta"></div>
+      </div>
+      <div class="modal-foot"><button class="btn" id="modal-cancel">Cancelar</button>
+        <button class="btn btn-accent" id="modal-save">Adicionar</button></div>`;
+    overlay.classList.add('show');
+    const cat=document.getElementById('f-spl-cat'), lst=document.getElementById('f-spl'), inf=document.getElementById('f-spl-info');
+    function preencher(){
+      lst.innerHTML = CATALOGO_SPLITTERS[cat.value].map(t=>`<option value="${t}">${t}</option>`).join('');
+      mostrarPerda();
+    }
+    function mostrarPerda(){
+      const t=lst.value;
+      if(/^1x/.test(t)) inf.textContent = 'Perda de catálogo: -'+(IL_BALANCEADO[t]||0).toFixed(1)+' dB em cada uma das '+vias(t)+' vias.';
+      else {
+        const p=t.split('/').map(v=>parseInt(v,10));
+        inf.textContent = 'Perda de catálogo: -'+perdaPrevista(t,0).toFixed(1)+' dB na via de '+p[0]+'% e -'+perdaPrevista(t,1).toFixed(1)+' dB na via de '+p[1]+'%.';
+      }
+    }
+    cat.addEventListener('change', preencher);
+    lst.addEventListener('change', mostrarPerda);
+    preencher();
+    document.getElementById('modal-x').addEventListener('click', closeModal);
+    document.getElementById('modal-cancel').addEventListener('click', closeModal);
+    document.getElementById('modal-save').addEventListener('click', ()=>{
+      const t=lst.value, bal = cat.value==='balanceado';
+      addSplitter(node.id, t, bal?parseInt(t.split('x')[1],10):t.split('/').map(v=>parseInt(v,10)), bal);
+      closeModal(); toast('Splitter '+t+' adicionado. Conecte a entrada e as saídas.'); renderDiagram();
+    });
+  });
+  document.getElementById('dg-add-cable').addEventListener('click', ()=>{
+    const node=nodeById(diagramNodeId);
+    modalEl.innerHTML = `
+      <div class="modal-head"><h3>Adicionar cabo à caixa</h3><button class="panel-close" id="modal-x">✕</button></div>
+      <div class="modal-body">
+        <div class="form-field"><label>Nome</label><input id="f-cnome" type="text" placeholder="CABO ${cables.length+1}"></div>
+        <div class="form-field"><label>Fibras</label>
+          <select id="f-cfo"><option>2</option><option>4</option><option selected>6</option><option>12</option><option>24</option><option>36</option><option>48</option></select></div>
+        <div class="form-field"><label>Tipo construtivo</label>
+          <select id="f-ctipo"><option>AS (auto-sustentado)</option><option>Drop</option><option>Espinado</option><option>Subterrâneo</option></select></div>
+        <div class="cable-meta" style="color:var(--yellow)">O ideal é criar o cabo no mapa (com rota e distância). Criado aqui, ele fica marcado como <b>sem rota</b> até ser georreferenciado.</div>
+      </div>
+      <div class="modal-foot"><button class="btn" id="modal-cancel">Cancelar</button>
+        <button class="btn btn-accent" id="modal-save">Adicionar</button></div>`;
+    overlay.classList.add('show');
+    document.getElementById('modal-x').addEventListener('click', closeModal);
+    document.getElementById('modal-cancel').addEventListener('click', closeModal);
+    document.getElementById('modal-save').addEventListener('click', ()=>{
+      const nome=document.getElementById('f-cnome').value.trim() || ('CABO '+(cables.length+1));
+      const fo=parseInt(document.getElementById('f-cfo').value,10);
+      const tipoC=document.getElementById('f-ctipo').value;
+      const cb=addCable(null, nome, fo+'FO', fo);
+      cb.localAtNode=node.id; cb.construtivo=tipoC; cb.semRota=true;
+      closeModal(); toast(nome+' adicionado ('+fo+' fibras). Conecte as fibras no diagrama.'); renderDiagram();
+    });
+  });
+}
+
+document.getElementById('diagram-back').addEventListener('click', closeDiagram);
+
+function openDiagram(nodeId){
+  diagramNodeId = nodeId;
+  dgSelPin=null; dgSelConn=null; dgSelSplitter=null; dgTraceFiber=null;
+  dgView={x:0,y:0,k:1};
+  document.getElementById('diagram-overlay').classList.add('show');
+  renderDiagram();
+}
+function closeDiagram(){
+  document.getElementById('diagram-overlay').classList.remove('show');
+  diagramNodeId=null; dgTraceFiber=null;
+  renderAll();
+}
+
+/* ============================================================
+   MENU DE CONTEXTO (botão direito) — mapa e diagrama
+   Um único menu (#ctxmenu) reaproveitado por todos os alvos. Cada handler
+   apenas monta a lista de itens; as ações chamam as funções que já existem,
+   para o comportamento ficar idêntico ao dos painéis laterais.
+   ============================================================ */
+const ctxEl = document.getElementById('ctxmenu');
+let ctxOpen = false;
+
+function closeCtxMenu(){
+  if(!ctxOpen) return;
+  ctxOpen = false;
+  ctxEl.classList.remove('show');
+  ctxEl.innerHTML = '';
+}
+
+function ctxIcon(type){
+  return ICON_PATHS[type]
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="${STATUS_COLOR.normal}" stroke-width="1.8">${ICON_PATHS[type]}</svg>`
+    : '';
+}
+
+/* items: {label, icon, kbd, danger, disabled, sep, onClick} — nulos são ignorados */
+function openCtxMenu(e, head, items){
+  const list = (items||[]).filter(Boolean);
+  if(!list.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  closeCtxMenu();
+
+  const parts = [];
+  if(head) parts.push(`<div class="ctxmenu-head">${escapeHtml(head)}</div>`);
+  list.forEach((it,i)=>{
+    if(it.sep){ parts.push('<div class="ctxmenu-sep"></div>'); return; }
+    const cls = 'ctxmenu-item'+(it.danger?' danger':'')+(it.disabled?' disabled':'');
+    parts.push(`<div class="${cls}" data-ci="${i}">${it.icon||''}<span>${escapeHtml(it.label)}</span>${
+      it.kbd?`<kbd>${escapeHtml(it.kbd)}</kbd>`:''}</div>`);
+  });
+  ctxEl.innerHTML = parts.join('');
+  ctxEl.querySelectorAll('[data-ci]').forEach(el=>{
+    const it = list[parseInt(el.getAttribute('data-ci'),10)];
+    if(!it || it.disabled || !it.onClick) return;
+    el.addEventListener('click',(ev)=>{
+      ev.stopPropagation();
+      closeCtxMenu();
+      it.onClick();
+    });
+  });
+
+  // abre invisível no canto para medir, depois posiciona sem sair da janela
+  ctxEl.style.left='0px'; ctxEl.style.top='0px';
+  ctxEl.classList.add('show');
+  ctxOpen = true;
+  const r = ctxEl.getBoundingClientRect(), m = 6;
+  let x = e.clientX, y = e.clientY;
+  if(x + r.width  > window.innerWidth  - m) x = Math.max(m, window.innerWidth  - r.width  - m);
+  if(y + r.height > window.innerHeight - m) y = Math.max(m, window.innerHeight - r.height - m);
+  ctxEl.style.left = x+'px';
+  ctxEl.style.top  = y+'px';
+}
+
+/* ---- fechamento ---- */
+document.addEventListener('pointerdown',(e)=>{ if(!ctxEl.contains(e.target)) closeCtxMenu(); }, true);
+document.addEventListener('wheel',(e)=>{ if(!ctxEl.contains(e.target)) closeCtxMenu(); }, true);
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeCtxMenu(); });
+window.addEventListener('resize', closeCtxMenu);
+window.addEventListener('blur', closeCtxMenu);
+ctxEl.addEventListener('contextmenu',(e)=> e.preventDefault());
+
+/* ============ MAPA ============ */
+function ctxItemsNode(n){
+  const items = [];
+  if(['ceo','cto'].includes(n.type))
+    items.push({label:'Abrir diagrama unifilar', icon:ctxIcon(n.type), onClick:()=> openDiagram(n.id)});
+  if(n.type==='client')
+    items.push({label:'Destacar caminho até a origem', onClick:()=>{ selectedNodeId=n.id; showPathForClient(n); }});
+  items.push({label:'Centralizar no mapa', onClick:()=>{ centerOn(n); }});
+  items.push({sep:true});
+  items.push({label:'Editar', onClick:()=>{ onNodeClick(n.id); openEditModal(n); }});
+  items.push({label:'Conectar a partir daqui', onClick:()=>{ onNodeClick(n.id); startLinking(n); }});
+  items.push({sep:true});
+  items.push({label:'Excluir elemento', danger:true, onClick:()=>{
+    if(confirm('Excluir "'+n.name+'" e todos os links associados?')) deleteNode(n.id);
+  }});
+  return items;
+}
+
+function ctxItemsLink(l, ll){
+  const a = nodeById(l.from), b = nodeById(l.to);
+  const items = [
+    {label:'Inserir caixa aqui (sangria)', onClick:()=> abrirSangria(l, ll)}
+  ];
+  [a,b].forEach(p=>{
+    if(p && ['ceo','cto'].includes(p.type))
+      items.push({label:'Abrir diagrama de '+p.name, icon:ctxIcon(p.type), onClick:()=> openDiagram(p.id)});
+  });
+  items.push({sep:true});
+  items.push({label:'Excluir trecho', danger:true, onClick:()=>{
+    if(confirm('Excluir este link?')){
+      links = links.filter(x=>x.id!==l.id);
+      if(selectedLinkId===l.id) closePanel(); else renderAll();
+      toast('Link excluído.');
+    }
+  }});
+  return items;
+}
+
+function ctxItemsMapVazio(latlng){
+  const items = ADDABLE.map(t=>({
+    label:'Adicionar '+TYPE_LABEL[t]+' aqui',
+    icon:ctxIcon(t),
+    onClick:()=> openCreateModal(t, latlng)
+  }));
+  items.push({sep:true});
+  items.push({label:'Enquadrar rede', onClick:fitToNetwork});
+  return items;
+}
+
+mapEl.addEventListener('contextmenu',(e)=>{
+  e.preventDefault();   // nunca deixa o menu nativo aparecer sobre o mapa
+  // em modo de posicionamento/ligação, o botão direito cancela (padrão de editor)
+  if(mode!=='idle'){ clearMode(); toast('Operação cancelada.'); return; }
+
+  const t = e.target;
+  const nodeG  = t.closest ? t.closest('.mnode') : null;
+  const linkEl = t.closest ? t.closest('.mlink-hit, .mlink') : null;
+
+  if(nodeG){
+    const n = nodeById(nodeG.getAttribute('data-node'));
+    if(n) openCtxMenu(e, TYPE_LABEL[n.type]+' — '+n.name, ctxItemsNode(n));
+    return;
+  }
+  if(linkEl){
+    const l = linkById(linkEl.getAttribute('data-link'));
+    if(l){
+      const a=nodeById(l.from), b=nodeById(l.to);
+      const ll = toLatLng(localPt(e).x, localPt(e).y);
+      openCtxMenu(e, (a?a.name:'?')+' → '+(b?b.name:'?'), ctxItemsLink(l, ll));
+    }
+    return;
+  }
+  const p = localPt(e);
+  openCtxMenu(e, 'Neste ponto do mapa', ctxItemsMapVazio(toLatLng(p.x,p.y)));
+});
+
+/* ============ DIAGRAMA ============ */
+/* Remove todas as emendas que tocam um pino. Mantém a mesma semântica do
+   botão "Excluir conexão" do painel (não devolve a fibra para "livre"). */
+function removerConexoesDoPino(key, node){
+  const antes = connections.length;
+  connections = connections.filter(cn => pinKey(cn.origem)!==key && pinKey(cn.destino)!==key);
+  const n = antes - connections.length;
+  if(!n){ toast('Este ponto não tem emendas.'); return; }
+  if(dgSelConn && !connections.some(c=>c.id===dgSelConn)) dgSelConn=null;
+  dgSelPin=null;
+  toast(n===1 ? 'Emenda removida.' : n+' emendas removidas.');
+  renderDiagram();
+}
+
+/* O clique esquerdo já seleciona o pino, destaca o caminho e, com outro pino
+   selecionado, fecha a emenda. A direita só oferece o que o esquerdo não faz:
+   escolher o tipo de emenda no ato e desfazer. */
+function ctxItemsPino(key, node){
+  const ref = refFromKey(key);
+  const conectado = isPinConnected(key, node);
+  const items = [];
+  if(isAdmin && dgSelPin && dgSelPin!==key){
+    const a = refFromKey(dgSelPin);
+    const erro = validarConexao(a, ref, node);
+    items.push({label:'De: '+describeRefTexto(a), disabled:true});
+    if(erro){
+      items.push({label:erro, disabled:true});
+    } else {
+      items.push({label:'Emendar por fusão ('+PERDA_FUSAO+' dB)', onClick:()=> criarConexao(a, ref, node, 'fusao')});
+      items.push({label:'Emendar por conector ('+PERDA_CONECTOR+' dB)', onClick:()=> criarConexao(a, ref, node, 'conector')});
+    }
+    items.push({sep:true});
+    items.push({label:'Cancelar seleção', onClick:()=>{ dgSelPin=null; renderDiagram(); }});
+  } else if(isAdmin && dgSelPin===key){
+    items.push({label:'Cancelar seleção', onClick:()=>{ dgSelPin=null; renderDiagram(); }});
+  }
+  if(isAdmin && conectado){
+    if(items.length) items.push({sep:true});
+    items.push({label:'Remover emendas deste ponto', danger:true, onClick:()=> removerConexoesDoPino(key, node)});
+  }
+  if(!items.length)
+    items.push({label:'Clique esquerdo para selecionar este ponto', disabled:true});
+  return items;
+}
+
+function ctxItemsConexao(cn, node){
+  const items = [];
+  if(!isAdmin){
+    items.push({label:'Clique esquerdo para ver as propriedades', disabled:true});
+    return items;
+  }
+  const atual = cn.emenda || 'passante';
+  const setEmenda = (v, rotulo)=> ({
+    label:(atual===v?'✓ ':'')+rotulo,
+    disabled: atual===v,
+    onClick:()=>{
+      cn.emenda = (v==='passante') ? null : v;
+      toast('Emenda alterada para '+rotulo.toLowerCase()+'. Potências recalculadas.');
+      renderDiagram();
+    }
+  });
+  items.push(setEmenda('fusao','Fusão ('+PERDA_FUSAO+' dB)'));
+  items.push(setEmenda('conector','Conectorizado ('+PERDA_CONECTOR+' dB)'));
+  items.push(setEmenda('passante','Passante / sem emenda (0 dB)'));
+  items.push({sep:true});
+  items.push({label:'Excluir conexão', danger:true, onClick:()=>{
+    connections = connections.filter(x=>x.id!==cn.id);
+    if(dgSelConn===cn.id) dgSelConn=null;
+    toast('Conexão removida.'); renderDiagram();
+  }});
+  return items;
+}
+
+function ctxItemsSplitter(s, node){
+  const items = [];
+  if(!isAdmin){
+    items.push({label:'Clique esquerdo para ver as propriedades', disabled:true});
+    return items;
+  }
+  items.push({label:'Restaurar posição deste splitter', onClick:()=> restaurarPosBloco(node,'spl:'+s.id)});
+  items.push({sep:true});
+  items.push({label:'Remover splitter', danger:true, onClick:()=> removerSplitter(s, node)});
+  return items;
+}
+
+/* Liga, em ordem, as saídas livres do splitter às portas livres da caixa —
+   automatiza o clique-clique repetitivo. Sempre conectorizado (papel splitter_out
+   já força isso em criarConexao). Não mexe em saída ou porta já ocupada por
+   ninguém — só preenche o que sobrou solto dos dois lados. */
+function ligarSaidasAsPortasLivres(s, node){
+  const outs = s.ports.filter(p=>p.papel==='saida' && !isPinConnected('splitterPort:'+p.id, node));
+  const portas = portsOf(node.id).filter(p=>p.status==='livre' && !portaAlimentada(p.id,node))
+    .sort((a,b)=> parseInt(a.label.replace('Porta ',''),10) - parseInt(b.label.replace('Porta ',''),10));
+  const n = Math.min(outs.length, portas.length);
+  for(let i=0;i<n;i++) criarConexao({type:'splitterPort',id:outs[i].id}, {type:'port',id:portas[i].id}, node, 'conector');
+  const sobraOuts = outs.length-n, sobraPortas = portas.length-n;
+  let msg = n+' saída(s) ligada(s) às portas livres, por conector.';
+  if(sobraOuts)   msg += ' '+sobraOuts+' saída(s) do splitter ficaram sem porta.';
+  if(sobraPortas) msg += ' '+sobraPortas+' porta(s) livre(s) sobraram sem saída.';
+  toast(msg);
+  renderDiagram();
+}
+
+function restaurarPosBloco(node, key){
+  if(node.dgPos && node.dgPos[key]){ delete node.dgPos[key]; renderDiagram(); toast('Posição restaurada.'); }
+  else toast('Este bloco já está na posição padrão.');
+}
+
+function ctxItemsBloco(key, node){
+  const items = [];
+  if(key==='ports'){
+    const ps = portsOf(node.id);
+    items.push({label:ps.filter(p=>p.clientName).length+' de '+ps.length+' portas em uso', disabled:true});
+    if(isAdmin) items.push({label:'Restaurar posição do bloco', onClick:()=> restaurarPosBloco(node,key)});
+    return items;
+  }
+  const cb = cables.find(c=>c.id===key.slice('cable:'.length));
+  if(!cb) return items;
+  const fibs = fiberStrands.filter(f=>f.cableId===cb.id);
+  items.push({label:cb.tipo+' · '+fibs.filter(f=>f.status==='livre').length+'/'+fibs.length+' livres', disabled:true});
+  items.push({label:'Origem: '+origemDoCabo(cb, node), disabled:true});
+  if(isAdmin){
+    items.push({sep:true});
+    items.push({label:'Restaurar posição do bloco', onClick:()=> restaurarPosBloco(node,key)});
+    items.push({label:'Remover cabo desta caixa', danger:true, onClick:()=> removerCabo(cb.id, node)});
+  }
+  return items;
+}
+
+function ctxItemsDiagramaVazio(node){
+  const items = [];
+  if(isAdmin){
+    items.push({label:'Adicionar cabo', onClick:()=> document.getElementById('dg-add-cable').click()});
+    items.push({label:'Adicionar splitter', onClick:()=> document.getElementById('dg-add-splitter').click()});
+    items.push({sep:true});
+  }
+  items.push({label:'Enquadrar diagrama', onClick:()=>{ dgView={x:0,y:0,k:1}; renderDiagram(); }});
+  if(isAdmin) items.push({label:'Restaurar posições dos blocos', onClick:()=>{
+    node.dgPos={}; dgView={x:0,y:0,k:1}; toast('Posições do diagrama restauradas.'); renderDiagram();
+  }});
+  if(dgSelPin||dgSelConn||dgSelSplitter||dgTraceFiber)
+    items.push({label:'Limpar seleção', onClick:()=>{
+      dgSelPin=null; dgSelConn=null; dgSelSplitter=null; dgTraceFiber=null; renderDiagram();
+    }});
+  return items;
+}
+
+function initDiagramCtxMenu(){
+  const svgEl = document.getElementById('diagram-svg');
+  svgEl.addEventListener('contextmenu',(e)=>{
+    e.preventDefault();
+    const node = nodeById(diagramNodeId); if(!node) return;
+    const t = e.target;
+    const pinEl  = t.closest ? t.closest('[data-pin]')  : null;
+    const connEl = t.closest ? t.closest('[data-conn]') : null;
+    const splEl  = t.closest ? t.closest('[data-spl]')  : null;
+    const blockEl= t.closest ? t.closest('[data-block]') : null;
+
+    if(pinEl){
+      const key = pinEl.getAttribute('data-pin');
+      openCtxMenu(e, describeRefTexto(refFromKey(key)), ctxItemsPino(key, node));
+      return;
+    }
+    if(connEl){
+      const cn = connections.find(x=>x.id===connEl.getAttribute('data-conn'));
+      if(cn) openCtxMenu(e, 'Emenda — '+rotuloTipoConexao(cn.tipo), ctxItemsConexao(cn, node));
+      return;
+    }
+    if(splEl){
+      const s = splitters.find(x=>x.id===splEl.getAttribute('data-spl'));
+      if(s) openCtxMenu(e, 'Splitter '+s.razao, ctxItemsSplitter(s, node));
+      return;
+    }
+    if(blockEl){
+      const key = blockEl.getAttribute('data-block');
+      const cb = key.indexOf('cable:')===0 ? cables.find(c=>c.id===key.slice(6)) : null;
+      openCtxMenu(e, cb ? cb.nome : 'Bloco de portas', ctxItemsBloco(key, node));
+      return;
+    }
+    openCtxMenu(e, TYPE_LABEL[node.type]+' — '+node.name, ctxItemsDiagramaVazio(node));
+  });
+}
+
+/* describeRef() devolve HTML já escapado; para o cabeçalho precisamos de texto puro */
+function describeRefTexto(ref){
+  const div = document.createElement('div');
+  div.innerHTML = describeRef(ref);
+  return div.textContent || '';
+}
+
+/* ============================================================
+   UTIL
+   ============================================================ */
+function escapeHtml(s){
+  if(s===undefined||s===null) return '';
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let toastTimer=null;
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 2600);
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+fitToNetwork();
+// O contêiner pode não ter altura final no primeiro frame; reenquadra quando tiver.
+requestAnimationFrame(fitToNetwork);
+setTimeout(fitToNetwork, 250);
+if(window.ResizeObserver){ new ResizeObserver(()=>{ measureMap(); renderAll(); }).observe(mapEl); }
+window.addEventListener('resize', ()=>{ measureMap(); renderAll(); });
+document.getElementById('btn-fit').addEventListener('click', fitToNetwork);
+initDiagramToolbar();
+initDiagramCanvas();
+initDiagramCtxMenu();
+document.getElementById('btn-zoom-in').addEventListener('click', ()=> zoomBy(1.35));
+document.getElementById('btn-zoom-out').addEventListener('click', ()=> zoomBy(1/1.35));
+
+/* ---- seletor de mapa base ---- */
+const selBase = document.getElementById('sel-basemap');
+selBase.innerHTML = Object.keys(BASEMAPS).map(k=>
+  `<option value="${k}"${k===basemap?' selected':''}>${BASEMAPS[k].label}</option>`).join('');
+selBase.addEventListener('change', ()=> setBasemap(selBase.value));
+setBasemap(basemap);
+
+/* Se os tiles forem bloqueados (o ambiente de prévia não carrega imagens
+   externas), avisa e oferece a grade técnica em vez de deixar a tela vazia. */
+const tileWarnEl = document.getElementById('tile-warning');
+window.__tileFail = function(){
+  tileErrors++;
+  if(basemap!=='none' && tileErrors>=3){
+    tileWarnEl.innerHTML = 'Este ambiente bloqueou as imagens do mapa base. A rede continua correta e georreferenciada — no servidor de vocês os tiles carregam normalmente. <b>Use "Grade técnica" para trabalhar aqui.</b>';
+    tileWarnEl.classList.add('show');
+    setTimeout(()=> tileWarnEl.classList.remove('show'), 9000);
+    tileErrors = -999; // avisa uma vez só
+  }
+};
+})();
+</script>
+</body>
+</html>
