@@ -23,7 +23,7 @@
     --ink: #1c2430;
     --ink-muted: #6b7280;
     --test-banner-height: 34px;
-    --topbar-stack-height-base: 59px;
+    --topbar-stack-height-base: 0px;
     --topbar-stack-height: calc(var(--topbar-stack-height-base) + var(--test-banner-height));
     --shadow: 0 20px 48px rgba(17, 35, 49, 0.11);
     --radius-xl: 22px;
@@ -4372,7 +4372,7 @@ body.client-panel-open {
 }
 
 @media (max-height: 800px) {
-    :root { --page-gap: 12px; --section-gap: 10px; --topbar-stack-height-base: 57px; --topbar-stack-height: calc(var(--topbar-stack-height-base) + var(--test-banner-height)); }
+    :root { --page-gap: 12px; --section-gap: 10px; --topbar-stack-height-base: 0px; --topbar-stack-height: calc(var(--topbar-stack-height-base) + var(--test-banner-height)); }
     .topbar { min-height: 56px; padding-block: 6px; }
     .app-nav { top: var(--topbar-stack-height); height: calc(100vh - var(--topbar-stack-height)); padding-block: 8px; }
     .card { padding: 13px; }
@@ -4382,6 +4382,281 @@ body.client-panel-open {
     .migration-phase-legend a,
     .migration-phase-legend span { min-height: 28px; padding-block: 3px; }
     .migration-workspace__actions { padding-top: 8px; }
+}
+
+/* ---------- Casca redesenhada (mockups em docs/design/mockups) ---------- */
+.layout-app,
+.layout-guest {
+    background: var(--surface-page);
+    color: var(--ink);
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Trilha: selo IA 36px #0c4a36; usuário e sair na base, acima de Configurações. */
+.app-nav {
+    padding: 20px 0;
+}
+
+.app-nav .sidebar__logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: #0c4a36;
+    font-size: 14px;
+}
+
+.app-nav__brand {
+    margin-bottom: 8px;
+}
+
+.app-nav__settings {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-nav__user {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--alert-ok-bg);
+    color: var(--action-primary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: default;
+}
+
+/* Topo do conteúdo: busca global (Ctrl K) e, no mobile, a marca. */
+.content-top {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mobile-brand {
+    display: none;
+    align-items: center;
+    gap: 10px;
+}
+
+.mobile-brand__logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #0c4a36;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.mobile-brand strong {
+    font-size: 15px;
+}
+
+.global-search {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+}
+
+.global-search input {
+    width: 100%;
+    height: 40px;
+    padding: 0 68px 0 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #ffffff;
+    color: var(--ink);
+    font-size: var(--font-base);
+    text-overflow: ellipsis;
+}
+
+.global-search input:focus {
+    outline: none;
+    border-color: var(--action-primary);
+    box-shadow: 0 0 0 3px rgba(18, 122, 91, 0.15);
+}
+
+.global-search__hint {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--surface-page);
+    border: 1px solid var(--border);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    pointer-events: none;
+}
+
+.content-top--home {
+    align-items: center;
+    padding-top: 48px;
+}
+
+.home-title {
+    margin: 0 0 12px;
+    font-size: 28px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.global-search--hero {
+    max-width: 640px;
+}
+
+.global-search--hero input {
+    height: auto;
+    padding: 16px 76px 16px 20px;
+    font-size: 16px;
+}
+
+.global-search--hero .global-search__hint {
+    right: 12px;
+    padding: 4px 8px;
+}
+
+/* Blocos da Home: caixas 20px/raio 10, rótulo em caixa alta, número 28px. */
+.home-tiles {
+    width: 100%;
+    max-width: 960px;
+    justify-self: center;
+    margin-top: 36px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.home-tiles .alert-tile {
+    gap: 0;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+.home-tiles .alert-tile__label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.home-tiles .alert-tile__value {
+    margin-top: 8px;
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.home-tiles .alert-tile__description {
+    margin-top: 4px;
+    font-size: 14px;
+    opacity: 1;
+}
+
+.main-content--home {
+    padding: 16px 64px 64px;
+}
+
+@media (max-width: 1100px) {
+    .home-tiles {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .main-content--home {
+        padding-inline: 32px;
+    }
+}
+
+@media (max-width: 767px) {
+    .mobile-brand {
+        display: flex;
+    }
+
+    .home-title,
+    .global-search__hint {
+        display: none;
+    }
+
+    .content-top--home {
+        align-items: stretch;
+        padding-top: 4px;
+    }
+
+    .global-search,
+    .global-search--hero {
+        max-width: none;
+    }
+
+    .global-search input,
+    .global-search--hero input {
+        height: auto;
+        padding: 14px 16px;
+        font-size: 15px;
+    }
+
+    .main-content--home {
+        padding: 16px 20px calc(76px + 16px);
+    }
+
+    /* Blocos empilhados no formato horizontal: texto à esquerda, número à direita. */
+    .home-tiles {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin-top: 8px;
+        max-width: none;
+    }
+
+    .home-tiles .alert-tile {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "label value" "desc value";
+        align-items: center;
+        padding: 18px;
+    }
+
+    .home-tiles .alert-tile__label {
+        grid-area: label;
+        font-size: 12px;
+    }
+
+    .home-tiles .alert-tile__value {
+        grid-area: value;
+        margin: 0;
+        font-size: 22px;
+    }
+
+    .home-tiles .alert-tile__description {
+        grid-area: desc;
+        margin-top: 2px;
+    }
+
+    .app-nav__more-item--logout {
+        color: var(--alert-urgent-ink);
+    }
+}
+
+@media print {
+    .content-top {
+        display: none !important;
+    }
 }
 
 @page {

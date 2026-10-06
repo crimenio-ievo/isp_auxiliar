@@ -10,7 +10,7 @@ Atualizado em 2026-10-02.
 
 ## Prioridades (em ordem)
 
-1. **Interface limpa:** barra de busca única e dominante em todas as telas (estilo Google, base da futura IA); topo mínimo; botão de IA/chat no canto superior esquerdo abrindo painel sob demanda; ISP Map como item da trilha. Implementar só a partir de mockup aprovado.
+1. **Interface limpa (casca feita: sem barra superior, busca grande na Home e compacta nas demais, Ctrl K, trilha com usuário/sair; botão de IA e login em seguida):** barra de busca única e dominante em todas as telas (estilo Google, base da futura IA); topo mínimo; botão de IA/chat no canto superior esquerdo abrindo painel sob demanda; ISP Map como item da trilha. Implementar só a partir de mockup aprovado.
 2. **FEITO (2faa26b) — Regras dos blocos da Home:** vermelho = ativo + bloqueado ou status_corte='down'; amarelo = ativo, não bloqueado, vencido há mais de N dias (padrão 5); em dia = demais ativos; desativados fora.
 3. **ISP Map dentro do ISP_Auxiliar:** subir isp-network-map.html para o .89; banco próprio (NODE -> PORT -> LINK); integrar depois.
 4. **Telemetria:** OLT piloto (V-SOL ou Hioso, a definir), coleta determinística a cada ~5 min, lista de ONUs offline ou com sinal ruim por PON, com o cliente. UISP para a rede de rádio.
@@ -25,7 +25,7 @@ Atualizado em 2026-10-02.
 - .86: rodar scripts/migrate_integration_settings.php (simulação, depois --apply) antes de alguém salvar Email/Evotrix pela tela.
 - .86: o .env da R5 é cópia (a R4 usa symlink para o arquivo compartilhado). Consolidar.
 - .86: validação funcional real da foto de instalação (técnico em campo) e do benefício (contrato existente).
-- "Fluxo do dia": o status "Aguardando conexão Radius" só muda por verificação manual (14 presos no .89). Decidir entre verificação automática via radacct ou substituir esse bloco.
+- "Fluxo do dia" (agora em /instalacoes, fora da Home): o status "Aguardando conexão Radius" só muda por verificação manual (14 presos no .89). Decidir entre verificação automática via radacct ou substituir esse bloco.
 - AiUsagePolicy: teto de orçamento só é checado em evaluateRealCall(), mas o fluxo conversacional usa evaluate(). Bloqueador antes de AI_REAL_CALLS_ENABLED=true.
 - Esconder links de /contratos/detalhe (linha do tempo e cartões) de quem não tem permissão de contratos.
 - .89 sem banco de teste isolado.

@@ -10,6 +10,15 @@ $access = is_array($user['access'] ?? null) ? $user['access'] : [];
 $canManageSettings = AccessControl::can($access, 'configuracoes');
 $canAccessContracts = AccessControl::can($access, 'contratos');
 $canViewLogs = AccessControl::isGestor($access);
+$userName = trim((string) ($user['name'] ?? '')) ?: 'Convidado';
+$userRole = strtolower((string) ($user['role'] ?? ''));
+$userRoleLabel = match ($userRole) {
+    'admin', 'platform_admin' => 'Administrador',
+    'manager' => 'Gestor',
+    'technician' => 'Tecnico',
+    default => (string) ($user['role'] ?? ''),
+};
+$logoutHref = Url::to('/logout');
 
 /**
  * Ícones outline (estilo Feather, stroke, sem preenchimento).
@@ -20,6 +29,8 @@ $navIcons = [
     'contratos' => '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9.3 13h5.4M9.3 16.5h5.4M9.3 9.5h2.4"/>',
     'processos' => '<path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/>',
     'mais' => '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+    'mapa' => '<path d="M9 4 3 6.5V20l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
+    'sair' => '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
     'logs' => '<path d="M5 4h14v16H5z"/><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4"/>',
     'configuracoes' => '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 ];
@@ -105,37 +116,45 @@ foreach ($navigationItems as $item) {
         <?php foreach ($primaryItems as $item): ?>
             <?php $renderNavLink($item, $isMobileOverflow($item)); ?>
         <?php endforeach; ?>
-        <?php if ($mobileOverflowItems !== []): ?>
-            <button
-                type="button"
-                class="app-nav__link app-nav__more<?= $moreIsActive ? ' is-active' : ''; ?>"
-                data-nav-more-toggle
-                aria-expanded="false"
-                aria-controls="app-nav-more-panel"
-            >
-                <span class="app-nav__link-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><?= $navIcons['mais']; ?></svg>
-                </span>
-                <span class="app-nav__link-label">Mais</span>
-            </button>
+        <button
+            type="button"
+            class="app-nav__link app-nav__more<?= $moreIsActive ? ' is-active' : ''; ?>"
+            data-nav-more-toggle
+            aria-expanded="false"
+            aria-controls="app-nav-more-panel"
+        >
+            <span class="app-nav__link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><?= $navIcons['mais']; ?></svg>
+            </span>
+            <span class="app-nav__link-label">Mais</span>
+        </button>
+    </div>
+
+    <div class="app-nav__settings">
+        <span class="app-nav__user" title="<?= htmlspecialchars($userName . ($userRoleLabel !== '' ? ' · ' . $userRoleLabel : ''), ENT_QUOTES, 'UTF-8'); ?>">
+            <?= htmlspecialchars(mb_strtoupper(mb_substr($userName, 0, 1)), ENT_QUOTES, 'UTF-8'); ?>
+        </span>
+        <a class="app-nav__link app-nav__link--mobile-hidden" href="<?= htmlspecialchars($logoutHref, ENT_QUOTES, 'UTF-8'); ?>" title="Sair" aria-label="Sair" data-tooltip="Sair">
+            <span class="app-nav__link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><?= $navIcons['sair']; ?></svg>
+            </span>
+        </a>
+        <?php if ($settingsItem !== null): ?>
+            <?php $renderNavLink($settingsItem, true); ?>
         <?php endif; ?>
     </div>
 
-    <?php if ($settingsItem !== null): ?>
-        <div class="app-nav__settings">
-            <?php $renderNavLink($settingsItem, true); ?>
-        </div>
-    <?php endif; ?>
-
-    <?php if ($mobileOverflowItems !== []): ?>
-        <div class="app-nav__more-panel" id="app-nav-more-panel" data-nav-more-panel role="dialog" aria-label="Mais opções" hidden>
-            <?php foreach ($mobileOverflowItems as $item): ?>
-                <?php $panelActive = $isItemActive($item); ?>
-                <a class="app-nav__more-item<?= $panelActive ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to($item['href']), ENT_QUOTES, 'UTF-8'); ?>" aria-current="<?= $panelActive ? 'page' : 'false'; ?>">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><?= $navIcons[$item['icon']] ?? ''; ?></svg>
-                    <span><?= htmlspecialchars((string) $item['label'], ENT_QUOTES, 'UTF-8'); ?></span>
-                </a>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
+    <div class="app-nav__more-panel" id="app-nav-more-panel" data-nav-more-panel role="dialog" aria-label="Mais opções" hidden>
+        <?php foreach ($mobileOverflowItems as $item): ?>
+            <?php $panelActive = $isItemActive($item); ?>
+            <a class="app-nav__more-item<?= $panelActive ? ' is-active' : ''; ?>" href="<?= htmlspecialchars(Url::to($item['href']), ENT_QUOTES, 'UTF-8'); ?>" aria-current="<?= $panelActive ? 'page' : 'false'; ?>">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><?= $navIcons[$item['icon']] ?? ''; ?></svg>
+                <span><?= htmlspecialchars((string) $item['label'], ENT_QUOTES, 'UTF-8'); ?></span>
+            </a>
+        <?php endforeach; ?>
+        <a class="app-nav__more-item app-nav__more-item--logout" href="<?= htmlspecialchars($logoutHref, ENT_QUOTES, 'UTF-8'); ?>">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><?= $navIcons['sair']; ?></svg>
+            <span>Sair</span>
+        </a>
+    </div>
 </nav>

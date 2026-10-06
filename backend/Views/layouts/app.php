@@ -46,7 +46,7 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
             <strong>AMBIENTE DE TESTES — NÃO É PRODUÇÃO</strong>
         </aside>
         <?php endif; ?>
-        <?php if (!$hideHeader): ?>
+        <?php if (!$hideHeader && $layoutMode === 'guest'): ?>
             <?php require __DIR__ . '/header.php'; ?>
         <?php endif; ?>
     </div>
@@ -56,7 +56,10 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
             <?php require __DIR__ . '/sidebar.php'; ?>
         <?php endif; ?>
 
-        <main class="main-content">
+        <main class="main-content<?= !empty($homeHero) ? ' main-content--home' : ''; ?>">
+            <?php if (!$hideHeader && $layoutMode !== 'guest'): ?>
+                <?php require __DIR__ . '/content_top.php'; ?>
+            <?php endif; ?>
             <?= $content; ?>
             <?php if (!$hideFooter): ?>
                 <?php require __DIR__ . '/footer.php'; ?>

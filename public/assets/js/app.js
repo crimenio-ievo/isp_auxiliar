@@ -4258,3 +4258,17 @@ if (focusOnLoad instanceof HTMLElement) {
         }
     });
 })();
+
+// Ctrl K (ou Cmd K) foca a busca global em qualquer página.
+document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
+        const input = Array.from(document.querySelectorAll('[data-global-search] input')).find((el) => el.offsetParent !== null);
+        if (input instanceof HTMLElement) {
+            event.preventDefault();
+            input.focus();
+            if (input instanceof HTMLInputElement) {
+                input.select();
+            }
+        }
+    }
+});

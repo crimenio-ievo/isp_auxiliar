@@ -34,13 +34,17 @@ $gestor = $render(['is_manager' => true]);
 preg_match_all('#<a\s+class="app-nav__link(?![^"]*app-nav__link--mobile-hidden)[^"]*"[^>]*>.*?<span class="app-nav__link-label">([^<]+)</span>#s', $gestor, $fixed);
 $assert($fixed[1] === ['Home', 'Clientes', 'Contratos', 'Processos'], 'fixos do gestor: ' . implode(',', $fixed[1]));
 preg_match('#data-nav-more-panel.*?</div>#s', $gestor, $panel);
-$assert(str_contains($panel[0], '>Configurações<') && str_contains($panel[0], '>Logs<') && substr_count($panel[0], 'app-nav__more-item"') + substr_count($panel[0], 'app-nav__more-item is-active') === 2, 'painel Mais traz Configurações e Logs');
+$assert(str_contains($panel[0], '>Configurações<') && str_contains($panel[0], '>Logs<') && str_contains($panel[0], '>Sair<') && substr_count($panel[0], '<a class="app-nav__more-item') === 3, 'painel Mais traz Configurações, Logs e Sair');
 $assert(str_contains($gestor, 'data-nav-more-toggle') && str_contains($gestor, 'aria-expanded="false"') && str_contains($gestor, 'aria-controls="app-nav-more-panel"'), 'botão Mais acessível');
 $assert(count($fixed[1]) <= 4, 'no máximo 4 fixos');
 
-// Perfil enxuto: sem contratos/config/logs não há o que colocar em Mais.
+// Perfil enxuto: sem contratos/config/logs, o Mais existe só para o "Sair" (não há mais barra superior).
 $basic = $render(['can_search_clients' => true]);
-$assert(!str_contains($basic, 'data-nav-more-toggle') && !str_contains($basic, 'data-nav-more-panel'), 'sem itens extras não mostra Mais');
+$assert(str_contains($basic, 'data-nav-more-toggle') && str_contains($basic, 'data-nav-more-panel'), 'Mais sempre existe (carrega o Sair)');
+preg_match('#data-nav-more-panel.*?</div>#s', $basic, $basicPanel);
+$assert(str_contains($basicPanel[0], '>Sair<') && substr_count($basicPanel[0], 'app-nav__more-item') === 2, 'perfil enxuto: Mais só com Sair');
+$assert(str_contains($gestor, 'app-nav__user') && str_contains($gestor, 'aria-label="Sair"'), 'desktop: usuário e sair na base da trilha');
+$assert(strpos($gestor, 'aria-label="Sair"') < strpos($gestor, 'title="Configurações"', strpos($gestor, 'app-nav__settings')), 'Sair fica acima de Configurações');
 
 // Página dentro do Mais marca o botão como ativo.
 $onLogs = $render(['is_manager' => true], '/logs');

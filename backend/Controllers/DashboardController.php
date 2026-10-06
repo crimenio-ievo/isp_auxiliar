@@ -36,7 +36,6 @@ final class DashboardController
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $this->resolveViewUser(),
             'alertTiles' => $this->homeAlertTiles(),
-            'recentActivities' => $this->recentInstallationActivities(),
         ]);
 
         return Response::html($html);
@@ -168,49 +167,5 @@ final class DashboardController
         }
 
         return $user;
-    }
-
-    private function recentInstallationActivities(): array
-    {
-        $records = $this->installationRecords();
-
-        usort($records, static function (array $a, array $b): int {
-            return strcmp((string) ($b['updated_at'] ?? $b['created_at'] ?? ''), (string) ($a['updated_at'] ?? $a['created_at'] ?? ''));
-        });
-
-        $activities = [];
-
-        foreach (array_slice($records, 0, 6) as $record) {
-            $status = (string) ($record['status'] ?? '');
-            $activities[] = [
-                'time' => (string) ($record['updated_at'] ?? $record['created_at'] ?? '-'),
-                'title' => $status === 'completed' ? 'Instalação finalizada' : 'Aguardando conexão Radius',
-                'description' => trim((string) ($record['client_name'] ?? 'Cliente') . ' · ' . (string) ($record['login'] ?? '')),
-            ];
-        }
-
-        return $activities !== [] ? $activities : [
-            ['time' => '-', 'title' => 'Nenhuma instalação registrada', 'description' => 'Os próximos cadastros aparecerão nesta linha do tempo.'],
-        ];
-    }
-
-    private function installationRecords(): array
-    {
-        $directory = dirname(__DIR__, 2) . '/storage/installations';
-
-        if (!is_dir($directory)) {
-            return [];
-        }
-
-        $records = [];
-
-        foreach (glob($directory . '/*.json') ?: [] as $file) {
-            $decoded = json_decode((string) file_get_contents($file), true);
-            if (is_array($decoded)) {
-                $records[] = $decoded;
-            }
-        }
-
-        return $records;
     }
 }
