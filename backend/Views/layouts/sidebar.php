@@ -108,9 +108,9 @@ foreach ($navigationItems as $item) {
 }
 ?>
 <nav class="app-nav" data-app-nav aria-label="Navegação principal">
-    <a class="app-nav__brand" href="<?= htmlspecialchars(Url::to('/dashboard'), ENT_QUOTES, 'UTF-8'); ?>" title="<?= htmlspecialchars($appName ?? 'ISP Auxiliar', ENT_QUOTES, 'UTF-8'); ?>">
+    <button type="button" class="app-nav__brand" data-ai-open aria-haspopup="dialog" aria-controls="ai-panel" title="Assistente" aria-label="Abrir assistente">
         <span class="sidebar__logo">IA</span>
-    </a>
+    </button>
 
     <div class="app-nav__list">
         <?php foreach ($primaryItems as $item): ?>

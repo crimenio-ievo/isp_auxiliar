@@ -4259,10 +4259,47 @@ if (focusOnLoad instanceof HTMLElement) {
     });
 })();
 
+// Painel do assistente (só interface): abre pelo selo IA (desktop) ou botão flutuante (mobile);
+// fecha com Esc, clique fora ou X. Ctrl K foca a busca do painel quando ele está aberto.
+const aiPanel = document.querySelector('[data-ai-panel]');
+const aiBackdrop = document.querySelector('[data-ai-backdrop]');
+const aiOpeners = Array.from(document.querySelectorAll('[data-ai-open]'));
+let aiLastOpener = null;
+const setAiOpen = (open, opener) => {
+    if (!(aiPanel instanceof HTMLElement)) {
+        return;
+    }
+    aiPanel.hidden = !open;
+    if (aiBackdrop instanceof HTMLElement) {
+        aiBackdrop.hidden = !open;
+    }
+    if (open) {
+        aiLastOpener = opener instanceof HTMLElement ? opener : null;
+        const input = aiPanel.querySelector('[data-ai-search]');
+        if (input instanceof HTMLElement) {
+            input.focus();
+        }
+    } else if (aiLastOpener instanceof HTMLElement && aiLastOpener.offsetParent !== null) {
+        aiLastOpener.focus();
+    }
+};
+aiOpeners.forEach((el) => el.addEventListener('click', () => setAiOpen(true, el)));
+document.querySelectorAll('[data-ai-close]').forEach((el) => el.addEventListener('click', () => setAiOpen(false)));
+if (aiBackdrop instanceof HTMLElement) {
+    aiBackdrop.addEventListener('click', () => setAiOpen(false));
+}
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && aiPanel instanceof HTMLElement && !aiPanel.hidden) {
+        setAiOpen(false);
+    }
+});
+
 // Ctrl K (ou Cmd K) foca a busca global em qualquer página.
 document.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
-        const input = Array.from(document.querySelectorAll('[data-global-search] input')).find((el) => el.offsetParent !== null);
+        const panelOpen = aiPanel instanceof HTMLElement && !aiPanel.hidden;
+        const selector = panelOpen ? '[data-ai-search]' : '[data-global-search] input';
+        const input = Array.from(document.querySelectorAll(selector)).find((el) => el.offsetParent !== null);
         if (input instanceof HTMLElement) {
             event.preventDefault();
             input.focus();

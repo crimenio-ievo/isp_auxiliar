@@ -67,6 +67,10 @@ $assetVersion = preg_replace('/[^A-Za-z0-9._-]+/', '-', $assetVersion) ?: '1';
         </main>
     </div>
 
+    <?php if ($layoutMode !== 'guest'): ?>
+        <?php require __DIR__ . '/ai_panel.php'; ?>
+    <?php endif; ?>
+
     <script src="<?= htmlspecialchars(Url::asset('js/app.js?v=' . rawurlencode($assetVersion)), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 </body>
 </html>
