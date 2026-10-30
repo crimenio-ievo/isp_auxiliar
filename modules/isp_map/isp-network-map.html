@@ -453,6 +453,7 @@ button{font-family:inherit;}
 .site-eq-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;}
 .site-eq-head .status-pill{margin-top:0;}
 .site-eq-meta{font-size:10.5px;color:var(--text-dim);margin-top:3px;}
+.lk-detail{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--yellow);border:1px solid var(--yellow);}
 .site-eq-links{font-size:10.5px;color:var(--text-dim);margin:4px 0;line-height:1.5;}
 .site-eq .action-row{margin-top:4px;}
 .site-add{display:flex;gap:6px;align-items:center;margin:10px 0;}
@@ -627,6 +628,18 @@ function isInternalLink(l){
   const a = siteOf(nodeById(l.from)), b = siteOf(nodeById(l.to));
   return !!a && !!b && a.id===b.id;
 }
+/* Ligação "a detalhar": alguma ponta é o próprio POP/torre, sem o equipamento definido (continua permitida). */
+function isPendingDetail(l){ return isContainer(nodeById(l.from)) || isContainer(nodeById(l.to)); }
+function portById(id){ return id ? ports.find(p=>p.id===id) || null : null; }
+function linkOfPort(portId){ return links.find(l=>l.fromPort===portId || l.toPort===portId) || null; }
+/* Pontas possíveis ao refinar um trecho: o site da ponta atual e os equipamentos dele (o servidor confere). CTO/CEO: só ela mesma. */
+function endpointChoices(n){ const st = siteOf(n); return isContainer(st) ? [st].concat(equipmentOf(st)) : [n]; }
+/* "OLT-001 · PON 1 (POP-001)" */
+function endpointLabel(n, portId){
+  if(!n) return '?';
+  const pt = portById(portId);
+  return escapeHtml(n.name) + (pt ? ' · '+escapeHtml(pt.label) : '') + (n.siteId ? ' <span class="muted">('+escapeHtml(siteOf(n).name)+')</span>' : '');
+}
 const STATUS_COLOR = {normal:'#3fb950',alerta:'#d29922',critico:'#f85149',offline:'#6e7681',livre:'#3a4353'};
 const STATUS_LABEL = {normal:'Online / Normal',alerta:'Atenção',critico:'Crítico',offline:'Offline',livre:'Livre'};
 const ICON_SIZE = {pop:30,tower:30,olt:26,switch:24,router:24,radio:22,server:24,other:22,ceo:22,cto:20,splitter:16,client:17};
@@ -791,6 +804,7 @@ function applyTopology(data){
     const a = byDb[r.from_node_id], b = byDb[r.to_node_id]; if(!a || !b) return;
     const at = r.attrs_json||{};
     const extra = Object.assign({}, at, {dbId:r.id, lifecycle:r.lifecycle||'ativo', label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json,
+      fromPort:r.from_port_id ? 'p'+r.from_port_id : null, toPort:r.to_port_id ? 'p'+r.to_port_id : null,
       _attrs:Object.assign({}, at)});
     if(r.length_m!=null) extra.km = +(r.length_m/1000).toFixed(3);
     if(r.fiber_count) extra.cableMeta = {nome:at.cabo_nome||('CABO '+r.id), tipo:at.cabo_tipo||(r.fiber_count+'FO'), totalFibras:r.fiber_count, construtivo:at.cabo_construtivo};
@@ -1276,6 +1290,11 @@ function renderSidebar(){
       <span class="count">${cnt}</span>
     </div>`;
   });
+  html += `<div class="layer-row" title="Ligações com uma ponta no próprio POP/torre, sem o equipamento definido">
+      <div class="swatch" style="background:var(--yellow)"></div>
+      <label>A detalhar (ponta em POP/torre)</label>
+      <span class="count" id="cnt-detail">${links.filter(isPendingDetail).length}</span>
+    </div>`;
   html += '</div>';
 
   html += '<div class="sb-section"><h4>Situação</h4>';
@@ -1758,12 +1777,12 @@ function openLinkPanel(linkId){
         </div>
         <button class="panel-close" id="panel-close-btn">✕</button>
       </div>
-      ${statusPill(l.status)}${lifecyclePill(l)}
+      ${statusPill(l.status)}${lifecyclePill(l)}${isPendingDetail(l) ? '<span class="lk-detail">a detalhar</span>' : ''}
     </div>
     <div class="panel-body">
+      ${isPendingDetail(l) ? '<div class="cable-meta">Uma ponta é o próprio POP/torre: use "Editar trecho" para escolher o equipamento daquele site.</div>' : ''}
       ${fieldsHtml([
-        {label:'Origem', value:escapeHtml(a.name)},
-        {label:'Destino', value:escapeHtml(b.name)},
+        {label:'Origem (envia) → Destino (recebe)', value:endpointLabel(a, l.fromPort)+' → '+endpointLabel(b, l.toPort), full:true},
         (()=>{ const c=cables.find(cc=>cc.linkId===l.id); return c?{label:'Cabo físico', value:escapeHtml(c.nome)+' · '+c.tipo+' ('+c.totalFibras+' fibras)', full:true}:null; })(),
         l.freq ? {label:'Frequência', value:escapeHtml(l.freq)} : null,
         l.distancia ? {label:'Distância', value:escapeHtml(l.distancia)} : null,
@@ -1771,6 +1790,7 @@ function openLinkPanel(linkId){
       ])}
       <div class="action-row">
         <button class="btn" id="btn-edit-link" style="flex:1 1 100%;">Editar trecho</button>
+        <button class="btn" id="btn-invert-link" style="flex:1 1 100%;">⇄ Inverter sentido</button>
         <button class="btn" id="btn-sangria" style="flex:1 1 100%;" disabled title="Disponível em breve">Inserir caixa neste trecho (sangria) — disponível em breve</button>
         <button class="btn btn-danger" id="btn-delete-link" style="flex:1 1 100%;">Excluir trecho</button>
       </div>
@@ -1778,6 +1798,7 @@ function openLinkPanel(linkId){
   `;
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
   document.getElementById('btn-edit-link').addEventListener('click', ()=> openLinkEditModal(l));
+  document.getElementById('btn-invert-link').addEventListener('click', ()=> invertLink(l));
   document.getElementById('btn-delete-link').addEventListener('click', ()=>{
     if(confirm('Excluir este trecho?')) deleteLinkRemote(l);
   });
@@ -2277,10 +2298,10 @@ function openLinkTypeModal(origin, dest){
     <div class="modal-head"><h3>Novo trecho</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
       ${fieldsHtml([
-        {label:'Origem',value:escapeHtml(origin.name)},
-        {label:'Destino',value:escapeHtml(dest.name)},
+        {label:'Origem (envia) → Destino (recebe)', value:endpointLabel(origin)+' → '+endpointLabel(dest), full:true},
         {label:'Distância (linha reta)', value:km.toFixed(2)+' km', full:true}
       ])}
+      <div class="form-field"><button class="btn btn-sm" id="f-link-invert" type="button">⇄ Inverter sentido</button></div>
       <div class="form-field"><label>Tipo de trecho</label>
         <select id="f-linktype">
           <option value="backbone">Fibra backbone</option>
@@ -2320,6 +2341,12 @@ function openLinkTypeModal(origin, dest){
     wrap.style.display = fibra ? '' : 'none';
   }
   selType.addEventListener('change', atualizaCampos); atualizaCampos();
+  document.getElementById('f-link-invert').addEventListener('click', ()=>{
+    const t = selType.value;
+    openLinkTypeModal(dest, origin);
+    document.getElementById('f-linktype').value = t;
+    document.getElementById('f-linktype').dispatchEvent(new Event('change'));
+  });
 
   document.getElementById('modal-x').addEventListener('click', ()=>{ closeModal(); clearMode(); });
   document.getElementById('modal-cancel').addEventListener('click', ()=>{ closeModal(); clearMode(); });
@@ -2341,10 +2368,10 @@ function openLinkTypeModal(origin, dest){
     }
     fields.attrs = JSON.stringify(attrs);
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
-    mapPost('/links', fields).then(()=>{
+    mapPost('/links', fields).then(data=>{
       closeModal(); clearMode();
       loadNetwork(()=>{
-        toast(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ${km.toFixed(2)} km.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`);
+        toastResult(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ${km.toFixed(2)} km.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`, data);
         const again = nodes.find(x=>x.dbId===dest.dbId);
         if(again) onNodeClick(again.id);
       });
@@ -2359,7 +2386,10 @@ function openLinkEditModal(l){
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Editar trecho</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
-      <div class="cable-meta">${escapeHtml(LINK_TYPE_LABEL[l.type]||l.type)} · tipo, origem e destino não mudam (exclua e crie de novo).</div>
+      <div class="cable-meta">${escapeHtml(LINK_TYPE_LABEL[l.type]||l.type)} · o tipo não muda; cada ponta só pode ir para outro elemento do mesmo site.</div>
+      <div class="form-field"><label>Origem (envia)</label><select id="f-lk-from"></select></div>
+      <div class="form-field"><label>Destino (recebe)</label><select id="f-lk-to"></select></div>
+      <div class="form-field"><button class="btn btn-sm" id="f-lk-invert" type="button">⇄ Inverter sentido</button></div>
       <div class="form-field"><label>Rótulo</label><input id="f-lk-label" type="text" maxlength="120" value="${escapeHtml(l.label||'')}"></div>
       <div class="form-field"><label>Status</label>
         <select id="f-lk-status">${['normal','alerta','critico','offline'].map(v=>`<option value="${v}" ${l.status===v?'selected':''}>${STATUS_LABEL[v]}</option>`).join('')}</select>
@@ -2373,9 +2403,21 @@ function openLinkEditModal(l){
   overlay.classList.add('show');
   document.getElementById('modal-x').addEventListener('click', closeModal);
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  // pontas: cada select oferece o site da ponta e os equipamentos dele; inverter troca as listas
+  const selFrom = document.getElementById('f-lk-from'), selTo = document.getElementById('f-lk-to');
+  let ends = {from:{list:endpointChoices(nodeById(l.from)), sel:l.from}, to:{list:endpointChoices(nodeById(l.to)), sel:l.to}};
+  function fillEnds(){
+    [[selFrom, ends.from], [selTo, ends.to]].forEach(([sel, e])=>{
+      sel.innerHTML = e.list.map(n=>`<option value="${n.id}" ${n.id===e.sel?'selected':''}>${escapeHtml(n.name)} (${TYPE_LABEL[n.type]})</option>`).join('');
+    });
+  }
+  fillEnds();
+  selFrom.addEventListener('change', ()=>{ ends.from.sel = selFrom.value; });
+  selTo.addEventListener('change', ()=>{ ends.to.sel = selTo.value; });
+  document.getElementById('f-lk-invert').addEventListener('click', ()=>{ ends = {from:ends.to, to:ends.from}; fillEnds(); });
   document.getElementById('modal-save').addEventListener('click', ()=>{
     const attrs = Object.assign({}, l._attrs||{});
-    const fields = {id:l.dbId, label:document.getElementById('f-lk-label').value.trim(),
+    const fields = {id:l.dbId, from_node_id:nodeById(ends.from.sel).dbId, to_node_id:nodeById(ends.to.sel).dbId, label:document.getElementById('f-lk-label').value.trim(),
       status:document.getElementById('f-lk-status').value, lifecycle:document.getElementById('f-lk-lifecycle').value, length_m:document.getElementById('f-lk-len').value.trim()};
     if(fibra){
       fields.fiber_count = document.getElementById('f-lk-fo').value.trim();
@@ -2385,15 +2427,32 @@ function openLinkEditModal(l){
     }
     fields.attrs = JSON.stringify(attrs);
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
-    mapPost('/links/editar', fields).then(()=>{
+    mapPost('/links/editar', fields).then(data=>{
       closeModal();
       loadNetwork(()=>{
         const again = links.find(x=>x.dbId===l.dbId);
         if(again) onLinkClick(again.id);
-        toast('Trecho salvo.');
+        toastResult('Trecho salvo.', data);
       });
     }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
   });
+}
+/* Toast com os avisos do servidor (warnings[]: ethernet > 100 m, porta reservada…), por mais tempo. */
+function toastResult(msg, data){
+  const w = (data && Array.isArray(data.warnings)) ? data.warnings : [];
+  toast(w.length ? msg+' Aviso: '+w.join(' ') : msg, w.length ? 7000 : undefined);
+}
+/* Troca origem e destino (as portas acompanham os nós no servidor). Auditado como update. */
+function invertLink(l){
+  const a = nodeById(l.from), b = nodeById(l.to);
+  if(!l.dbId || !a || !b){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }
+  mapPost('/links/editar', {id:l.dbId, from_node_id:b.dbId, to_node_id:a.dbId}).then(data=>{
+    loadNetwork(()=>{
+      const again = links.find(x=>x.dbId===l.dbId);
+      if(again) onLinkClick(again.id);
+      toastResult('Sentido invertido: '+b.name+' → '+a.name+'.', data);
+    });
+  }).catch(err=> toast(err.message));
 }
 function deleteLinkRemote(l){
   if(!l.dbId){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }
@@ -3716,12 +3775,12 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 let toastTimer=null;
-function toast(msg){
+function toast(msg, ms){
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=> t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), ms || 2600);
 }
 
 /* ============================================================

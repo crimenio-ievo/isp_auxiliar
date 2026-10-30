@@ -429,6 +429,35 @@ final class MapController
         return in_array($node['node_type'], self::EQUIPMENT_TYPES, true) && $node['parent_node_id'] !== null ? (int) $node['parent_node_id'] : null;
     }
 
+    /**
+     * Distância em linha reta (haversine, metros) entre dois nós; equipamento usa a coordenada do site.
+     *
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     */
+    private function straightMeters(int $providerId, array $a, array $b): ?float
+    {
+        $coord = function (array $n) use ($providerId): ?array {
+            for ($guard = 0; $n !== null && $guard < 5; $guard++) {
+                if ($n['lat'] !== null && $n['lng'] !== null) {
+                    return [(float) $n['lat'], (float) $n['lng']];
+                }
+                $n = $n['parent_node_id'] === null ? null : $this->mapRepository->findNode($providerId, (int) $n['parent_node_id']);
+            }
+
+            return null;
+        };
+        $p = $coord($a);
+        $q = $coord($b);
+        if ($p === null || $q === null) {
+            return null;
+        }
+        $rad = M_PI / 180;
+        $h = sin(($q[0] - $p[0]) * $rad / 2) ** 2 + cos($p[0] * $rad) * cos($q[0] * $rad) * sin(($q[1] - $p[1]) * $rad / 2) ** 2;
+
+        return 2 * 6371000 * asin(min(1.0, sqrt($h)));
+    }
+
     private function sameSite(int $providerId, int $nodeA, int $nodeB): bool
     {
         $a = $this->siteIdOf($this->mapRepository->findNode($providerId, $nodeA));
@@ -447,9 +476,14 @@ final class MapController
         [$providerId, $userId, $actor] = $guard;
 
         $errors = [];
-        $fields = $this->validateLinkInput($request, $providerId, null, $errors);
+        $conflicts = [];
+        $warnings = [];
+        $fields = $this->validateLinkInput($request, $providerId, null, $errors, $conflicts, $warnings);
         if ($errors !== []) {
             return $this->fail(implode(' ', $errors), 422);
+        }
+        if ($conflicts !== []) {
+            return $this->fail(implode(' ', $conflicts), 409);
         }
 
         $pdo = $this->mapRepository->pdo();
@@ -470,7 +504,7 @@ final class MapController
             return $this->fail('Não foi possível salvar a ligação.', 500);
         }
 
-        return Response::json(['ok' => true, 'data' => ['link' => $link]], 200, ['Cache-Control' => 'private, no-store']);
+        return Response::json(['ok' => true, 'data' => ['link' => $link, 'warnings' => $warnings]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
     public function updateLink(Request $request): Response
@@ -488,14 +522,25 @@ final class MapController
         }
 
         $errors = [];
-        $fields = $this->validateLinkInput($request, $providerId, $before, $errors);
+        $conflicts = [];
+        $warnings = [];
+        $fields = $this->validateLinkInput($request, $providerId, $before, $errors, $conflicts, $warnings);
         if ($errors !== []) {
             return $this->fail(implode(' ', $errors), 422);
+        }
+        if ($conflicts !== []) {
+            return $this->fail(implode(' ', $conflicts), 409);
         }
 
         $pdo = $this->mapRepository->pdo();
         $pdo->beginTransaction();
         try {
+            $endsChanged = $fields['from_node_id'] !== $before['from_node_id'] || $fields['to_node_id'] !== $before['to_node_id'];
+            if ($endsChanged && $this->mapRepository->linkExists($providerId, $fields['from_node_id'], $fields['to_node_id'], (string) $before['link_type'], $id)) {
+                $pdo->rollBack();
+
+                return $this->fail('Já existe uma ligação deste tipo entre esses dois elementos.', 409);
+            }
             if ($fields !== []) {
                 $this->mapRepository->updateLink($providerId, $id, $userId, $fields);
             }
@@ -508,7 +553,7 @@ final class MapController
             return $this->fail('Não foi possível salvar a ligação.', 500);
         }
 
-        return Response::json(['ok' => true, 'data' => ['link' => $after]], 200, ['Cache-Control' => 'private, no-store']);
+        return Response::json(['ok' => true, 'data' => ['link' => $after, 'warnings' => $warnings]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
     public function deleteLink(Request $request): Response
@@ -541,12 +586,29 @@ final class MapController
         return Response::json(['ok' => true, 'data' => ['id' => $id]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
+    /*
+     * Ligação por porta (fase 1G). Regras, nesta ordem (422 salvo indicação):
+     * - a porta pertence ao nó daquela ponta (e ao mesmo provedor);
+     * - status 'defeito' não entra em ligação; 'reservada' entra, com aviso;
+     * - ligação entre sites diferentes (ou site↔campo) só usa porta EXTERNA; porta interna só liga dentro do mesmo site;
+     * - mídia × meio: PON e fibra só em ligação de fibra; RJ45 só em ethernet (cabo); SFP em fibra ou ethernet;
+     *   ligação sem fio (radio) não usa porta;
+     * - uma porta só pode estar em UMA ligação (409, indicando qual);
+     * - ethernet com distância em linha reta > 100 m grava, mas devolve aviso em warnings[].
+     * Na edição, cada ponta só pode ser trocada por outro nó do MESMO site da ponta atual (ex.: POP → OLT daquele POP);
+     * inverter o sentido (from↔to, com as portas) é permitido. Trocar de site continua proibido.
+     */
+    private const PORT_MEDIA_BY_MEDIUM = ['fibra' => ['pon', 'fibra', 'sfp'], 'cabo' => ['rj45', 'sfp'], 'radio' => []];
+    private const ETHERNET_MAX_M = 100.0;
+
     /**
      * @param array<string, mixed>|null $existing ligação atual (edição) ou null (criação)
-     * @param list<string> $errors
-     * @return array<string, mixed> campos prontos para gravar (na edição, só os enviados)
+     * @param list<string> $errors 422
+     * @param list<string> $conflicts 409
+     * @param list<string> $warnings gravam, mas o cliente mostra o aviso
+     * @return array<string, mixed> campos prontos para gravar (na edição, pontas e portas sempre presentes)
      */
-    private function validateLinkInput(Request $request, int $providerId, ?array $existing, array &$errors): array
+    private function validateLinkInput(Request $request, int $providerId, ?array $existing, array &$errors, array &$conflicts, array &$warnings): array
     {
         $creating = $existing === null;
         $fields = [];
@@ -561,27 +623,90 @@ final class MapController
             }
             $fields['link_type'] = $type;
             $fields['medium'] = self::LINK_MEDIUMS[$type] ?? '';
-
             $from = $this->intOrNull($request->input('from_node_id'));
             $to = $this->intOrNull($request->input('to_node_id'));
-            if ($from === null || $to === null) {
-                $errors[] = 'Origem e destino são obrigatórios.';
-            } elseif ($from === $to) {
-                $errors[] = 'Origem e destino devem ser elementos diferentes.';
-            } elseif ($this->mapRepository->findNode($providerId, $from) === null || $this->mapRepository->findNode($providerId, $to) === null) {
-                $errors[] = 'Origem ou destino não encontrado.';
-            }
-            $fields['from_node_id'] = $from;
-            $fields['to_node_id'] = $to;
             $medium = $fields['medium'];
         } else {
-            foreach (['link_type', 'from_node_id', 'to_node_id'] as $immutable) {
-                if ($has($immutable) && trim((string) $request->input($immutable)) !== (string) $existing[$immutable]) {
-                    $errors[] = 'Tipo, origem e destino não podem ser alterados; exclua e crie a ligação de novo.';
-                    break;
-                }
+            $type = (string) $existing['link_type'];
+            if ($has('link_type') && trim((string) $request->input('link_type')) !== $type) {
+                $errors[] = 'O tipo da ligação não pode ser alterado; exclua e crie a ligação de novo.';
             }
+            $from = $has('from_node_id') ? $this->intOrNull($request->input('from_node_id')) : (int) $existing['from_node_id'];
+            $to = $has('to_node_id') ? $this->intOrNull($request->input('to_node_id')) : (int) $existing['to_node_id'];
             $medium = (string) $existing['medium'];
+        }
+
+        $fromNode = $from === null ? null : $this->mapRepository->findNode($providerId, $from);
+        $toNode = $to === null ? null : $this->mapRepository->findNode($providerId, $to);
+        if ($from === null || $to === null) {
+            $errors[] = 'Origem e destino são obrigatórios.';
+        } elseif ($from === $to) {
+            $errors[] = 'Origem e destino devem ser elementos diferentes.';
+        } elseif ($fromNode === null || $toNode === null) {
+            $errors[] = 'Origem ou destino não encontrado.';
+        } elseif (!$creating && ($from !== $existing['from_node_id'] || $to !== $existing['to_node_id'])) {
+            $endOk = fn (int $old, array $new): bool => $old === (int) $new['id']
+                || (($site = $this->siteIdOf($this->mapRepository->findNode($providerId, $old))) !== null && $site === $this->siteIdOf($new));
+            $straight = $endOk((int) $existing['from_node_id'], $fromNode) && $endOk((int) $existing['to_node_id'], $toNode);
+            $inverted = $endOk((int) $existing['to_node_id'], $fromNode) && $endOk((int) $existing['from_node_id'], $toNode);
+            if (!$straight && !$inverted) {
+                $errors[] = 'Só é possível trocar a ponta por outro elemento do mesmo site (ou inverter o sentido); mudar de site não é permitido.';
+            }
+        }
+        $fields['from_node_id'] = $from;
+        $fields['to_node_id'] = $to;
+
+        // Portas: '' = sem porta. Na edição, porta não enviada acompanha o nó se ele continuar numa das pontas (ex.: inverter).
+        $existingPorts = $creating ? [] : array_filter([(int) $existing['from_node_id'] => $existing['from_port_id'], (int) $existing['to_node_id'] => $existing['to_port_id']]);
+        $internal = $fromNode !== null && $toNode !== null && $this->sameSite($providerId, (int) $fromNode['id'], (int) $toNode['id']);
+        foreach (['from' => $fromNode, 'to' => $toNode] as $end => $endNode) {
+            $key = $end . '_port_id';
+            if ($has($key)) {
+                $raw = trim((string) $request->input($key));
+                $portId = $raw === '' ? null : $this->intOrNull($raw);
+                if ($raw !== '' && $portId === null) {
+                    $errors[] = 'Porta inválida.';
+                }
+            } else {
+                $portId = $endNode === null ? null : ($existingPorts[(int) $endNode['id']] ?? null);
+            }
+            $fields[$key] = $portId;
+            if ($portId === null || $endNode === null) {
+                continue;
+            }
+
+            $port = $this->mapRepository->findPort($providerId, $portId);
+            $name = $port === null ? '' : $port['label'] . ' de ' . $endNode['name'];
+            if ($port === null || $port['node_id'] !== (int) $endNode['id']) {
+                $errors[] = 'A porta escolhida não pertence a "' . $endNode['name'] . '".';
+                continue;
+            }
+            // Porta que já estava nesta ligação: status alterado depois não impede editar o resto do trecho.
+            $kept = !$creating && in_array($portId, [$existing['from_port_id'], $existing['to_port_id']], true);
+            if (!$kept && $port['status'] === 'defeito') {
+                $errors[] = $name . ' está com defeito e não pode entrar em ligação.';
+            } elseif (!$kept && $port['status'] === 'reservada') {
+                $warnings[] = $name . ' está reservada.';
+            }
+            if (!$internal && !$port['is_external']) {
+                $errors[] = $name . ' é interna: só liga dentro do mesmo site.';
+            }
+            if (!in_array((string) $port['media'], self::PORT_MEDIA_BY_MEDIUM[$medium] ?? [], true)) {
+                $errors[] = $medium === 'radio'
+                    ? 'Ligação sem fio não usa porta.'
+                    : $name . ' (' . strtoupper((string) $port['media']) . ') não serve para ligação ' . ($medium === 'cabo' ? 'ethernet' : 'de fibra') . '.';
+            }
+            $using = $this->mapRepository->linkUsingPort($providerId, $portId, $creating ? null : (int) $existing['id']);
+            if ($using !== null) {
+                $conflicts[] = $name . ' já está em uso na ligação #' . $using['id'] . ($using['label'] ? ' (' . $using['label'] . ')' : '') . '.';
+            }
+        }
+
+        if ($type === 'ethernet' && $fromNode !== null && $toNode !== null) {
+            $meters = $this->straightMeters($providerId, $fromNode, $toNode);
+            if ($meters !== null && $meters > self::ETHERNET_MAX_M) {
+                $warnings[] = 'Ethernet com ' . number_format($meters, 0, ',', '.') . ' m em linha reta: acima do limite de 100 m do cabo.';
+            }
         }
 
         if ($creating || $has('status')) {
