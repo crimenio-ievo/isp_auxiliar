@@ -435,6 +435,10 @@ button{font-family:inherit;}
 .map-unsaved{position:absolute;left:10px;bottom:10px;z-index:901;font-size:10.5px;color:var(--yellow);
   background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.35);border-radius:4px;padding:3px 8px;pointer-events:none;}
 .diagram-unsaved{font-size:10px;color:var(--yellow);margin-top:2px;}
+.pin-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:902;display:none;align-items:center;gap:6px;
+  background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text-dim);}
+.pin-bar.show{display:flex;}
+.pin-bar select{background:var(--bg-panel-alt);color:inherit;border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-size:11px;}
 </style>
 </head>
 <body>
@@ -485,6 +489,7 @@ button{font-family:inherit;}
     <div id="map-wrap">
       <div id="map"></div>
       <div class="map-status" id="map-status" role="status"></div>
+      <div class="pin-bar" id="pin-bar"><span id="pin-coords"></span><select id="pin-type" title="Tipo do elemento"></select><button class="btn btn-accent btn-sm" id="pin-add">Adicionar elemento aqui</button><button class="btn btn-sm" id="pin-clear" title="Limpar marcador">✕</button></div>
       <div class="map-unsaved" id="map-unsaved">Nós são salvos; ligações e diagrama ainda não</div>
       <div id="mode-banner"><span id="mode-banner-text"></span><button id="mode-banner-cancel">CANCELAR (ESC)</button></div>
       <div class="map-legend">
@@ -882,6 +887,7 @@ function setBasemap(key){
   renderAll();
 }
 
+let searchPin = null;   // marcador temporário da busca por coordenada {lat,lng}
 let selectedNodeId = null;
 let selectedLinkId = null;
 let linkPoint = null;   // {linkId, lat, lng} — marcador deixado por um clique esquerdo na fibra
@@ -991,6 +997,15 @@ function renderAll(){
       parts.push(`<text class="mlabel${dim?' dim':''}" x="${p.x+r+6}" y="${p.y+4}">${escapeHtml(n.name)}</text>`);
     }
   });
+
+  // marcador temporário da busca por coordenada
+  if(searchPin){
+    const q = toScreen(searchPin.lat, searchPin.lng);
+    parts.push(`<g class="search-pin" transform="translate(${q.x},${q.y})" pointer-events="none">
+      <circle r="11" fill="none" stroke="#4fd1c5" stroke-width="2.5"/><circle r="3" fill="#4fd1c5"/>
+      <line x1="-17" y1="0" x2="-7" y2="0" stroke="#4fd1c5" stroke-width="2"/><line x1="7" y1="0" x2="17" y2="0" stroke="#4fd1c5" stroke-width="2"/>
+      <line x1="0" y1="-17" x2="0" y2="-7" stroke="#4fd1c5" stroke-width="2"/><line x1="0" y1="7" x2="0" y2="17" stroke="#4fd1c5" stroke-width="2"/></g>`);
+  }
 
   // conectores visuais do nó selecionado (arrastar para criar link)
   if(mode==='idle' && selectedNodeId){
@@ -1113,6 +1128,7 @@ mapEl.addEventListener('pointerup', (e)=>{
   }
 
   // clique simples
+  clearSearchPin(true);
   if(mode==='placing'){
     openCreateModal(placingType, toLatLng(p.x,p.y));
     return;
@@ -1787,13 +1803,90 @@ function deleteNode(nodeId){
    ============================================================ */
 const searchInput = document.getElementById('search-input');
 const searchResults = document.getElementById('search-results');
+/* ---- coordenadas na busca: decimal, graus/minutos/segundos e link do Google Maps ---- */
+function coordInRange(lat, lng){
+  return isFinite(lat) && isFinite(lng) && Math.abs(lat)<=90 && Math.abs(lng)<=180 ? {lat, lng} : null;
+}
+function parseCoords(raw){
+  const q = String(raw||'').trim();
+  if(!q) return null;
+  // 1) link do Google Maps (ou texto com URL)
+  if(/^https?:\/\//i.test(q) || /(google\.[a-z.]+\/maps|goo\.gl|maps\.app)/i.test(q)){
+    let u = q; try{ u = decodeURIComponent(q); }catch(e){}
+    const N = '(-?\\d{1,3}(?:\\.\\d+)?)';
+    const pats = [new RegExp('!3d'+N+'!4d'+N), new RegExp('@'+N+',\\s*'+N), new RegExp('[?&](?:q|ll|query|center|destination)='+'\\+?'+N+',\\s*\\+?'+N)];
+    for(const re of pats){ const m = u.match(re); if(m) return coordInRange(parseFloat(m[1]), parseFloat(m[2])); }
+    return null;
+  }
+  // 2) graus/minutos/segundos com hemisfério (N/S/E/W; L = leste, O = oeste)
+  const hasHemi = /[NSEWLO]\s*$/i.test(q) || /\d\s*[NSEWLO]\b/i.test(q);
+  if(/[°º'′’"″”]/.test(q) || hasHemi){
+    const comp = /(\d{1,3}(?:[.,]\d+)?)\s*[°º]?\s*(?:(\d{1,2}(?:[.,]\d+)?)\s*['′’]?\s*(?:(\d{1,2}(?:[.,]\d+)?)\s*(?:''|"|″|”|′′)?)?)?\s*([NSEWLO])(?![A-Za-z])/gi;
+    const found = []; let m;
+    while((m = comp.exec(q))) found.push(m);
+    if(found.length!==2) return null;
+    // o que sobra (fora dos dois componentes) só pode ser separador
+    const rest = q.replace(comp,'').replace(/[\s,;]+/g,'');
+    if(rest) return null;
+    const vals = {};
+    for(const f of found){
+      const num = x=> x===undefined ? 0 : parseFloat(String(x).replace(',','.'));
+      const d=num(f[1]), mi=num(f[2]), se=num(f[3]);
+      if(mi>=60 || se>=60 || (f[2]!==undefined && /[.,]/.test(f[1]))) return null;
+      let v = d + mi/60 + se/3600;
+      const h = f[4].toUpperCase();
+      const axis = (h==='N'||h==='S') ? 'lat' : 'lng';
+      if(axis in vals) return null;
+      if(h==='S' || h==='W' || h==='O') v = -v;
+      vals[axis] = v;
+    }
+    return ('lat' in vals && 'lng' in vals) ? coordInRange(vals.lat, vals.lng) : null;
+  }
+  // 3) decimal
+  const n = '[+-]?\\d+(?:[.,]\\d+)?', nd = '[+-]?\\d+(?:\\.\\d+)?';
+  let m = q.match(new RegExp('^('+n+')\\s*;\\s*('+n+')$'))                // ponto e vírgula: vírgula decimal ok
+       || q.match(new RegExp('^('+n+')\\s+('+n+')$'));                     // espaço: vírgula decimal ok
+  if(!m){
+    m = q.match(new RegExp('^('+nd+')\\s*,\\s*('+nd+')$'));               // vírgula separadora, ponto decimal
+    if(m && !(/\./.test(q) || /,\s/.test(q))) m = null;                    // "-21,5" não é um par
+    if(!m){
+      m = q.match(/^([+-]?\d+,\d+)\s*,\s+([+-]?\d+,\d+)$/);               // "-21,0025, -42,8375" (decimal brasileiro)
+    }
+  }
+  if(!m) return null;
+  return coordInRange(parseFloat(m[1].replace(',','.')), parseFloat(m[2].replace(',','.')));
+}
+function fmtCoord(v){ return v.toFixed(5); }
+function showSearchPin(ll){
+  searchPin = {lat:ll.lat, lng:ll.lng};
+  document.getElementById('pin-coords').textContent = fmtCoord(ll.lat)+', '+fmtCoord(ll.lng);
+  document.getElementById('pin-bar').classList.add('show');
+  centerOn(searchPin, Math.max(view.scale, 256*Math.pow(2,17)));
+}
+function clearSearchPin(clearInput){
+  if(!searchPin) return;
+  searchPin = null;
+  document.getElementById('pin-bar').classList.remove('show');
+  if(clearInput) searchInput.value = '';
+  renderAll();
+}
 searchInput.addEventListener('input', ()=>{
-  const q = searchInput.value.trim().toLowerCase();
-  if(!q){ searchResults.classList.remove('show'); return; }
-  const matches = nodes.filter(n=> n.name.toLowerCase().includes(q)).slice(0,10);
-  if(!matches.length){ searchResults.innerHTML = '<div class="search-item">Nenhum resultado</div>'; searchResults.classList.add('show'); return; }
-  searchResults.innerHTML = matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}</small></div>`).join('');
+  const raw = searchInput.value.trim();
+  const q = raw.toLowerCase();
+  if(!q){ searchResults.classList.remove('show'); clearSearchPin(false); return; }
+  const coord = parseCoords(raw);
+  const matches = coord ? [] : nodes.filter(n=> n.name.toLowerCase().includes(q)).slice(0,10);
+  let htmlOut = '';
+  if(coord) htmlOut += `<div class="search-item" data-coord="1"><span>Ir para ${fmtCoord(coord.lat)}, ${fmtCoord(coord.lng)}</span><small>coordenada</small></div>`;
+  htmlOut += matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}</small></div>`).join('');
+  if(!htmlOut) htmlOut = '<div class="search-item">Nenhum resultado</div>';
+  searchResults.innerHTML = htmlOut;
   searchResults.classList.add('show');
+  const goItem = searchResults.querySelector('.search-item[data-coord]');
+  if(goItem) goItem.addEventListener('click', ()=>{
+    searchResults.classList.remove('show');
+    showSearchPin(coord);
+  });
   searchResults.querySelectorAll('.search-item[data-id]').forEach(el=>{
     el.addEventListener('click', ()=>{
       const n = nodeById(el.getAttribute('data-id'));
@@ -1804,6 +1897,10 @@ searchInput.addEventListener('input', ()=>{
     });
   });
 });
+searchInput.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter'){ const first = searchResults.querySelector('.search-item[data-coord], .search-item[data-id]'); if(first) first.click(); }
+});
+document.getElementById('pin-clear').addEventListener('click', ()=> clearSearchPin(true));
 document.addEventListener('click', (e)=>{
   if(!e.target.closest('.topbar-search')) searchResults.classList.remove('show');
 });
@@ -1818,6 +1915,13 @@ addMenu.innerHTML = ADDABLE.map(t=>`
     <svg viewBox="0 0 24 24" fill="none" stroke="${STATUS_COLOR.normal}" stroke-width="1.8">${ICON_PATHS[t]}</svg>
     ${TYPE_LABEL[t]}
   </div>`).join('');
+document.getElementById('pin-type').innerHTML = ADDABLE.map(t=>`<option value="${t}">${TYPE_LABEL[t]}</option>`).join('');
+document.getElementById('pin-add').addEventListener('click', ()=>{
+  if(!searchPin) return;
+  const ll = {lat:searchPin.lat, lng:searchPin.lng};
+  const type = document.getElementById('pin-type').value;
+  openCreateModal(type, ll);   // o marcador fica até salvar/cancelar; limpar ao salvar é feito pelo recarregamento
+});
 document.getElementById('btn-add').addEventListener('click', (e)=>{
   e.stopPropagation();
   addMenu.classList.toggle('show');
@@ -1859,6 +1963,8 @@ function openCreateModal(type, latlng){
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Novo elemento — ${TYPE_LABEL[type]}</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
+      <div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
+      <div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
       <div class="form-field"><label>Nome</label><input id="f-name" type="text" placeholder="${TYPE_LABEL[type]}-${(nodes.filter(n=>n.type===type).length+1).toString().padStart(2,'0')}"></div>
       <div class="form-field"><label>Status</label>
         <select id="f-status">
@@ -1891,7 +1997,7 @@ function openCreateModal(type, latlng){
       notes:document.getElementById('f-obs').value.trim(),
       attrs:JSON.stringify(attrs)
     }).then(data=>{
-      closeModal(); clearMode();
+      closeModal(); clearMode(); clearSearchPin(true);
       loadNetwork(()=>{
         toast('Elemento "'+name+'" salvo. Ligações ainda não são salvas.');
         const created = nodes.find(n=>n.dbId===data.node.id);
