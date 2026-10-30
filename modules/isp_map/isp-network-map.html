@@ -485,7 +485,7 @@ button{font-family:inherit;}
     <div id="map-wrap">
       <div id="map"></div>
       <div class="map-status" id="map-status" role="status"></div>
-      <div class="map-unsaved" id="map-unsaved">Edições ainda não são salvas</div>
+      <div class="map-unsaved" id="map-unsaved">Nós são salvos; ligações e diagrama ainda não</div>
       <div id="mode-banner"><span id="mode-banner-text"></span><button id="mode-banner-cancel">CANCELAR (ESC)</button></div>
       <div class="map-legend">
         <div class="lg-item"><div class="lg-dot" style="background:var(--green)"></div>Normal</div>
@@ -631,38 +631,6 @@ function addPort(nodeId,label,status,extra){
   return p;
 }
 
-/* Redimensiona a bandeja de uma CTO. Aumentar é seguro: só acrescenta posições
-   vagas no fim. Diminuir remove as posições numeradas mais altas — bloqueado
-   se alguma delas tiver cliente (preserva o que funciona; não apaga cliente
-   em silêncio). Junto com a porta removida, some qualquer emenda que apontava
-   pra ela, senão fica ligação órfã no diagrama. Devolve true se aplicou. */
-function redimensionarPortasCTO(n, novaCap){
-  const atuais = portsOf(n.id).slice().sort((a,b)=>
-    parseInt(a.label.replace('Porta ',''),10) - parseInt(b.label.replace('Porta ',''),10));
-  if(novaCap > atuais.length){
-    for(let i=atuais.length+1;i<=novaCap;i++) addPort(n.id,'Porta '+i,'livre');
-    n.capacity = novaCap;
-    toast('Portas '+(atuais.length+1)+'–'+novaCap+' adicionadas.');
-    return true;
-  }
-  if(novaCap === atuais.length) return true;
-  const remover = atuais.slice(novaCap);              // as posições mais altas
-  const comCliente = remover.filter(p=>p.clientName);
-  if(comCliente.length){
-    alert('Não é possível reduzir para '+novaCap+' portas: '+
-      comCliente.map(p=>p.label+' — '+p.clientName).join(', ')+
-      ' ainda '+(comCliente.length>1?'têm':'tem')+' cliente. Migre ou remova o(s) cliente(s) primeiro.');
-    return false;
-  }
-  const idsRemover = new Set(remover.map(p=>p.id));
-  connections = connections.filter(cn=>
-    !(cn.origem.type==='port' && idsRemover.has(cn.origem.id)) &&
-    !(cn.destino.type==='port' && idsRemover.has(cn.destino.id)));
-  ports = ports.filter(p=>!idsRemover.has(p.id));
-  n.capacity = novaCap;
-  toast('Portas '+(novaCap+1)+'–'+atuais.length+' removidas.');
-  return true;
-}
 function addLink(type,fromNode,toNode,status,extra){
   extra = Object.assign({}, extra||{});
   const cableMeta = extra.cableMeta; delete extra.cableMeta;
@@ -729,165 +697,6 @@ function addMeasurement(targetType, targetId, kind, valorDbm, extra){
 }
 function measurementsFor(targetId){ return measurements.filter(m=>m.targetId===targetId); }
 
-function buildNetwork(){
-  // ---- POPs ----
-  const popCentral = addNode('pop','POP Central', -21.0025,-42.8375,'normal',{ip:'192.168.0.1',desc:'POP principal — backbone e core.'});
-  const popNorte   = addNode('pop','POP Norte',   -20.9752,-42.8300,'normal',{ip:'192.168.1.1',desc:'POP secundário, atende zona norte.'});
-  const popSul     = addNode('pop','POP Sul',     -21.0300,-42.8452,'normal',{ip:'192.168.2.1',desc:'POP secundário, atende zona sul e área rural.'});
-
-  addLink('backbone', popCentral, popNorte, 'normal', {label:'Backbone Central–Norte'});
-  addLink('backbone', popCentral, popSul,   'normal', {label:'Backbone Central–Sul'});
-  // backbone links não devem sobrescrever "parent" de topo — mantemos POPs como raízes
-  popNorte.parent = null; popNorte.parentLink = null;
-  popSul.parent = null; popSul.parentLink = null;
-
-  // ---- OLT-01 (POP Central) ----
-  const olt01 = addNode('olt','OLT-01', -21.0032,-42.8384,'normal',{ip:'192.168.10.20',
-    pons:[
-      {ponId:'PON 1', onus:5, power:-18.3, status:'normal'},
-      {ponId:'PON 2', onus:2, power:-26.5, status:'alerta'},
-      {ponId:'PON 3', onus:0, power:null, status:'livre'},
-      {ponId:'PON 4', onus:0, power:null, status:'livre'}
-    ]});
-  addLink('ethernet', popCentral, olt01, 'normal', {label:'Uplink OLT-01'});
-
-  // ---- OLT-02 (POP Norte) ----
-  const olt02 = addNode('olt','OLT-02', -20.9758,-42.8308,'normal',{ip:'192.168.11.20',
-    pons:[
-      {ponId:'PON 1', onus:3, power:-19.8, status:'normal'},
-      {ponId:'PON 2', onus:1, power:-21.0, status:'normal'},
-      {ponId:'PON 3', onus:0, power:null, status:'livre'},
-      {ponId:'PON 4', onus:0, power:null, status:'livre'}
-    ]});
-  addLink('ethernet', popNorte, olt02, 'normal', {label:'Uplink OLT-02'});
-
-  // ---- Switch (POP Sul) ----
-  const swSul = addNode('switch','SW-SUL-01', -21.0308,-42.8458,'normal',{ip:'192.168.12.10', ports24:24, used:6});
-  addLink('ethernet', popSul, swSul, 'normal', {label:'Uplink SW-SUL-01'});
-
-  // ---- Torres + Rádios (PTP) ----
-  const torreNorte = addNode('tower','Torre Norte', -20.9598,-42.8148,'normal',{altura:'42m'});
-  addLink('wireless', popCentral, torreNorte, 'normal', {label:'PTP Central–Torre Norte',freq:'5.8GHz',distancia:'4.1km',sinal:-58});
-
-  const torreSul = addNode('tower','Torre Sul', -21.0502,-42.8602,'normal',{altura:'36m'});
-  addLink('wireless', popSul, torreSul, 'normal', {label:'PTP Sul–Torre Sul',freq:'5.8GHz',distancia:'2.6km',sinal:-61});
-
-  const apRural01 = addNode('radio','AP Rural 01', -20.9600,-42.8145,'normal',{ip:'192.168.20.11',ssid:'ISP-RURAL-01',freq:'5.8GHz',clientesMax:30});
-  addLink('ethernet', torreNorte, apRural01, 'normal', {label:'Setor A'});
-
-  const apRural02 = addNode('radio','AP Rural 02', -20.9596,-42.8151,'normal',{ip:'192.168.20.12',ssid:'ISP-RURAL-02',freq:'2.4GHz',clientesMax:30});
-  addLink('ethernet', torreNorte, apRural02, 'normal', {label:'Setor B'});
-
-  const apSul01 = addNode('radio','AP Sul 01', -21.0500,-42.8598,'normal',{ip:'192.168.21.11',ssid:'ISP-SUL-01',freq:'5.8GHz',clientesMax:30});
-  addLink('ethernet', torreSul, apSul01, 'normal', {label:'Setor A'});
-
-  const apSul02 = addNode('radio','AP Sul 02', -21.0504,-42.8606,'offline',{ip:'192.168.21.12',ssid:'ISP-SUL-02',freq:'2.4GHz',clientesMax:30});
-  addLink('ethernet', torreSul, apSul02, 'offline', {label:'Setor B'});
-
-  // ---- CEO-01 / CEO-02 (caixas de emenda — infraestrutura óptica) ----
-  const ceo01 = addNode('ceo','CEO-01', -21.0048,-42.8398,'normal',{desc:'Caixa de emenda — fusão + splitter 10/90.'});
-  const linkOltCeo1 = addLink('distribuicao', olt01, ceo01, 'normal', {label:'CEO-01 via PON 1', pon:'PON 1',
-    cableMeta:{nome:'CABO-01', tipo:'12FO', totalFibras:12, coresOcupadas:[{numero:6,status:'ocupada'}]}});
-  const cable01 = cables.find(c=>c.linkId===linkOltCeo1.id);
-  const cable02 = addCable(null, 'CABO-02', '12FO', 12, [{numero:2,status:'ocupada'}]);
-  cable02.localAtNode = ceo01.id;
-
-  const ceo02 = addNode('ceo','CEO-02', -21.0074,-42.8424,'normal',{desc:'Caixa de emenda — passagem direta (sem splitter).'});
-  const linkCeo1Ceo2 = addLink('distribuicao', ceo01, ceo02, 'normal', {label:'CEO-01 → CEO-02',
-    cableMeta:{nome:'CABO-03', tipo:'24FO', totalFibras:24, coresOcupadas:[{numero:4,status:'ocupada'},{numero:15,status:'reservada'}]}});
-  const cable03 = cables.find(c=>c.linkId===linkCeo1Ceo2.id);
-
-  // ---- CTOs ----
-  // Cada CTO recebe um cabo de chegada, um splitter balanceado e as conexões
-  // internas fibra → splitter → portas. É isso que permite abrir o diagrama dela.
-  function makeCTO(name,lat,lng,status,parentEquip,ponId,capacity){
-    const cap = capacity||8;
-    const c = addNode('cto',name,lat,lng,status,{capacity:cap, powerIn: -16 - Math.random()*4});
-    const l = addLink('distribuicao', parentEquip, c, status==='offline'?'offline':'normal', {
-      label:name+' via '+(ponId||'uplink'), pon:ponId||null,
-      cableMeta:{nome:'CABO '+name, tipo:'6FO', totalFibras:6, coresOcupadas:[{numero:1,status:'ocupada'}]}
-    });
-    const cab = cables.find(x=>x.linkId===l.id);
-    const portList = [];
-    for(let i=1;i<=cap;i++) portList.push(addPort(c.id, 'Porta '+i, 'livre'));
-    const sp = addSplitter(c.id, '1x'+cap, cap, true);
-    addConnection(c.id, 'splitter_in', {type:'fiber', id: fiberIn(cab,1).id}, {type:'splitterPort', id: sp.id+'-in'});
-    sp.ports.filter(p=>p.papel==='saida').forEach((p,i)=>{
-      addConnection(c.id, 'splitter_out', {type:'splitterPort', id:p.id}, {type:'port', id: portList[i].id});
-    });
-    return c;
-  }
-  const cto01 = makeCTO('CTO-01', -21.0062,-42.8412,'normal', ceo01, null);
-  const cto02 = makeCTO('CTO-02', -21.0082,-42.8432,'normal', ceo02, null);
-  const cto03 = makeCTO('CTO-03', -21.0002,-42.8342,'normal', olt01, 'PON 2');
-  const cto04 = makeCTO('CTO-04', -20.9782,-42.8332,'normal', olt02, 'PON 1');
-  const cto05 = makeCTO('CTO-05', -20.9802,-42.8352,'alerta', olt02, 'PON 1');
-  const cto06 = makeCTO('CTO-06', -20.9722,-42.8282,'normal', olt02, 'PON 2');
-  const cto07 = makeCTO('CTO-07', -21.0332,-42.8482,'normal', swSul, null);
-  const cto08 = makeCTO('CTO-08', -21.0352,-42.8502,'normal', swSul, null);
-
-  // ---- Clientes fibra (ligados a portas de CTO) ----
-  function jitter(v){ return v + (Math.random()-0.5)*0.0025; }
-  function fiberClient(name,cto,portNum,plano,status){
-    status = status || 'normal';
-    const cl = addNode('client', name, jitter(cto.lat), jitter(cto.lng), status, {
-      plano, tecnologia:'Fibra (GPON)', equipamento:'ONU '+ (Math.random()>0.5?'Huawei HG8245':'Fiberhome AN5506'),
-      sinal: status==='offline' ? null : Math.round((-19 - Math.random()*8)*10)/10,
-      lastSeen: status==='offline' ? 'há 2 dias' : 'há 2 min'
-    });
-    const port = ports.find(p=>p.nodeId===cto.id && p.label==='Porta '+portNum);
-    if(port){ port.status = status==='offline' ? 'alerta' : 'ocupada'; port.clientId = cl.id; port.clientName = name; }
-    addLink('drop', cto, cl, status, {label:'Drop '+name, portLabel:'Porta '+portNum});
-    return cl;
-  }
-  fiberClient('João Pereira', cto01, 1, '300 Mbps', 'normal');
-  fiberClient('Maria Souza',  cto01, 2, '300 Mbps', 'normal');
-  fiberClient('Carlos Nunes', cto01, 5, '200 Mbps', 'offline');
-  fiberClient('Ana Ribeiro',  cto02, 1, '500 Mbps', 'normal');
-  fiberClient('Pedro Alves',  cto02, 3, '300 Mbps', 'normal');
-  fiberClient('Lucas Martins',cto03, 1, '300 Mbps', 'normal');
-  fiberClient('Beatriz Lima', cto03, 2, '200 Mbps', 'normal');
-  fiberClient('Fernanda Dias',cto04, 1, '300 Mbps', 'normal');
-  fiberClient('Rafael Costa', cto04, 4, '300 Mbps', 'normal');
-  fiberClient('Gustavo Melo', cto05, 1, '200 Mbps', 'alerta');
-  fiberClient('Juliana Rocha',cto06, 1, '500 Mbps', 'normal');
-
-  // ---- Clientes rádio ----
-  function radioClient(name,ap,plano,sinal,status){
-    status = status || 'normal';
-    const cl = addNode('client', name, jitter(ap.lat+0.004), jitter(ap.lng+0.004), status, {
-      plano, tecnologia:'Rádio', equipamento:'CPE Ubiquiti LiteBeam',
-      sinal, lastSeen: status==='offline' ? 'há 5 horas' : 'há 1 min'
-    });
-    addLink('wireless', ap, cl, status, {label:'Acesso '+name});
-    return cl;
-  }
-  radioClient('Fazenda Boa Vista', apRural01, '10 Mbps', -63, 'normal');
-  radioClient('Fazenda Santa Rita', apRural01, '10 Mbps', -67, 'normal');
-  radioClient('Fazenda Três Irmãos', apRural02, '10 Mbps', -71, 'alerta');
-  radioClient('Sítio Alegre', apSul01, '15 Mbps', -59, 'normal');
-
-  // ---- Splitter + fusão + connections dentro da CEO-01 (exemplo trabalhado) ----
-  const linkCeo1Cto1 = links.find(l=>l.from===ceo01.id && l.to===cto01.id);
-  const linkCeo2Cto2 = links.find(l=>l.from===ceo02.id && l.to===cto02.id);
-  const splCeo1 = addSplitter(ceo01.id, '10/90', [10,90]);
-  addConnection(ceo01.id, 'fusao', {type:'fiber', id: fiberIn(cable01,6).id}, {type:'fiber', id: fiberIn(cable02,2).id});
-  addConnection(ceo01.id, 'splitter_in', {type:'fiber', id: fiberIn(cable02,2).id}, {type:'splitterPort', id: splCeo1.id+'-in'});
-  const cabCeo1Cto1 = cables.find(x=>x.linkId===linkCeo1Cto1.id);
-  addConnection(ceo01.id, 'splitter_out', {type:'splitterPort', id: splCeo1.id+'-out10'}, {type:'fiber', id: fiberIn(cabCeo1Cto1,1).id});
-  addConnection(ceo01.id, 'splitter_out', {type:'splitterPort', id: splCeo1.id+'-out90'}, {type:'fiber', id: fiberIn(cable03,4).id});
-  // CEO-02: passagem direta (sem splitter) — demonstra o tipo de conexão "passante"
-  const cabCeo2Cto2 = cables.find(x=>x.linkId===linkCeo2Cto2.id);
-  addConnection(ceo02.id, 'passante', {type:'fiber', id: fiberIn(cable03,4).id}, {type:'fiber', id: fiberIn(cabCeo2Cto2,1).id});
-
-  // ---- Potência: calculada × medida (campo) ----
-  addMeasurement('node', cto01.id, 'calculado', -19.5);
-  addMeasurement('node', cto01.id, 'medido', -20.1, {data:'14/08/2026', tecnico:'Carlos (campo)', equipamento:'Power meter EXFO FOT-930'});
-  addMeasurement('node', cto05.id, 'calculado', -21.0);
-  addMeasurement('node', cto05.id, 'medido', -27.4, {data:'02/09/2026', tecnico:'Marcos (campo)', equipamento:'Power meter EXFO FOT-930', observacao:'Sinal bem abaixo do esperado — possível perda extra na fusão ou splitter fora da faixa.'});
-
-  return {popCentral,popNorte,popSul};
-}
 /* ---- carga dos dados reais (GET /api/mapa) ---- */
 function setMapStatus(msg, isError){
   const el = document.getElementById('map-status');
@@ -905,7 +714,8 @@ function applyTopology(data){
     if(r.lat==null || r.lng==null) return;            // sem coordenada não há onde desenhar
     const n = Object.assign({}, r.attrs_json||{}, {
       id:'n'+r.id, dbId:r.id, type:r.node_type, name:r.name, code:r.code, lat:r.lat, lng:r.lng,
-      status:r.status||'normal', parent:null, parentLink:null, notes:r.notes
+      status:r.status||'normal', parent:null, parentLink:null, notes:r.notes, desc:r.notes||'',
+      _attrs:Object.assign({}, r.attrs_json||{})
     });
     if(n.type==='olt') n.pons = [];
     if(n.type==='switch'){ n.ports24 = n.ports24||24; n.used = n.used||0; }
@@ -932,10 +742,15 @@ function applyTopology(data){
   setMapStatus(nodes.length ? '' : 'Nenhum elemento cadastrado');
   fitToNetwork();
 }
-function loadNetwork(){
+function resetTopology(){
+  nodes = []; ports = []; links = []; cables = []; fiberStrands = []; splitters = []; connections = []; measurements = [];
+  selectedNodeId = null; selectedLinkId = null; pathHighlight = null;
+}
+/* Recarrega a topologia do servidor (fonte da verdade). onDone(): chamado após aplicar com sucesso. */
+function loadNetwork(onDone){
   const cfg = window.ISP_MAP || {};
   const sessionMsg = 'Sessão expirada — faça login novamente';
-  setMapStatus('Carregando…');
+  if(!nodes.length) setMapStatus('Carregando…');
   fetch(cfg.api || '/api/mapa', {credentials:'same-origin', headers:{'Accept':'application/json'}})
     .then(resp=>{
       const ct = resp.headers.get('content-type') || '';
@@ -945,12 +760,34 @@ function loadNetwork(){
     .then(({status, body})=>{
       if(status===403) throw new Error('forbidden');
       if(!body || body.ok!==true || !body.data) throw new Error('api');
+      resetTopology();
+      closePanel();
       applyTopology(body.data);
+      if(typeof onDone==='function') onDone();
     })
     .catch(err=>{
       const m = err && err.message;
       setMapStatus(m==='session' ? sessionMsg : (m==='forbidden' ? 'Acesso negado ao mapa.' : 'Não foi possível carregar o mapa.'), true);
     });
+}
+/* Grava um nó: POST FormData + X-CSRF-Token. Resolve com data; rejeita com Error(mensagem do servidor). */
+function mapPost(path, fields){
+  const cfg = window.ISP_MAP || {};
+  const fd = new FormData();
+  Object.keys(fields).forEach(k=>{ if(fields[k]!==null && fields[k]!==undefined) fd.append(k, fields[k]); });
+  return fetch((cfg.api || '/api/mapa') + path, {method:'POST', body:fd, credentials:'same-origin',
+      headers:{'Accept':'application/json', 'X-CSRF-Token': cfg.csrf || ''}})
+    .then(resp=>{
+      const ct = resp.headers.get('content-type') || '';
+      if(resp.redirected || !ct.includes('application/json')) throw new Error('Sessão expirada — faça login novamente');
+      return resp.json().then(body=>{
+        if(!resp.ok || !body || body.ok!==true) throw new Error((body && body.message) || 'Não foi possível gravar.');
+        return body.data;
+      });
+    });
+}
+function nodeAttrsJson(n, overrides){
+  return JSON.stringify(Object.assign({}, n && n._attrs || {}, overrides||{}));
 }
 loadNetwork();
 
@@ -1263,7 +1100,17 @@ mapEl.addEventListener('pointerup', (e)=>{
     else renderAll();
     return;
   }
-  if(st.moved){ if(st.kind==='node') toast('Posição atualizada.'); return; }
+  if(st.moved){
+    if(st.kind==='node'){
+      const mv = nodeById(st.id);
+      if(mv && mv.dbId){
+        mapPost('/nos/editar', {id:mv.dbId, lat:mv.lat, lng:mv.lng})
+          .then(()=>{ toast('Posição salva.'); })
+          .catch(err=>{ toast(err.message); loadNetwork(); });   // recarrega para desfazer o arrasto
+      }
+    }
+    return;
+  }
 
   // clique simples
   if(mode==='placing'){
@@ -1731,7 +1578,7 @@ function bindPanelActions(n){
 
   const btnDelete = document.getElementById('btn-delete-node');
   if(btnDelete) btnDelete.addEventListener('click', ()=>{
-    if(confirm('Excluir "'+n.name+'" e todos os links associados?')){
+    if(confirm('Excluir "'+n.name+'"? Só é possível se não tiver ligações nem elementos filhos.')){
       deleteNode(n.id);
     }
   });
@@ -1921,14 +1768,18 @@ function showPathForClient(clientNode){
    EXCLUSÃO
    ============================================================ */
 function deleteNode(nodeId){
-  // remove links relacionados, portas, e reparenta filhos (opcional: apenas remove)
-  links = links.filter(l=> l.from!==nodeId && l.to!==nodeId);
-  ports = ports.filter(p=> p.nodeId!==nodeId);
-  nodes = nodes.filter(n=> n.id!==nodeId);
-  // remove referências de portas que apontavam para o node excluído
-  ports.forEach(p=>{ if(p.clientId===nodeId){ p.status='livre'; delete p.clientId; delete p.clientName; }});
-  closePanel();
-  toast('Elemento excluído.');
+  const n = nodeById(nodeId);
+  if(!n) return;
+  if(!n.dbId){   // elemento só em memória (ex.: caixa criada por sangria): comportamento antigo
+    links = links.filter(l=> l.from!==nodeId && l.to!==nodeId);
+    ports = ports.filter(p=> p.nodeId!==nodeId);
+    nodes = nodes.filter(x=> x.id!==nodeId);
+    closePanel(); toast('Elemento excluído.');
+    return;
+  }
+  mapPost('/nos/excluir', {id:n.dbId})
+    .then(()=>{ loadNetwork(()=> toast('Elemento excluído.')); })
+    .catch(err=> toast(err.message));
 }
 
 /* ============================================================
@@ -1961,7 +1812,7 @@ document.addEventListener('click', (e)=>{
    ADICIONAR ELEMENTO
    ============================================================ */
 const addMenu = document.getElementById('add-menu');
-const ADDABLE = ['pop','olt','switch','radio','tower','ceo','cto','splitter','client'];
+const ADDABLE = ['pop','olt','switch','radio','tower','ceo','cto'];   // cliente e splitter: fases seguintes
 addMenu.innerHTML = ADDABLE.map(t=>`
   <div class="add-menu-item" data-type="${t}">
     <svg viewBox="0 0 24 24" fill="none" stroke="${STATUS_COLOR.normal}" stroke-width="1.8">${ICON_PATHS[t]}</svg>
@@ -2029,23 +1880,24 @@ function openCreateModal(type, latlng){
   document.getElementById('modal-x').addEventListener('click', ()=>{ closeModal(); clearMode(); });
   document.getElementById('modal-cancel').addEventListener('click', ()=>{ closeModal(); clearMode(); });
   document.getElementById('modal-save').addEventListener('click', ()=>{
-    const name = document.getElementById('f-name').value.trim() || (TYPE_LABEL[type]+'-NOVO');
-    const status = document.getElementById('f-status').value;
-    const obs = document.getElementById('f-obs').value.trim();
-    const extra = {desc:obs};
-    const cap = type==='cto' ? Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||16)) : null;
-    if(type==='cto'){ extra.capacity=cap; extra.powerIn=-18; }
-    if(type==='olt'){ extra.ip='192.168.99.'+Math.floor(Math.random()*250); extra.pons=[{ponId:'PON 1',onus:0,power:null,status:'livre'},{ponId:'PON 2',onus:0,power:null,status:'livre'},{ponId:'PON 3',onus:0,power:null,status:'livre'},{ponId:'PON 4',onus:0,power:null,status:'livre'}]; }
-    if(type==='switch'){ extra.ip='192.168.99.'+Math.floor(Math.random()*250); extra.ports24=24; extra.used=0; }
-    if(type==='radio'){ extra.ip='192.168.99.'+Math.floor(Math.random()*250); extra.ssid='ISP-NOVO'; extra.freq='5.8GHz'; extra.clientesMax=30; }
-    if(type==='client'){ extra.plano='—'; extra.tecnologia='—'; extra.equipamento='—'; extra.sinal=null; extra.lastSeen='agora'; }
-    const n = addNode(type, name, latlng.lat, latlng.lng, status, extra);
-    if(type==='cto'){ for(let i=1;i<=cap;i++) addPort(n.id,'Porta '+i,'livre'); }
-    closeModal();
-    clearMode();
-    renderAll();
-    toast('Elemento "'+name+'" criado. Use "Adicionar conexão" para ligá-lo à rede.');
-    onNodeClick(n.id);
+    const name = document.getElementById('f-name').value.trim();
+    if(!name){ toast('Informe o nome do elemento.'); return; }
+    const attrs = {};
+    if(type==='cto') attrs.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||16));
+    const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
+    mapPost('/nos', {
+      node_type:type, name, lat:latlng.lat, lng:latlng.lng,
+      status:document.getElementById('f-status').value,
+      notes:document.getElementById('f-obs').value.trim(),
+      attrs:JSON.stringify(attrs)
+    }).then(data=>{
+      closeModal(); clearMode();
+      loadNetwork(()=>{
+        toast('Elemento "'+name+'" salvo. Ligações ainda não são salvas.');
+        const created = nodes.find(n=>n.dbId===data.node.id);
+        if(created) onNodeClick(created.id);
+      });
+    }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
   });
 }
 
@@ -2078,17 +1930,22 @@ function openEditModal(n){
   document.getElementById('modal-x').addEventListener('click', closeModal);
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   document.getElementById('modal-save').addEventListener('click', ()=>{
-    n.name = document.getElementById('f-name').value.trim() || n.name;
-    n.status = document.getElementById('f-status').value;
-    n.desc = document.getElementById('f-obs').value.trim();
-    if(isCTO){
-      const novaCap = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||n.capacity));
-      if(novaCap !== n.capacity && !redimensionarPortasCTO(n, novaCap)) return; // bloqueado, modal segue aberto
-    }
-    closeModal();
-    renderAll();
-    openNodePanel(n.id);
-    toast('Alterações salvas.');
+    const name = document.getElementById('f-name').value.trim();
+    if(!name){ toast('Informe o nome do elemento.'); return; }
+    const overrides = {};
+    if(isCTO) overrides.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||n.capacity||16));
+    const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
+    mapPost('/nos/editar', {
+      id:n.dbId, name, status:document.getElementById('f-status').value,
+      notes:document.getElementById('f-obs').value.trim(), attrs:nodeAttrsJson(n, overrides)
+    }).then(()=>{
+      closeModal();
+      loadNetwork(()=>{
+        const again = nodes.find(x=>x.dbId===n.dbId);
+        if(again) openNodePanel(again.id);
+        toast('Alterações salvas.');
+      });
+    }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
   });
 }
 
@@ -3243,7 +3100,7 @@ function ctxItemsNode(n){
   items.push({label:'Conectar a partir daqui', onClick:()=>{ onNodeClick(n.id); startLinking(n); }});
   items.push({sep:true});
   items.push({label:'Excluir elemento', danger:true, onClick:()=>{
-    if(confirm('Excluir "'+n.name+'" e todos os links associados?')) deleteNode(n.id);
+    if(confirm('Excluir "'+n.name+'"? Só é possível se não tiver ligações nem elementos filhos.')) deleteNode(n.id);
   }});
   return items;
 }

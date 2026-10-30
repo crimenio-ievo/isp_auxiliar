@@ -91,6 +91,9 @@ return static function (Router $router): void {
     $router->post('/usuarios/gestor', [SystemController::class, 'saveManager'], 'users.manager.save');
     $router->get('/mapa', [MapController::class, 'show'], 'map.show');
     $router->get('/api/mapa', [MapController::class, 'data'], 'api.map.data');
+    $router->post('/api/mapa/nos', [MapController::class, 'createNode'], 'api.map.nodes.create');
+    $router->post('/api/mapa/nos/editar', [MapController::class, 'updateNode'], 'api.map.nodes.update');
+    $router->post('/api/mapa/nos/excluir', [MapController::class, 'deleteNode'], 'api.map.nodes.delete');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');

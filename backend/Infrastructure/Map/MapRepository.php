@@ -38,6 +38,137 @@ final class MapRepository
         ];
     }
 
+    public function pdo(): \PDO
+    {
+        return $this->database->pdo();
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findNode(int $providerId, int $nodeId): ?array
+    {
+        $rows = $this->fetch(
+            $this->database->pdo(),
+            'SELECT id, node_type, name, code, lat, lng, parent_node_id, status, attrs_json, equipment_id, notes
+             FROM map_nodes WHERE id = :id AND provider_id = :provider_id',
+            ['id' => $nodeId, 'provider_id' => $providerId]
+        );
+
+        return $rows === [] ? null : $this->normalize($rows[0], ['id', 'parent_node_id', 'equipment_id'], ['lat', 'lng'], ['attrs_json']);
+    }
+
+    /**
+     * @param array<string, mixed> $fields node_type, name, code, lat, lng, parent_node_id, status, attrs_json (string|null), notes
+     */
+    public function createNode(int $providerId, ?int $userId, array $fields): int
+    {
+        $pdo = $this->database->pdo();
+        $statement = $pdo->prepare(
+            'INSERT INTO map_nodes (provider_id, node_type, name, code, lat, lng, parent_node_id, status, attrs_json, notes,
+                    created_by_user_id, updated_by_user_id, created_at, updated_at)
+             VALUES (:provider_id, :node_type, :name, :code, :lat, :lng, :parent_node_id, :status, :attrs_json, :notes,
+                    :user_id, :user_id2, NOW(), NOW())'
+        );
+        $statement->execute([
+            'provider_id' => $providerId,
+            'node_type' => $fields['node_type'],
+            'name' => $fields['name'],
+            'code' => $fields['code'] ?? null,
+            'lat' => $fields['lat'],
+            'lng' => $fields['lng'],
+            'parent_node_id' => $fields['parent_node_id'] ?? null,
+            'status' => $fields['status'],
+            'attrs_json' => $fields['attrs_json'] ?? null,
+            'notes' => $fields['notes'] ?? null,
+            'user_id' => $userId,
+            'user_id2' => $userId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Atualiza só as colunas presentes em $fields (whitelist abaixo).
+     *
+     * @param array<string, mixed> $fields
+     */
+    public function updateNode(int $providerId, int $nodeId, ?int $userId, array $fields): void
+    {
+        $allowed = ['name', 'code', 'lat', 'lng', 'parent_node_id', 'status', 'attrs_json', 'notes'];
+        $sets = [];
+        $params = ['id' => $nodeId, 'provider_id' => $providerId, 'user_id' => $userId];
+        foreach ($allowed as $column) {
+            if (array_key_exists($column, $fields)) {
+                $sets[] = "{$column} = :{$column}";
+                $params[$column] = $fields[$column];
+            }
+        }
+        $sets[] = 'updated_by_user_id = :user_id';
+        $sets[] = 'updated_at = NOW()';
+
+        $this->database->pdo()
+            ->prepare('UPDATE map_nodes SET ' . implode(', ', $sets) . ' WHERE id = :id AND provider_id = :provider_id')
+            ->execute($params);
+    }
+
+    /**
+     * Ids dos nós que descendem de $nodeId (para impedir ciclos de parent_node_id).
+     *
+     * @return list<int>
+     */
+    public function descendantIds(int $providerId, int $nodeId): array
+    {
+        $found = [];
+        $frontier = [$nodeId];
+        while ($frontier !== []) {
+            $marks = implode(',', array_fill(0, count($frontier), '?'));
+            $statement = $this->database->pdo()->prepare("SELECT id FROM map_nodes WHERE provider_id = ? AND parent_node_id IN ({$marks})");
+            $statement->execute(array_merge([$providerId], $frontier));
+            $frontier = array_values(array_diff(array_map('intval', $statement->fetchAll(\PDO::FETCH_COLUMN)), $found));
+            $found = array_merge($found, $frontier);
+        }
+
+        return $found;
+    }
+
+    /**
+     * O que impede a exclusão: nós filhos e ligações que usam o nó.
+     *
+     * @return array{children: list<array<string, mixed>>, links: list<array<string, mixed>>}
+     */
+    public function deleteBlockers(int $providerId, int $nodeId): array
+    {
+        $pdo = $this->database->pdo();
+
+        return [
+            'children' => $this->fetch($pdo, 'SELECT id, name FROM map_nodes WHERE provider_id = :p AND parent_node_id = :n ORDER BY id', ['p' => $providerId, 'n' => $nodeId]),
+            'links' => $this->fetch($pdo, 'SELECT id, label FROM map_links WHERE provider_id = :p AND (from_node_id = :n OR to_node_id = :n2) ORDER BY id', ['p' => $providerId, 'n' => $nodeId, 'n2' => $nodeId]),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function portsOfNode(int $providerId, int $nodeId): array
+    {
+        return $this->fetch($this->database->pdo(), 'SELECT * FROM map_ports WHERE provider_id = :p AND node_id = :n ORDER BY id', ['p' => $providerId, 'n' => $nodeId]);
+    }
+
+    public function deleteNode(int $providerId, int $nodeId): void
+    {
+        $this->database->pdo()
+            ->prepare('DELETE FROM map_nodes WHERE id = :id AND provider_id = :provider_id')
+            ->execute(['id' => $nodeId, 'provider_id' => $providerId]);
+    }
+
+    public function userExists(int $providerId, int $userId): bool
+    {
+        $rows = $this->fetch($this->database->pdo(), 'SELECT id FROM app_users WHERE id = :id AND (provider_id = :p OR provider_id IS NULL)', ['id' => $userId, 'p' => $providerId]);
+
+        return $rows !== [];
+    }
+
     /**
      * @param array<string, mixed> $params
      * @return list<array<string, mixed>>
