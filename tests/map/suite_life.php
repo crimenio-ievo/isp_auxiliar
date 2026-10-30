@@ -30,7 +30,10 @@ try {
  $fn=array_values(array_filter($d['nodes'],fn($n)=>$n['id']===$p))[0]??null; $fl=array_values(array_filter($d['links'],fn($x)=>$x['id']===$l2))[0]??null;
  chk('GET /api/mapa devolve lifecycle (no e ligacao)',($fn['lifecycle']??'')==='projeto'&&($fl['lifecycle']??'')==='projeto');
  chk('nos reais seguem ativo',count(array_filter($d['nodes'],fn($n)=>strpos($n['name'],'ZZ TESTE')!==0&&$n['lifecycle']==='ativo'))===$b['n']);
- $au=$pdo->query("SELECT context_json FROM audit_logs WHERE action='map.node.update' AND entity_id=$a ORDER BY id DESC LIMIT 1")->fetchColumn(); chk('auditoria registra lifecycle antes/depois',strpos($au,'"lifecycle":"desativado"')!==false&&strpos($au,'"lifecycle":"ativo"')!==false);
+ $auditLifecycle=$pdo->prepare("SELECT context_json FROM audit_logs WHERE action='map.node.update' AND entity_id=? AND actor_login='zz_teste_manager' AND JSON_UNQUOTE(JSON_EXTRACT(context_json, '$.before.lifecycle'))='ativo' AND JSON_UNQUOTE(JSON_EXTRACT(context_json, '$.after.lifecycle'))='desativado'");
+ $auditLifecycle->execute([$a]);
+ $au=json_decode($auditLifecycle->fetchColumn() ?: 'null',true);
+ chk('auditoria registra lifecycle antes/depois',($au['before']['lifecycle']??null)==='ativo'&&($au['after']['lifecycle']??null)==='desativado');
 } finally {
  $d1="DELETE FROM map_links WHERE from_node_id IN (SELECT id FROM (SELECT id FROM map_nodes WHERE name LIKE 'ZZ TESTE%') x) OR to_node_id IN (SELECT id FROM (SELECT id FROM map_nodes WHERE name LIKE 'ZZ TESTE%') y)";
  $d2="DELETE FROM map_nodes WHERE name LIKE 'ZZ TESTE%' ORDER BY id DESC"; echo "-- limpeza\nSQL> $d1\nSQL> $d2\n"; $pdo->exec($d1); $pdo->exec($d2);

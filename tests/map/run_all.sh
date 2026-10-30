@@ -27,6 +27,6 @@ for suite in tests/map/suite*.php; do run php "$suite"; done
 html=modules/isp_map/isp-network-map.html
 for mode in empty one session forbidden; do run node tests/map/js/run.js "$html" "$mode"; done
 for suite in coords flow life links name site; do run node "tests/map/js/$suite.js" "$html"; done
-for suite in b c dd e; do run node "tests/map/$suite.js"; done
+for suite in b c dd e f diagram; do run node "tests/map/$suite.js"; done
 echo "RESUMO: $passed passaram; $failed falharam."
 (( failed == 0 ))

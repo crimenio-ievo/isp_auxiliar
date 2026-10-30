@@ -13,7 +13,7 @@ Requisitos: PHP 8.2 com PDO MySQL, Node 18 ou superior e configuração local
 da aplicação já existente. Não imprimir nem copiar credenciais. A dependência
 jsdom 24.1.0 fica restrita a estes testes; a aplicação não usa npm/bundler.
 
-O runner executa seis suites PHP e quatorze cenários jsdom, imprime a saída
+O runner executa sete suites PHP e dezesseis cenários jsdom, imprime a saída
 original e resume quantos passaram/falharam. Retorna 1 se houver falha,
 exceção ou erro de console. Alguns harnesses antigos são observacionais:
 imprimem valores para revisão, sem afirmar todos os resultados automaticamente.
@@ -24,6 +24,21 @@ Gravam exclusivamente fixtures com nomes `ZZ TESTE`, usam `finally` para
 limpar nós/ligações/portas e removem a auditoria nova da sessão fictícia ao
 encerrar. A execução recusa nós `ZZ TESTE` preexistentes para não apagá-los.
 Nenhuma migration é executada. Não executar em produção.
+
+Nenhum teste pode escrever em tabelas de configuração reais. A checagem de
+sobreposição de `map.loss.fusion_db` em `suite_tx.php` é pulada com aviso
+`[PULADO]`: não faz INSERT, UPDATE nem DELETE em `provider_settings`.
+A leitura de `data.defaults` continua testada. Os demais testes escrevem
+somente nas fixtures do mapa e na auditoria das sessões fictícias.
+
+Filtro exato da limpeza de auditoria (inalterado, somente atores fictícios):
+
+```sql
+DELETE FROM audit_logs
+WHERE id > ?
+  AND actor_login IN ('zz_teste_manager', 'zz_teste_technician', 'zz_teste_tec')
+  AND action LIKE 'map.%'
+```
 
 Os jsdom usam topologias e respostas HTTP fictícias, sem gravar no banco.
 `harness.js` resolve o HTML relativamente ao repositório; os scripts antigos
@@ -36,8 +51,13 @@ Origem preservada:
   a suite antiga sem sobrescrever a suite de portas/ligações posterior.
 - `common.php`, `suite_ports.php`, `suite_links.php`, `harness.js`, `b.js`,
   `c.js`, `dd.js`, `e.js`: harnesses da fase 1G (`05151c2f`).
+- `suite_tx.php`, `f.js`: fase 2B, mesma origem (`05151c2f`).
+- `diagram.js`: regressão da extração 2R pela interface (emendas, perdas,
+  tracing, menus, zoom e recarga), com hash do SVG/painéis para comparação.
 - `js/dark.js`: utilitário histórico de geração de imagens com tiles reais,
   fora do runner (não é teste jsdom e depende de `pngjs`, não instalado).
 
-As expectativas históricas não foram atualizadas. Falhas na linha de base
-devem ser relatadas antes de qualquer extração do motor.
+A checagem histórica da auditoria de lifecycle busca a transição específica
+`ativo` → `desativado` pelo `entity_id` e por `context_json`, em vez da última
+edição (que pode ser só de nome). Falhas na linha de base devem ser relatadas
+antes de qualquer extração do motor.

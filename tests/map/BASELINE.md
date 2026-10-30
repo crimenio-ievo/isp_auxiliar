@@ -1,5 +1,29 @@
 # Fase 2R — linha de base
 
+## Continuação — nova linha de base verde (2026-10-30)
+
+Aplicação ainda intacta em `af77117`; harnesses incorporados em `697b59b`
+e ajustados nesta continuação. Comando: `bash tests/map/run_all.sh`.
+Resultado: **23 passaram; 0 falharam**, exit code 0 (7 suites PHP,
+16 cenários jsdom). Sintaxe PHP e shell validada.
+
+- `suite_life.php` agora filtra a transição `ativo` → `desativado` no
+  `context_json` do `entity_id` da fixture, sem depender da última edição.
+- Testes 2B (`suite_tx.php` e `f.js`) passaram. A checagem de sobreposição
+  em `provider_settings` é explicitamente **pulada** com aviso; a escrita
+  e a exclusão históricas foram removidas. Nenhuma configuração real escrita.
+- `diagram.js` passou nas 12 asserções de interface. Hash do SVG e painéis:
+  `1afbec8e402663b2aec9d7eeea9e53b82e40d2b25c47adb76bdedb21fd641e1c`.
+- Zero erros de console reportados; permanecem os warnings históricos de
+  headers no CLI em `suite.php`, sem falha de asserção.
+- Sete suites PHP encerraram com zero fixtures `ZZ TESTE`. Contagens
+  preservadas: **4 nós, 2 ligações, 37 portas**. Limpeza de auditoria
+  permanece restrita aos atores fictícios (filtro exato no README).
+
+Pós-extração: pendente no momento deste commit de testes.
+
+## Histórico — primeira execução interrompida
+
 Executada em 2026-10-30 no .89, worktree `_isp_auxiliar_redesign_shell`,
 branch `feature/mapa-fase1`, aplicação no commit `af77117`.
 
