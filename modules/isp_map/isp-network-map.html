@@ -846,14 +846,17 @@ const BASEMAPS = {
   none:   {label:'Grade técnica (sem mapa)', url:null, attrib:'Protótipo — dados fictícios', dark:true},
   osm:    {label:'OpenStreetMap (ruas)',
            url:(z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
-           attrib:'© OpenStreetMap contributors', maxZoom:19, dim:0.72},
+           attrib:'© OpenStreetMap contributors', maxNativeZoom:19, dim:0.72},
   dark:   {label:'Mapa escuro (Carto)',
            url:(z,x,y)=>`https://basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`,
-           attrib:'© OpenStreetMap · © CARTO', maxZoom:19, dim:1, dark:true},
+           attrib:'© OpenStreetMap · © CARTO', maxNativeZoom:19, dim:1, dark:true},
   sat:    {label:'Satélite (Esri)',
            url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
-           attrib:'© Esri, Maxar, Earthstar Geographics', maxZoom:19, dim:0.85}
+           attrib:'© Esri, Maxar, Earthstar Geographics', maxNativeZoom:17, dim:0.85}
 };
+/* maxNativeZoom = último zoom em que a camada tem imagem real. Acima dele o mesmo tile do zoom máximo é ampliado
+   (overzoom), em vez de pedir tiles que não existem. Esri: z18 é "Map data not yet available" em áreas rurais do
+   Brasil (testado em MG, GO, MT, BA e AM; só cidades grandes têm z18); z17 existe em todos os pontos testados. OSM: z19; z20 dá HTTP 400. */
 let basemap = 'osm';
 let tileErrors = 0, tileTried = 0;
 
@@ -861,7 +864,7 @@ function renderTiles(parts){
   const bm = BASEMAPS[basemap];
   if(!bm || !bm.url) return;
   let z = Math.round(currentZoom());
-  z = Math.max(0, Math.min(bm.maxZoom||19, z));
+  z = Math.max(0, Math.min(bm.maxNativeZoom||19, z));   // acima do zoom nativo: overzoom (tile ampliado)
   const n = Math.pow(2,z);
   const tileScreen = view.scale/n;                       // tamanho do tile na tela
   const x0 = Math.floor((view.cx - (mapW/2)/view.scale)*n);
@@ -1960,13 +1963,22 @@ const modalEl = document.getElementById('modal-el');
 function closeModal(){ overlay.classList.remove('show'); modalEl.innerHTML=''; }
 overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
 
+const NAME_PREFIX = {pop:'POP', tower:'TORRE', olt:'OLT', switch:'SW', radio:'AP', ceo:'CEO', cto:'CTO'};
+/* Próximo nome da sequência do tipo: PREFIXO-NNN, maior número existente + 1 (001 se não houver). */
+function nextNodeName(type){
+  const prefix = NAME_PREFIX[type] || String(type).toUpperCase();
+  const re = new RegExp('^'+prefix+'-(\\d+)$', 'i');
+  let max = 0;
+  nodes.forEach(n=>{ if(n.type!==type) return; const m = String(n.name||'').match(re); if(m) max = Math.max(max, parseInt(m[1],10)); });
+  return prefix+'-'+String(max+1).padStart(3,'0');
+}
 function openCreateModal(type, latlng){
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Novo elemento — ${TYPE_LABEL[type]}</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
       <div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
       <div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
-      <div class="form-field"><label>Nome</label><input id="f-name" type="text" placeholder="${TYPE_LABEL[type]}-${(nodes.filter(n=>n.type===type).length+1).toString().padStart(2,'0')}"></div>
+      <div class="form-field"><label>Nome</label><input id="f-name" type="text" maxlength="120" value="${escapeHtml(nextNodeName(type))}"></div>
       <div class="form-field"><label>Status</label>
         <select id="f-status">
           <option value="normal">Normal</option>
@@ -1984,6 +1996,9 @@ function openCreateModal(type, latlng){
     </div>
   `;
   overlay.classList.add('show');
+  const nameInput = document.getElementById('f-name');
+  nameInput.focus(); nameInput.select();   // digitar substitui; Enter salva
+  nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('modal-save').click(); } });
   document.getElementById('modal-x').addEventListener('click', ()=>{ closeModal(); clearMode(); });
   document.getElementById('modal-cancel').addEventListener('click', ()=>{ closeModal(); clearMode(); });
   document.getElementById('modal-save').addEventListener('click', ()=>{
