@@ -1344,7 +1344,8 @@ final class ClientController
             return $denied;
         }
         if (!Csrf::verify($request, 'client_create')) {
-            Flash::set('error', 'A sessão do cadastro expirou. Reabra o formulário e tente novamente.');
+            error_log('[cadastro.post] case=invalid_csrf route=/clientes/novo');
+            Flash::set('error', 'Token de segurança inválido. Seu login está ativo; reabra o cadastro para atualizar o token e tente novamente.');
             return Response::redirect('/clientes/novo');
         }
 
@@ -1478,7 +1479,8 @@ final class ClientController
 
         $draftId = trim((string) $request->input('draft_id', $request->query('draft', '')));
         if (!Csrf::verify($request, 'client_finalize:' . $draftId)) {
-            Flash::set('error', 'A sessão da conclusão expirou. Reabra o aceite e tente novamente.');
+            error_log('[cadastro.post] case=invalid_csrf route=/clientes/novo/aceite');
+            Flash::set('error', 'Token de segurança inválido. Seu login está ativo; reabra o aceite para atualizar o token e tente novamente.');
             return Response::redirect('/clientes/novo/aceite?draft=' . rawurlencode($draftId));
         }
         $checkpointToken = trim((string) $request->input('checkpoint_token', $request->query('token', '')));

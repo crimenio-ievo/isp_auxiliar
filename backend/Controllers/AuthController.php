@@ -49,6 +49,7 @@ final class AuthController
                 'user' => 'Usuario nao encontrado no MkAuth.',
                 'password' => 'Senha invalida para este usuario.',
                 'service' => 'Nao foi possivel consultar o MkAuth agora.',
+                'cadastro-auth' => 'Você não está conectado. Entre novamente e reabra o cadastro para recuperar o rascunho local neste navegador.',
                 default => null,
             },
         ]);
