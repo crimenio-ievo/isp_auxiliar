@@ -1,7 +1,47 @@
 # Cadastro — Etapa A
 
 Branch `fix/cadastro-rascunho`, base R5 `3967195`, worktree próprio.
-Sem heartbeat, relogin, alteração de banco ou infraestrutura.
+Sem heartbeat, relogin ou alteração de banco. Ambiente Apache isolado autorizado e
+ativado em 30/10/2026, conforme registro abaixo.
+
+## Ambiente de validação ativo — .89
+
+- URL: `https://teste.ievo.com.br:8444/`.
+- Novo arquivo `/etc/apache2/sites-available/isp-auxiliar-cadastro-rascunho.conf`,
+  copiado exatamente do bloco Apache desta documentação, habilitado por a2ensite.
+- `apachectl configtest`: Syntax OK antes do reload; Apache ativo e ouvindo 8444.
+- Oito verificações HTTP dos endereços existentes antes/depois: status e hashes
+  de conteúdo idênticos. Arquivos Apache preexistentes também com hashes idênticos.
+- Novo login e assets: 200. Raiz e cadastro sem autenticação: 302 para login.
+  Cookie exclusivo, Secure/HttpOnly; valor não registrado.
+- `.env` próprio ignorado pelo Git, 0640 root:www-data; storage/sessões/logs/tmp
+  próprios. Credenciais copiadas internamente sem impressão; credenciais de
+  SMTP, Evotrix e IA não copiadas. Nenhum symlink para runtime de outro worktree.
+- Verificação dentro do PHP Apache (apache2handler):
+  `MKAUTH_WRITE_ENABLED=false`, `app.mkauth.write_enabled=false`, guard desabilitado
+  para escrita e assertAllowed bloqueando antes de qualquer chamada externa.
+  Host efetivo de leitura confirmado como clone .88, sem chamada a ele na verificação.
+- Email/Evotrix sem envio real, dry_run efetivo=true, flags .env enabled=false;
+  AI_ENABLED=false e AI_REAL_CALLS_ENABLED=false; chamados MkAuth em dry_run.
+  As travas dry_run de notificações continuam efetivas mesmo com overlay do banco.
+- A checagem HTTP temporária era acessível apenas por loopback e foi removida.
+  Não ficou endpoint de diagnóstico publicado.
+- Diff `3967195..HEAD`: ClientProvisioner.php integralmente intacto. finalize()
+  NÃO é idêntico byte a byte: apenas mensagem/log de CSRF da A2 foram alterados;
+  provisionamento, gravação, releitura e confirmação permanecem inalterados.
+- Nenhum login operacional, cadastro ou finalização real executado. Nenhuma
+  migration, merge, promoção ou acesso ao .86.
+
+Desativação exata (não executada):
+
+```bash
+sudo a2dissite isp-auxiliar-cadastro-rascunho.conf
+sudo apachectl configtest && sudo systemctl reload apache2
+```
+
+Preserva o worktree e seus dados; retira o vhost e seu Listen 8444 do Apache.
+As seções de proposta abaixo registram o plano aprovado e o estado ANTERIOR à
+ativação; este registro é o estado atual.
 
 ## A1 — segurança do rascunho local
 
