@@ -162,6 +162,97 @@ final class MapRepository
             ->execute(['id' => $nodeId, 'provider_id' => $providerId]);
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findLink(int $providerId, int $linkId): ?array
+    {
+        $rows = $this->fetch(
+            $this->database->pdo(),
+            'SELECT id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, label,
+                    length_m, fiber_count, attrs_json, path_json
+             FROM map_links WHERE id = :id AND provider_id = :provider_id',
+            ['id' => $linkId, 'provider_id' => $providerId]
+        );
+
+        return $rows === [] ? null : $this->normalize($rows[0], ['id', 'from_node_id', 'to_node_id', 'from_port_id', 'to_port_id', 'fiber_count'], ['length_m'], ['attrs_json', 'path_json']);
+    }
+
+    /**
+     * Já existe ligação do mesmo tipo entre os dois nós, em qualquer sentido?
+     */
+    public function linkExists(int $providerId, int $nodeA, int $nodeB, string $linkType): bool
+    {
+        $rows = $this->fetch(
+            $this->database->pdo(),
+            'SELECT id FROM map_links WHERE provider_id = :p AND link_type = :t
+               AND ((from_node_id = :a AND to_node_id = :b) OR (from_node_id = :b2 AND to_node_id = :a2)) LIMIT 1',
+            ['p' => $providerId, 't' => $linkType, 'a' => $nodeA, 'b' => $nodeB, 'b2' => $nodeB, 'a2' => $nodeA]
+        );
+
+        return $rows !== [];
+    }
+
+    /**
+     * @param array<string, mixed> $fields link_type, medium, from_node_id, to_node_id, status, label, length_m, fiber_count, attrs_json
+     */
+    public function createLink(int $providerId, ?int $userId, array $fields): int
+    {
+        $pdo = $this->database->pdo();
+        $pdo->prepare(
+            'INSERT INTO map_links (provider_id, link_type, medium, from_node_id, to_node_id, status, label, length_m, fiber_count, attrs_json,
+                    created_by_user_id, updated_by_user_id, created_at, updated_at)
+             VALUES (:provider_id, :link_type, :medium, :from_node_id, :to_node_id, :status, :label, :length_m, :fiber_count, :attrs_json,
+                    :user_id, :user_id2, NOW(), NOW())'
+        )->execute([
+            'provider_id' => $providerId,
+            'link_type' => $fields['link_type'],
+            'medium' => $fields['medium'],
+            'from_node_id' => $fields['from_node_id'],
+            'to_node_id' => $fields['to_node_id'],
+            'status' => $fields['status'],
+            'label' => $fields['label'] ?? null,
+            'length_m' => $fields['length_m'] ?? null,
+            'fiber_count' => $fields['fiber_count'] ?? null,
+            'attrs_json' => $fields['attrs_json'] ?? null,
+            'user_id' => $userId,
+            'user_id2' => $userId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Atualiza só as colunas presentes em $fields (whitelist abaixo).
+     *
+     * @param array<string, mixed> $fields
+     */
+    public function updateLink(int $providerId, int $linkId, ?int $userId, array $fields): void
+    {
+        $allowed = ['status', 'label', 'length_m', 'fiber_count', 'attrs_json'];
+        $sets = [];
+        $params = ['id' => $linkId, 'provider_id' => $providerId, 'user_id' => $userId];
+        foreach ($allowed as $column) {
+            if (array_key_exists($column, $fields)) {
+                $sets[] = "{$column} = :{$column}";
+                $params[$column] = $fields[$column];
+            }
+        }
+        $sets[] = 'updated_by_user_id = :user_id';
+        $sets[] = 'updated_at = NOW()';
+
+        $this->database->pdo()
+            ->prepare('UPDATE map_links SET ' . implode(', ', $sets) . ' WHERE id = :id AND provider_id = :provider_id')
+            ->execute($params);
+    }
+
+    public function deleteLink(int $providerId, int $linkId): void
+    {
+        $this->database->pdo()
+            ->prepare('DELETE FROM map_links WHERE id = :id AND provider_id = :provider_id')
+            ->execute(['id' => $linkId, 'provider_id' => $providerId]);
+    }
+
     public function userExists(int $providerId, int $userId): bool
     {
         $rows = $this->fetch($this->database->pdo(), 'SELECT id FROM app_users WHERE id = :id AND (provider_id = :p OR provider_id IS NULL)', ['id' => $userId, 'p' => $providerId]);

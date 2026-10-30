@@ -159,6 +159,206 @@ final class MapController
         return Response::json(['ok' => true, 'data' => ['id' => $id]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
+    private const LINK_MEDIUMS = ['backbone' => 'fibra', 'distribuicao' => 'fibra', 'drop' => 'fibra', 'ethernet' => 'cabo', 'wireless' => 'radio'];
+
+    public function createLink(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+
+        $errors = [];
+        $fields = $this->validateLinkInput($request, $providerId, null, $errors);
+        if ($errors !== []) {
+            return $this->fail(implode(' ', $errors), 422);
+        }
+
+        $pdo = $this->mapRepository->pdo();
+        $pdo->beginTransaction();
+        try {
+            if ($this->mapRepository->linkExists($providerId, $fields['from_node_id'], $fields['to_node_id'], $fields['link_type'])) {
+                $pdo->rollBack();
+
+                return $this->fail('Já existe uma ligação deste tipo entre esses dois elementos.', 409);
+            }
+            $id = $this->mapRepository->createLink($providerId, $userId, $fields);
+            $link = $this->mapRepository->findLink($providerId, $id);
+            $this->audit($userId, $actor, 'map.link.create', $id, ['link' => $link], 'map_link');
+            $pdo->commit();
+        } catch (\Throwable) {
+            $pdo->rollBack();
+
+            return $this->fail('Não foi possível salvar a ligação.', 500);
+        }
+
+        return Response::json(['ok' => true, 'data' => ['link' => $link]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    public function updateLink(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+
+        $id = $this->intOrNull($request->input('id'));
+        $before = $id === null ? null : $this->mapRepository->findLink($providerId, $id);
+        if ($before === null) {
+            return $this->fail('Ligação não encontrada.', 404);
+        }
+
+        $errors = [];
+        $fields = $this->validateLinkInput($request, $providerId, $before, $errors);
+        if ($errors !== []) {
+            return $this->fail(implode(' ', $errors), 422);
+        }
+
+        $pdo = $this->mapRepository->pdo();
+        $pdo->beginTransaction();
+        try {
+            if ($fields !== []) {
+                $this->mapRepository->updateLink($providerId, $id, $userId, $fields);
+            }
+            $after = $this->mapRepository->findLink($providerId, $id);
+            $this->audit($userId, $actor, 'map.link.update', $id, ['before' => $before, 'after' => $after], 'map_link');
+            $pdo->commit();
+        } catch (\Throwable) {
+            $pdo->rollBack();
+
+            return $this->fail('Não foi possível salvar a ligação.', 500);
+        }
+
+        return Response::json(['ok' => true, 'data' => ['link' => $after]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    public function deleteLink(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+
+        $id = $this->intOrNull($request->input('id'));
+        $link = $id === null ? null : $this->mapRepository->findLink($providerId, $id);
+        if ($link === null) {
+            return $this->fail('Ligação não encontrada.', 404);
+        }
+
+        $pdo = $this->mapRepository->pdo();
+        $pdo->beginTransaction();
+        try {
+            // O registro completo vai para a auditoria na mesma transação do DELETE.
+            $this->audit($userId, $actor, 'map.link.delete', $id, ['link' => $link], 'map_link');
+            $this->mapRepository->deleteLink($providerId, $id);
+            $pdo->commit();
+        } catch (\Throwable) {
+            $pdo->rollBack();
+
+            return $this->fail('Não foi possível excluir a ligação.', 500);
+        }
+
+        return Response::json(['ok' => true, 'data' => ['id' => $id]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    /**
+     * @param array<string, mixed>|null $existing ligação atual (edição) ou null (criação)
+     * @param list<string> $errors
+     * @return array<string, mixed> campos prontos para gravar (na edição, só os enviados)
+     */
+    private function validateLinkInput(Request $request, int $providerId, ?array $existing, array &$errors): array
+    {
+        $creating = $existing === null;
+        $fields = [];
+        $has = static fn (string $key): bool => $request->input($key) !== null;
+
+        // medium nunca vem do cliente: é derivado do tipo.
+        if ($creating) {
+            $type = trim((string) $request->input('link_type', ''));
+            if (!isset(self::LINK_MEDIUMS[$type])) {
+                $errors[] = 'Tipo de ligação inválido.';
+                $type = '';
+            }
+            $fields['link_type'] = $type;
+            $fields['medium'] = self::LINK_MEDIUMS[$type] ?? '';
+
+            $from = $this->intOrNull($request->input('from_node_id'));
+            $to = $this->intOrNull($request->input('to_node_id'));
+            if ($from === null || $to === null) {
+                $errors[] = 'Origem e destino são obrigatórios.';
+            } elseif ($from === $to) {
+                $errors[] = 'Origem e destino devem ser elementos diferentes.';
+            } elseif ($this->mapRepository->findNode($providerId, $from) === null || $this->mapRepository->findNode($providerId, $to) === null) {
+                $errors[] = 'Origem ou destino não encontrado.';
+            }
+            $fields['from_node_id'] = $from;
+            $fields['to_node_id'] = $to;
+            $medium = $fields['medium'];
+        } else {
+            foreach (['link_type', 'from_node_id', 'to_node_id'] as $immutable) {
+                if ($has($immutable) && trim((string) $request->input($immutable)) !== (string) $existing[$immutable]) {
+                    $errors[] = 'Tipo, origem e destino não podem ser alterados; exclua e crie a ligação de novo.';
+                    break;
+                }
+            }
+            $medium = (string) $existing['medium'];
+        }
+
+        if ($creating || $has('status')) {
+            $status = trim((string) $request->input('status', 'normal'));
+            if (!in_array($status, self::NODE_STATUSES, true)) {
+                $errors[] = 'Status inválido.';
+            }
+            $fields['status'] = $status;
+        }
+
+        if ($creating || $has('label')) {
+            $label = trim((string) $request->input('label', ''));
+            if (mb_strlen($label) > 120) {
+                $errors[] = 'Rótulo deve ter até 120 caracteres.';
+            }
+            $fields['label'] = $label === '' ? null : $label;
+        }
+
+        if ($has('length_m')) {
+            $raw = trim((string) $request->input('length_m'));
+            if ($raw === '') {
+                $fields['length_m'] = null;
+            } elseif (!is_numeric($raw) || (float) $raw < 0 || (float) $raw > 99999999.99) {
+                $errors[] = 'Comprimento inválido (metros, maior ou igual a zero).';
+            } else {
+                $fields['length_m'] = round((float) $raw, 2);
+            }
+        }
+
+        if ($has('fiber_count')) {
+            $raw = trim((string) $request->input('fiber_count'));
+            if ($raw === '') {
+                $fields['fiber_count'] = null;
+            } elseif ($medium !== 'fibra') {
+                $errors[] = 'Número de fibras só se aplica a ligações de fibra.';
+            } elseif (preg_match('/^[0-9]{1,3}$/', $raw) !== 1 || (int) $raw < 1 || (int) $raw > 288) {
+                $errors[] = 'Número de fibras inválido (1 a 288).';
+            } else {
+                $fields['fiber_count'] = (int) $raw;
+            }
+        }
+
+        if ($creating || $has('attrs')) {
+            $attrs = $this->parseAttrs((string) $request->input('attrs', ''));
+            if ($attrs === false) {
+                $errors[] = 'Atributos inválidos (objeto JSON simples, só valores escalares, até 4 KB).';
+            } else {
+                $fields['attrs_json'] = $attrs;
+            }
+        }
+
+        return $fields;
+    }
+
     /**
      * Gestor (403) e CSRF do escopo "map" (419). Devolve [provider_id, user_id|null, login] ou a resposta de erro.
      *
@@ -322,13 +522,13 @@ final class MapController
     /**
      * @param array<string, mixed> $context
      */
-    private function audit(?int $userId, string $actor, string $action, int $entityId, array $context): void
+    private function audit(?int $userId, string $actor, string $action, int $entityId, array $context, string $entityType = 'map_node'): void
     {
         $this->localRepository->log(
             $userId,
             $actor,
             $action,
-            'map_node',
+            $entityType,
             $entityId,
             $context,
             (string) ($_SERVER['REMOTE_ADDR'] ?? ''),

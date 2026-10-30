@@ -490,7 +490,7 @@ button{font-family:inherit;}
       <div id="map"></div>
       <div class="map-status" id="map-status" role="status"></div>
       <div class="pin-bar" id="pin-bar"><span id="pin-coords"></span><select id="pin-type" title="Tipo do elemento"></select><button class="btn btn-accent btn-sm" id="pin-add">Adicionar elemento aqui</button><button class="btn btn-sm" id="pin-clear" title="Limpar marcador">✕</button></div>
-      <div class="map-unsaved" id="map-unsaved">Nós são salvos; ligações e diagrama ainda não</div>
+      <div class="map-unsaved" id="map-unsaved">Nós e ligações são salvos; diagrama ainda não</div>
       <div id="mode-banner"><span id="mode-banner-text"></span><button id="mode-banner-cancel">CANCELAR (ESC)</button></div>
       <div class="map-legend">
         <div class="lg-item"><div class="lg-dot" style="background:var(--green)"></div>Normal</div>
@@ -738,8 +738,14 @@ function applyTopology(data){
   });
   rawLinks.forEach(r=>{
     const a = byDb[r.from_node_id], b = byDb[r.to_node_id]; if(!a || !b) return;
-    const extra = Object.assign({}, r.attrs_json||{}, {dbId:r.id, label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json});
+    const at = r.attrs_json||{};
+    const extra = Object.assign({}, at, {dbId:r.id, label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json,
+      _attrs:Object.assign({}, at)});
+    if(r.length_m!=null) extra.km = +(r.length_m/1000).toFixed(3);
+    if(r.fiber_count) extra.cableMeta = {nome:at.cabo_nome||('CABO '+r.id), tipo:at.cabo_tipo||(r.fiber_count+'FO'), totalFibras:r.fiber_count, construtivo:at.cabo_construtivo};
     const l = addLink(r.link_type, a, b, r.status||'normal', extra);
+    const cbl = cables.find(x=>x.linkId===l.id);
+    if(cbl){ cbl.construtivo = at.cabo_construtivo; if(extra.km!==undefined) cbl.km = extra.km; }
     if(r.link_type==='backbone'){ b.parent = null; b.parentLink = null; }   // backbone não define hierarquia
   });
   // contadores em memória não podem colidir com os ids vindos do banco
@@ -1308,13 +1314,12 @@ function openLinkPointPanel(l, pt){
       ])}
       <div class="cable-meta">Distância acumulada até a OLT de origem: ainda não calculada (pendente).</div>
       <div class="action-row">
-        <button class="btn btn-accent" id="btn-sangria-ponto" style="flex:1 1 100%;">Inserir caixa aqui (sangria)</button>
+        <button class="btn" id="btn-sangria-ponto" style="flex:1 1 100%;" disabled title="Disponível em breve">Inserir caixa aqui (sangria) — disponível em breve</button>
         <button class="btn" id="btn-ver-trecho" style="flex:1 1 100%;">Ver detalhes do trecho inteiro</button>
       </div>
     </div>
   `;
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
-  document.getElementById('btn-sangria-ponto').addEventListener('click', ()=> abrirSangria(l, {lat:pt.lat,lng:pt.lng}));
   document.getElementById('btn-ver-trecho').addEventListener('click', ()=> onLinkClick(l.id));
 }
 
@@ -1369,9 +1374,9 @@ function renderPopBody(n){
   const children = links.filter(l=>l.from===n.id);
   return `
     ${fieldsHtml([
-      {label:'IP de gerência', value:n.ip||'—'},
+      {label:'IP de gerência', value:escapeHtml(n.ip||'—')},
       {label:'Elementos conectados', value:children.length},
-      {label:'Observação', value:n.desc||'—', full:true}
+      {label:'Observação', value:escapeHtml(n.desc||'—'), full:true}
     ])}
     <div class="section-title">Equipamentos / enlaces</div>
     <div class="port-list">
@@ -1387,18 +1392,18 @@ function renderPopBody(n){
 function renderOLTBody(n){
   return `
     ${fieldsHtml([
-      {label:'IP', value:n.ip||'—'},
+      {label:'IP', value:escapeHtml(n.ip||'—')},
       {label:'PONs ativas', value:n.pons.filter(p=>p.onus>0).length+' / '+n.pons.length}
     ])}
     <div class="section-title">Portas PON</div>
     ${n.pons.map(p=>{
-      const pct = Math.min(100, (p.onus/32)*100);
+      const pct = Math.min(100, ((Number(p.onus)||0)/32)*100);
       const barColor = p.status==='alerta' ? 'var(--yellow)' : (p.status==='livre' ? 'var(--text-faint)' : 'var(--green)');
       return `<div class="pon-card">
-        <div class="pon-card-head"><b>${p.ponId}</b>${statusPill(p.status)}</div>
+        <div class="pon-card-head"><b>${escapeHtml(p.ponId)}</b>${statusPill(p.status)}</div>
         <div class="field-grid" style="margin-bottom:0;">
-          <div class="field"><label>ONUs</label><div class="val">${p.onus}</div></div>
-          <div class="field"><label>Potência média</label><div class="val">${p.power!==null?p.power+' dBm':'—'}</div></div>
+          <div class="field"><label>ONUs</label><div class="val">${escapeHtml(p.onus)}</div></div>
+          <div class="field"><label>Potência média</label><div class="val">${p.power!==null?escapeHtml(p.power)+' dBm':'—'}</div></div>
         </div>
         <div class="usage-bar"><div style="width:${pct}%;background:${barColor}"></div></div>
       </div>`;
@@ -1412,8 +1417,8 @@ function renderSwitchBody(n){
   const pct = Math.round((n.used/n.ports24)*100);
   return `
     ${fieldsHtml([
-      {label:'IP', value:n.ip||'—'},
-      {label:'Portas em uso', value:n.used+' / '+n.ports24}
+      {label:'IP', value:escapeHtml(n.ip||'—')},
+      {label:'Portas em uso', value:escapeHtml(n.used)+' / '+escapeHtml(n.ports24)}
     ])}
     <div class="usage-bar" style="margin-bottom:14px;"><div style="width:${pct}%;background:var(--accent)"></div></div>
     <div class="section-title">Conectados</div>
@@ -1432,7 +1437,7 @@ function renderTowerBody(n){
   const upstream = n.parentLink ? linkById(n.parentLink) : null;
   return `
     ${fieldsHtml([
-      {label:'Altura', value:n.altura||'—'},
+      {label:'Altura', value:escapeHtml(n.altura||'—')},
       {label:'Rádios instalados', value:children.length},
       upstream ? {label:'Enlace upstream', value:(upstream.freq||'')+' · '+(upstream.distancia||''), full:true} : null
     ])}
@@ -1451,9 +1456,9 @@ function renderRadioBody(n){
   const clients = links.filter(l=>l.from===n.id && nodeById(l.to).type==='client');
   return `
     ${fieldsHtml([
-      {label:'IP', value:n.ip||'—'},
-      {label:'SSID', value:n.ssid||'—'},
-      {label:'Frequência', value:n.freq||'—'},
+      {label:'IP', value:escapeHtml(n.ip||'—')},
+      {label:'SSID', value:escapeHtml(n.ssid||'—')},
+      {label:'Frequência', value:escapeHtml(n.freq||'—')},
       {label:'Clientes conectados', value:clients.length+' / '+(n.clientesMax||'—')}
     ])}
     <div class="section-title">Clientes</div>
@@ -1469,7 +1474,7 @@ function renderRadioBody(n){
 
 function renderSplitterBody(n){
   return `
-    ${fieldsHtml([{label:'Tipo', value:n.desc||'Splitter óptico'}])}
+    ${fieldsHtml([{label:'Tipo', value:escapeHtml(n.desc||'Splitter óptico')}])}
     <div class="alert-box none">Elemento passivo — sem telemetria própria.</div>
     ${actionRow(n)}
   `;
@@ -1485,7 +1490,7 @@ function renderCeoBody(n){
       {label:'Origem', value: origin?escapeHtml(origin.name):'—'},
       {label:'Cabos presentes', value: cablesHere.length},
       {label:'Splitter interno', value: splitterHere ? splitterHere.razao : 'Não possui'},
-      {label:'Observação', value: n.desc||'—', full:true}
+      {label:'Observação', value:escapeHtml(n.desc||'—'), full:true}
     ])}
     <div class="section-title">Cabos</div>
     <div class="port-list">
@@ -1511,9 +1516,9 @@ function renderCTOBody(n){
 
   return `
     ${fieldsHtml([
-      {label:'Tipo', value:'CTO '+n.capacity+'x'+' portas'},
-      {label:'Origem', value:origin?(escapeHtml(origin.name)+(originLink.pon?(' / '+originLink.pon):'')):'—'},
-      {label:'Potência de entrada', value:(n.powerIn?n.powerIn.toFixed(1):'—')+' dBm'},
+      {label:'Tipo', value:'CTO '+escapeHtml(n.capacity)+'x'+' portas'},
+      {label:'Origem', value:origin?(escapeHtml(origin.name)+(originLink.pon?(' / '+escapeHtml(originLink.pon)):'')):'—'},
+      {label:'Potência de entrada', value:(Number.isFinite(Number(n.powerIn))&&n.powerIn!==null&&n.powerIn!==''?Number(n.powerIn).toFixed(1):'—')+' dBm'},
       {label:'Clientes', value:clientCount}
     ])}
     ${(mCalc||mMed) ? `
@@ -1529,7 +1534,7 @@ function renderCTOBody(n){
       ${nodePorts.map(p=>{
         const cls = p.status==='ocupada' ? 'occ' : (p.status==='alerta' ? 'alerta' : 'free');
         const label = p.clientName ? escapeHtml(p.clientName) : 'livre';
-        return `<div class="port-row ${cls}"><span class="pn">${p.label.replace('Porta ','')}</span><span class="pd"></span><span class="pl">${label}</span></div>`;
+        return `<div class="port-row ${cls}"><span class="pn">${escapeHtml(p.label.replace('Porta ',''))}</span><span class="pd"></span><span class="pl">${label}</span></div>`;
       }).join('')}
     </div>
     <div class="section-title">Alertas</div>
@@ -1546,12 +1551,12 @@ function renderClientBody(n){
   return `
     ${fieldsHtml([
       {label:'Código', value:'#'+n.id.toUpperCase()},
-      {label:'Plano', value:n.plano||'—'},
-      {label:'Tecnologia', value:n.tecnologia||'—'},
-      {label:'Equipamento', value:n.equipamento||'—', full:true},
+      {label:'Plano', value:escapeHtml(n.plano||'—')},
+      {label:'Tecnologia', value:escapeHtml(n.tecnologia||'—')},
+      {label:'Equipamento', value:escapeHtml(n.equipamento||'—'), full:true},
       {label:'Origem da conexão', value:origin?escapeHtml(origin.name):'—'},
-      {label:'Sinal / potência', value:n.sinal!==null&&n.sinal!==undefined?n.sinal+' dBm':'—'},
-      {label:'Última leitura', value:n.lastSeen||'—'}
+      {label:'Sinal / potência', value:n.sinal!==null&&n.sinal!==undefined?escapeHtml(n.sinal)+' dBm':'—'},
+      {label:'Última leitura', value:escapeHtml(n.lastSeen||'—')}
     ])}
     <div class="action-row">
       <button class="btn btn-accent" id="btn-show-path" style="flex:1 1 100%;">
@@ -1621,25 +1626,21 @@ function openLinkPanel(linkId){
         {label:'Origem', value:escapeHtml(a.name)},
         {label:'Destino', value:escapeHtml(b.name)},
         (()=>{ const c=cables.find(cc=>cc.linkId===l.id); return c?{label:'Cabo físico', value:escapeHtml(c.nome)+' · '+c.tipo+' ('+c.totalFibras+' fibras)', full:true}:null; })(),
-        l.freq ? {label:'Frequência', value:l.freq} : null,
-        l.distancia ? {label:'Distância', value:l.distancia} : null,
-        l.sinal ? {label:'Sinal', value:l.sinal+' dBm'} : null
+        l.freq ? {label:'Frequência', value:escapeHtml(l.freq)} : null,
+        l.distancia ? {label:'Distância', value:escapeHtml(l.distancia)} : null,
+        l.sinal ? {label:'Sinal', value:escapeHtml(l.sinal)+' dBm'} : null
       ])}
       <div class="action-row">
-        <button class="btn btn-accent" id="btn-sangria" style="flex:1 1 100%;">Inserir caixa neste trecho (sangria)</button>
+        <button class="btn" id="btn-edit-link" style="flex:1 1 100%;">Editar trecho</button>
+        <button class="btn" id="btn-sangria" style="flex:1 1 100%;" disabled title="Disponível em breve">Inserir caixa neste trecho (sangria) — disponível em breve</button>
         <button class="btn btn-danger" id="btn-delete-link" style="flex:1 1 100%;">Excluir trecho</button>
       </div>
     </div>
   `;
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
-  const btnSangria=document.getElementById('btn-sangria');
-  if(btnSangria) btnSangria.addEventListener('click', ()=> abrirSangria(l));
+  document.getElementById('btn-edit-link').addEventListener('click', ()=> openLinkEditModal(l));
   document.getElementById('btn-delete-link').addEventListener('click', ()=>{
-    if(confirm('Excluir este link?')){
-      links = links.filter(x=>x.id!==l.id);
-      closePanel();
-      toast('Link excluído.');
-    }
+    if(confirm('Excluir este trecho?')) deleteLinkRemote(l);
   });
 }
 
@@ -1999,7 +2000,7 @@ function openCreateModal(type, latlng){
     }).then(data=>{
       closeModal(); clearMode(); clearSearchPin(true);
       loadNetwork(()=>{
-        toast('Elemento "'+name+'" salvo. Ligações ainda não são salvas.');
+        toast('Elemento "'+name+'" salvo. Use "Conectar" para ligá-lo à rede.');
         const created = nodes.find(n=>n.dbId===data.node.id);
         if(created) onNodeClick(created.id);
       });
@@ -2131,23 +2132,79 @@ function openLinkTypeModal(origin, dest){
   document.getElementById('modal-save').addEventListener('click', ()=>{
     const type = selType.value;
     const ehFibra = ['backbone','distribuicao','drop'].includes(type);
-    const extra = {label:origin.name+' → '+dest.name, km:+km.toFixed(3)};
+    if(!origin.dbId || !dest.dbId){ toast('Elemento ainda não salvo. Recarregue o mapa.'); return; }
+    const fields = {
+      link_type:type, from_node_id:origin.dbId, to_node_id:dest.dbId,
+      label:(origin.name+' → '+dest.name).slice(0,120), length_m:Math.round(km*1000*100)/100
+    };
+    const attrs = {};
     if(ehFibra){
       const fo = parseInt(document.getElementById('f-linkfo').value,10);
-      extra.cableMeta = {
-        nome:'CABO '+origin.name+'→'+dest.name, tipo:fo+'FO', totalFibras:fo,
-        construtivo: document.getElementById('f-linkconstr').value
-      };
+      fields.fiber_count = fo;
+      attrs.cabo_nome = ('CABO '+origin.name+'→'+dest.name).slice(0,100);
+      attrs.cabo_tipo = fo+'FO';
+      attrs.cabo_construtivo = document.getElementById('f-linkconstr').value;
     }
-    const l = addLink(type, origin, dest, 'normal', extra);
-    const cb = cables.find(x=>x.linkId===l.id);
-    if(cb){ cb.construtivo = extra.cableMeta.construtivo; cb.km = extra.km; }
-    closeModal(); clearMode(); renderAll();
-    toast(ehFibra
-      ? `Trecho criado com cabo de ${extra.cableMeta.totalFibras} fibras · ${km.toFixed(2)} km.`
-      : `Trecho criado entre "${origin.name}" e "${dest.name}".`);
-    onNodeClick(dest.id);
+    fields.attrs = JSON.stringify(attrs);
+    const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
+    mapPost('/links', fields).then(()=>{
+      closeModal(); clearMode();
+      loadNetwork(()=>{
+        toast(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ${km.toFixed(2)} km.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`);
+        const again = nodes.find(x=>x.dbId===dest.dbId);
+        if(again) onNodeClick(again.id);
+      });
+    }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
   });
+}
+
+/* ---- editar / excluir trecho (grava no servidor; tipo, origem e destino não mudam) ---- */
+function openLinkEditModal(l){
+  const fibra = l.medium==='fibra' || ['backbone','distribuicao','drop'].includes(l.type);
+  const construtivos = ['AS (auto-sustentado)','Drop','Espinado','Subterrâneo'];
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Editar trecho</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      <div class="cable-meta">${escapeHtml(LINK_TYPE_LABEL[l.type]||l.type)} · tipo, origem e destino não mudam (exclua e crie de novo).</div>
+      <div class="form-field"><label>Rótulo</label><input id="f-lk-label" type="text" maxlength="120" value="${escapeHtml(l.label||'')}"></div>
+      <div class="form-field"><label>Status</label>
+        <select id="f-lk-status">${['normal','alerta','critico','offline'].map(v=>`<option value="${v}" ${l.status===v?'selected':''}>${STATUS_LABEL[v]}</option>`).join('')}</select>
+      </div>
+      <div class="form-field"><label>Comprimento (metros)</label><input id="f-lk-len" type="number" min="0" step="0.01" value="${l.lengthM!=null?escapeHtml(l.lengthM):''}"></div>
+      ${fibra ? `<div class="form-field"><label>Nº de fibras</label><input id="f-lk-fo" type="number" min="1" max="288" value="${l.fiberCount||''}"></div>
+      <div class="form-field"><label>Tipo construtivo</label><select id="f-lk-constr"><option value="">—</option>${construtivos.map(c=>`<option ${l.cabo_construtivo===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
+    </div>
+    <div class="modal-foot"><button class="btn" id="modal-cancel">Cancelar</button><button class="btn btn-accent" id="modal-save">Salvar alterações</button></div>`;
+  overlay.classList.add('show');
+  document.getElementById('modal-x').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    const attrs = Object.assign({}, l._attrs||{});
+    const fields = {id:l.dbId, label:document.getElementById('f-lk-label').value.trim(),
+      status:document.getElementById('f-lk-status').value, length_m:document.getElementById('f-lk-len').value.trim()};
+    if(fibra){
+      fields.fiber_count = document.getElementById('f-lk-fo').value.trim();
+      const c = document.getElementById('f-lk-constr').value;
+      if(c) attrs.cabo_construtivo = c; else delete attrs.cabo_construtivo;
+      if(fields.fiber_count) attrs.cabo_tipo = fields.fiber_count+'FO'; else { delete attrs.cabo_tipo; }
+    }
+    fields.attrs = JSON.stringify(attrs);
+    const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
+    mapPost('/links/editar', fields).then(()=>{
+      closeModal();
+      loadNetwork(()=>{
+        const again = links.find(x=>x.dbId===l.dbId);
+        if(again) onLinkClick(again.id);
+        toast('Trecho salvo.');
+      });
+    }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
+  });
+}
+function deleteLinkRemote(l){
+  if(!l.dbId){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }
+  mapPost('/links/excluir', {id:l.dbId})
+    .then(()=>{ loadNetwork(()=> toast('Trecho excluído.')); })
+    .catch(err=> toast(err.message));
 }
 
 /* ============================================================
@@ -2509,7 +2566,7 @@ function renderDiagram(){
         out.push(`<g class="fpin${dgSelPin===key?' sel':''}" data-pin="${key}" opacity="${dim?0.25:1}">
           <circle class="fpin-ring" cx="${pin.x}" cy="${pin.y}" r="7" fill="${fill}" stroke="${stroke}" ${alim?'':'stroke-dasharray="2,2"'}/>
           <text class="fpin-num" x="${pin.x}" y="${pin.y+3}" text-anchor="middle" fill="${occ?'#04211f':'#7c8798'}">${i+1}</text>
-          <title>${p.label} — ${occ?p.clientName:(alim?'livre (alimentada)':'sem alimentação')}</title></g>`);
+          <title>${escapeHtml(p.label)} — ${occ?escapeHtml(p.clientName):(alim?'livre (alimentada)':'sem alimentação')}</title></g>`);
         const txt = occ ? p.clientName : (alim ? 'livre' : 'sem alimentação');
         out.push(`<text class="fpin-label${alim?'':' nofeed'}" x="${pin.x+14}" y="${pin.y+3}">${escapeHtml(txt)}</text>`);
       });
@@ -2906,7 +2963,7 @@ function renderDiagramSidePanels(node, layout, powers, trace){
       ${px===undefined && f.status!=='livre' ? '<div class="alert-box has">Esta fibra está emendada, mas não há caminho com sinal até ela dentro desta caixa. Verifique a fusão a montante.</div>' : ''}
       ${alcancados.length?`<div class="section-title">Portas alcançadas</div><div class="port-list">${
         alcancados.map(k=>{const p=ports.find(x=>x.id===k.split(':')[1]);
-          return `<div class="port-row ${p.clientName?'occ':'free'}"><span class="pn">${p.label.replace('Porta ','')}</span><span class="pd"></span><span class="pl">${escapeHtml(p.clientName||'livre')}</span></div>`;}).join('')
+          return `<div class="port-row ${p.clientName?'occ':'free'}"><span class="pn">${escapeHtml(p.label.replace('Porta ',''))}</span><span class="pd"></span><span class="pl">${escapeHtml(p.clientName||'livre')}</span></div>`;}).join('')
       }</div>`:''}`;
     return;
   }
@@ -3214,19 +3271,16 @@ function ctxItemsNode(n){
 function ctxItemsLink(l, ll){
   const a = nodeById(l.from), b = nodeById(l.to);
   const items = [
-    {label:'Inserir caixa aqui (sangria)', onClick:()=> abrirSangria(l, ll)}
+    {label:'Inserir caixa aqui (sangria) — disponível em breve', disabled:true}
   ];
   [a,b].forEach(p=>{
     if(p && ['ceo','cto'].includes(p.type))
       items.push({label:'Abrir diagrama de '+p.name, icon:ctxIcon(p.type), onClick:()=> openDiagram(p.id)});
   });
   items.push({sep:true});
+  items.push({label:'Editar trecho', onClick:()=> openLinkEditModal(l)});
   items.push({label:'Excluir trecho', danger:true, onClick:()=>{
-    if(confirm('Excluir este link?')){
-      links = links.filter(x=>x.id!==l.id);
-      if(selectedLinkId===l.id) closePanel(); else renderAll();
-      toast('Link excluído.');
-    }
+    if(confirm('Excluir este trecho?')) deleteLinkRemote(l);
   }});
   return items;
 }

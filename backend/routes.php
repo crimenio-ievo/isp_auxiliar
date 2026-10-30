@@ -94,6 +94,9 @@ return static function (Router $router): void {
     $router->post('/api/mapa/nos', [MapController::class, 'createNode'], 'api.map.nodes.create');
     $router->post('/api/mapa/nos/editar', [MapController::class, 'updateNode'], 'api.map.nodes.update');
     $router->post('/api/mapa/nos/excluir', [MapController::class, 'deleteNode'], 'api.map.nodes.delete');
+    $router->post('/api/mapa/links', [MapController::class, 'createLink'], 'api.map.links.create');
+    $router->post('/api/mapa/links/editar', [MapController::class, 'updateLink'], 'api.map.links.update');
+    $router->post('/api/mapa/links/excluir', [MapController::class, 'deleteLink'], 'api.map.links.delete');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');
