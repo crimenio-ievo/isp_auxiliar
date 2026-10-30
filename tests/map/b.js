@@ -1,0 +1,20 @@
+const boot=require('./harness.js'); const {N,P}=boot;
+const nodes=[N(1,'pop','POP-001',-20.85,-42.80),N(2,'olt','OLT-001',null,null,1),N(5,'cto','CTO-001',-20.84,-42.80,null,{capacity:4})];
+const ports=[P(10,2,'eth',1,'ETH 1'),P(11,2,'eth',2,'ETH 2'),P(12,2,'pon',1,'PON 1',1),P(20,5,'fo',1,'Porta 1',1)];
+const {d,posts,errs,wait,q,ptr}=boot(()=>({nodes,ports,links:[]}));
+let fail=0; const ck=(l,c,x='')=>{ if(!c)fail++; console.log(c?'[OK]  ':'[FALHA]',l,x); };
+(async()=>{
+ await wait(300);
+ ptr(q('.mnode[data-node="n1"]')); await wait(20);
+ d.getElementById('site-add-type').value='switch'; d.getElementById('btn-site-add').click(); await wait(20);
+ ck('criar equipamento: 4 campos de quantidade zerados', ['eth','sfp','pon','fo'].every(f=>d.getElementById('f-ports-'+f)&&d.getElementById('f-ports-'+f).value==='0'));
+ d.getElementById('f-ports-eth').value='24'; d.getElementById('f-ports-sfp').value='4'; d.getElementById('modal-save').click(); await wait(200);
+ const pc=posts.find(p=>p[0]==='/nos'); ck('POST /nos com ports_eth=24, ports_sfp=4, pon/fo=0', pc&&pc[1].ports_eth==='24'&&pc[1].ports_sfp==='4'&&pc[1].ports_pon==='0'&&pc[1].ports_fo==='0', pc&&JSON.stringify(pc[1]));
+ await wait(100); ptr(q('.mnode[data-node="n1"]')); await wait(20); q('[data-eq-edit="n2"]').click(); await wait(10);
+ ck('editar OLT: quantidades atuais (eth 2, pon 1)', d.getElementById('f-ports-eth').value==='2'&&d.getElementById('f-ports-pon').value==='1'&&d.getElementById('f-ports-sfp').value==='0');
+ d.getElementById('f-ports-pon').value='16'; d.getElementById('modal-save').click(); await wait(200);
+ const pe=posts.find(p=>p[0]==='/nos/editar'); ck('POST editar com ports_pon=16', pe&&pe[1].ports_pon==='16'&&pe[1].ports_eth==='2');
+ await wait(100); ptr(q('.mnode[data-node="n5"]')); await wait(20); d.getElementById('btn-edit-node').click(); await wait(10);
+ ck('CTO não tem campos de quantidade por tipo (usa capacidade)', !d.getElementById('f-ports-eth')&&!!d.getElementById('f-cap'));
+ console.log('falhas:',fail,'| erros console:',errs.length?errs.join('\n '):'nenhum'); process.exit(0);
+})();

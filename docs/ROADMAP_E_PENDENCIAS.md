@@ -25,6 +25,7 @@ Atualizado em 2026-10-30.
 
 ## Pendências técnicas
 
+- **ISP Map 2R (2026-10-30):** harnesses incorporados em `tests/map/` com runner PHP/jsdom. Linha de base no `af77117`: 19 cenários passaram, 1 falhou (`suite_life.php`, auditoria de lifecycle). Extração do motor interrompida antes de alterar a aplicação, conforme regra da tarefa. Evidência e reprodução: `tests/map/BASELINE.md` e `tests/map/README.md`. Alinhar a expectativa histórica em tarefa posterior antes de retomar 2R; demais fases não iniciadas.
 - .86: rodar scripts/migrate_integration_settings.php (simulação, depois --apply) antes de alguém salvar Email/Evotrix pela tela.
 - .86: o .env da R5 é cópia (a R4 usa symlink para o arquivo compartilhado). Consolidar.
 - .86: validação funcional real da foto de instalação (técnico em campo) e do benefício (contrato existente).

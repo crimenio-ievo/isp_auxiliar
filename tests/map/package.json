@@ -1,0 +1,7 @@
+{
+  "name": "isp-map-regression",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "test": "bash run_all.sh" },
+  "devDependencies": { "jsdom": "24.1.0" }
+}
