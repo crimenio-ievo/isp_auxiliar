@@ -23,11 +23,11 @@ final class MapRepository
         $pdo = $this->database->pdo();
         $params = ['provider_id' => $providerId];
 
-        $nodes = $this->fetch($pdo, 'SELECT id, node_type, name, code, lat, lng, parent_node_id, status, attrs_json, equipment_id, notes
+        $nodes = $this->fetch($pdo, 'SELECT id, node_type, name, code, lat, lng, parent_node_id, status, lifecycle, attrs_json, equipment_id, notes
              FROM map_nodes WHERE provider_id = :provider_id ORDER BY id', $params);
         $ports = $this->fetch($pdo, 'SELECT id, node_id, port_num, label, port_role, status, attrs_json
              FROM map_ports WHERE provider_id = :provider_id ORDER BY node_id, port_role, port_num', $params);
-        $links = $this->fetch($pdo, 'SELECT id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, label,
+        $links = $this->fetch($pdo, 'SELECT id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, lifecycle, label,
                     length_m, fiber_count, attrs_json, path_json
              FROM map_links WHERE provider_id = :provider_id ORDER BY id', $params);
 
@@ -50,7 +50,7 @@ final class MapRepository
     {
         $rows = $this->fetch(
             $this->database->pdo(),
-            'SELECT id, node_type, name, code, lat, lng, parent_node_id, status, attrs_json, equipment_id, notes
+            'SELECT id, node_type, name, code, lat, lng, parent_node_id, status, lifecycle, attrs_json, equipment_id, notes
              FROM map_nodes WHERE id = :id AND provider_id = :provider_id',
             ['id' => $nodeId, 'provider_id' => $providerId]
         );
@@ -65,9 +65,9 @@ final class MapRepository
     {
         $pdo = $this->database->pdo();
         $statement = $pdo->prepare(
-            'INSERT INTO map_nodes (provider_id, node_type, name, code, lat, lng, parent_node_id, status, attrs_json, notes,
+            'INSERT INTO map_nodes (provider_id, node_type, name, code, lat, lng, parent_node_id, status, lifecycle, attrs_json, notes,
                     created_by_user_id, updated_by_user_id, created_at, updated_at)
-             VALUES (:provider_id, :node_type, :name, :code, :lat, :lng, :parent_node_id, :status, :attrs_json, :notes,
+             VALUES (:provider_id, :node_type, :name, :code, :lat, :lng, :parent_node_id, :status, :lifecycle, :attrs_json, :notes,
                     :user_id, :user_id2, NOW(), NOW())'
         );
         $statement->execute([
@@ -79,6 +79,7 @@ final class MapRepository
             'lng' => $fields['lng'],
             'parent_node_id' => $fields['parent_node_id'] ?? null,
             'status' => $fields['status'],
+            'lifecycle' => $fields['lifecycle'] ?? 'ativo',
             'attrs_json' => $fields['attrs_json'] ?? null,
             'notes' => $fields['notes'] ?? null,
             'user_id' => $userId,
@@ -95,7 +96,7 @@ final class MapRepository
      */
     public function updateNode(int $providerId, int $nodeId, ?int $userId, array $fields): void
     {
-        $allowed = ['name', 'code', 'lat', 'lng', 'parent_node_id', 'status', 'attrs_json', 'notes'];
+        $allowed = ['name', 'code', 'lat', 'lng', 'parent_node_id', 'status', 'lifecycle', 'attrs_json', 'notes'];
         $sets = [];
         $params = ['id' => $nodeId, 'provider_id' => $providerId, 'user_id' => $userId];
         foreach ($allowed as $column) {
@@ -169,7 +170,7 @@ final class MapRepository
     {
         $rows = $this->fetch(
             $this->database->pdo(),
-            'SELECT id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, label,
+            'SELECT id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, lifecycle, label,
                     length_m, fiber_count, attrs_json, path_json
              FROM map_links WHERE id = :id AND provider_id = :provider_id',
             ['id' => $linkId, 'provider_id' => $providerId]
@@ -200,9 +201,9 @@ final class MapRepository
     {
         $pdo = $this->database->pdo();
         $pdo->prepare(
-            'INSERT INTO map_links (provider_id, link_type, medium, from_node_id, to_node_id, status, label, length_m, fiber_count, attrs_json,
+            'INSERT INTO map_links (provider_id, link_type, medium, from_node_id, to_node_id, status, lifecycle, label, length_m, fiber_count, attrs_json,
                     created_by_user_id, updated_by_user_id, created_at, updated_at)
-             VALUES (:provider_id, :link_type, :medium, :from_node_id, :to_node_id, :status, :label, :length_m, :fiber_count, :attrs_json,
+             VALUES (:provider_id, :link_type, :medium, :from_node_id, :to_node_id, :status, :lifecycle, :label, :length_m, :fiber_count, :attrs_json,
                     :user_id, :user_id2, NOW(), NOW())'
         )->execute([
             'provider_id' => $providerId,
@@ -211,6 +212,7 @@ final class MapRepository
             'from_node_id' => $fields['from_node_id'],
             'to_node_id' => $fields['to_node_id'],
             'status' => $fields['status'],
+            'lifecycle' => $fields['lifecycle'] ?? 'ativo',
             'label' => $fields['label'] ?? null,
             'length_m' => $fields['length_m'] ?? null,
             'fiber_count' => $fields['fiber_count'] ?? null,
@@ -229,7 +231,7 @@ final class MapRepository
      */
     public function updateLink(int $providerId, int $linkId, ?int $userId, array $fields): void
     {
-        $allowed = ['status', 'label', 'length_m', 'fiber_count', 'attrs_json'];
+        $allowed = ['status', 'lifecycle', 'label', 'length_m', 'fiber_count', 'attrs_json'];
         $sets = [];
         $params = ['id' => $linkId, 'provider_id' => $providerId, 'user_id' => $userId];
         foreach ($allowed as $column) {

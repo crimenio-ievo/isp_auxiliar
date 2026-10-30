@@ -49,6 +49,7 @@ final class MapController
 
     private const NODE_TYPES = ['pop', 'tower', 'olt', 'switch', 'radio', 'ceo', 'cto'];
     private const NODE_STATUSES = ['normal', 'alerta', 'critico', 'offline'];
+    private const NODE_LIFECYCLES = ['projeto', 'ativo', 'desativado'];
     private const ATTRS_MAX_BYTES = 4096;
 
     public function createNode(Request $request): Response
@@ -315,6 +316,14 @@ final class MapController
             $fields['status'] = $status;
         }
 
+        if ($creating || $has('lifecycle')) {
+            $lifecycle = trim((string) $request->input('lifecycle', 'ativo'));
+            if (!in_array($lifecycle, self::NODE_LIFECYCLES, true)) {
+                $errors[] = 'Situação inválida (projeto, ativo ou desativado).';
+            }
+            $fields['lifecycle'] = $lifecycle;
+        }
+
         if ($creating || $has('label')) {
             $label = trim((string) $request->input('label', ''));
             if (mb_strlen($label) > 120) {
@@ -443,6 +452,14 @@ final class MapController
                 $errors[] = 'Status inválido.';
             }
             $fields['status'] = $status;
+        }
+
+        if ($creating || $has('lifecycle')) {
+            $lifecycle = trim((string) $request->input('lifecycle', 'ativo'));
+            if (!in_array($lifecycle, self::NODE_LIFECYCLES, true)) {
+                $errors[] = 'Situação inválida (projeto, ativo ou desativado).';
+            }
+            $fields['lifecycle'] = $lifecycle;
         }
 
         if ($creating || $has('notes')) {

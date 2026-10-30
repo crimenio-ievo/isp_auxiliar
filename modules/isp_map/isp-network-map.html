@@ -439,6 +439,9 @@ button{font-family:inherit;}
   background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text-dim);}
 .pin-bar.show{display:flex;}
 .pin-bar select{background:var(--bg-panel-alt);color:inherit;border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-size:11px;}
+.status-pill.lc-projeto{background:rgba(88,166,255,.12);color:#58a6ff;}.status-pill.lc-projeto .d{background:#58a6ff;}
+.status-pill.lc-ativo{background:rgba(139,148,158,.12);color:#9aa4b2;}.status-pill.lc-ativo .d{background:#9aa4b2;}
+.status-pill.lc-desativado{background:rgba(110,118,129,.12);color:#6e7681;}.status-pill.lc-desativado .d{background:#6e7681;}
 </style>
 </head>
 <body>
@@ -719,7 +722,7 @@ function applyTopology(data){
     if(r.lat==null || r.lng==null) return;            // sem coordenada não há onde desenhar
     const n = Object.assign({}, r.attrs_json||{}, {
       id:'n'+r.id, dbId:r.id, type:r.node_type, name:r.name, code:r.code, lat:r.lat, lng:r.lng,
-      status:r.status||'normal', parent:null, parentLink:null, notes:r.notes, desc:r.notes||'',
+      status:r.status||'normal', lifecycle:r.lifecycle||'ativo', parent:null, parentLink:null, notes:r.notes, desc:r.notes||'',
       _attrs:Object.assign({}, r.attrs_json||{})
     });
     if(n.type==='olt') n.pons = [];
@@ -739,7 +742,7 @@ function applyTopology(data){
   rawLinks.forEach(r=>{
     const a = byDb[r.from_node_id], b = byDb[r.to_node_id]; if(!a || !b) return;
     const at = r.attrs_json||{};
-    const extra = Object.assign({}, at, {dbId:r.id, label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json,
+    const extra = Object.assign({}, at, {dbId:r.id, lifecycle:r.lifecycle||'ativo', label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json,
       _attrs:Object.assign({}, at)});
     if(r.length_m!=null) extra.km = +(r.length_m/1000).toFixed(3);
     if(r.fiber_count) extra.cableMeta = {nome:at.cabo_nome||('CABO '+r.id), tipo:at.cabo_tipo||(r.fiber_count+'FO'), totalFibras:r.fiber_count, construtivo:at.cabo_construtivo};
@@ -847,9 +850,10 @@ const BASEMAPS = {
   osm:    {label:'OpenStreetMap (ruas)',
            url:(z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
            attrib:'© OpenStreetMap contributors', maxNativeZoom:19, dim:0.72},
-  dark:   {label:'Mapa escuro (Carto)',
-           url:(z,x,y)=>`https://basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`,
-           attrib:'© OpenStreetMap · © CARTO', maxNativeZoom:19, dim:1, dark:true},
+  dark:   {label:'Mapa escuro (OSM, filtro)',
+           url:(z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+           attrib:'© OpenStreetMap contributors', maxNativeZoom:19, dim:1, dark:true,
+           filter:'invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)'},   // Carto passou a exigir chave de API
   sat:    {label:'Satélite (Esri)',
            url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
            attrib:'© Esri, Maxar, Earthstar Geographics', maxNativeZoom:17, dim:0.85}
@@ -872,7 +876,7 @@ function renderTiles(parts){
   const y0 = Math.floor((view.cy - (mapH/2)/view.scale)*n);
   const y1 = Math.floor((view.cy + (mapH/2)/view.scale)*n);
   if((x1-x0+1)*(y1-y0+1) > 400) return;                  // proteção contra excesso
-  parts.push(`<g opacity="${bm.dim||1}">`);
+  parts.push(`<g opacity="${bm.dim||1}"${bm.filter?` style="filter:${bm.filter}"`:''}>`);
   for(let ty=y0; ty<=y1; ty++){
     if(ty<0||ty>=n) continue;
     for(let tx=x0; tx<=x1; tx++){
@@ -903,7 +907,10 @@ let linkPoint = null;   // {linkId, lat, lng} — marcador deixado por um clique
 let pathHighlight = null;
 let activeTypeFilters = new Set(TYPE_ORDER);
 let activeLinkFilters = new Set(Object.keys(LINK_TYPE_LABEL));
+let activeLifecycleFilters = new Set(['projeto','ativo','desativado']);
 let alertsOnly = false;
+const LIFECYCLE_LABEL = {projeto:'Projeto', ativo:'Ativo', desativado:'Desativado'};
+const lifecycleOf = x => (x && x.lifecycle) || 'ativo';
 
 /* ---- estado de edição/criação ---- */
 let mode = 'idle';     // idle | placing | linking-dest
@@ -916,11 +923,13 @@ function portsOf(nodeId){ return ports.filter(p=>p.nodeId===nodeId); }
 function linksOfNode(nodeId){ return links.filter(l=>l.from===nodeId || l.to===nodeId); }
 
 function nodeVisible(n){
+  if(!activeLifecycleFilters.has(lifecycleOf(n))) return false;
   if(!activeTypeFilters.has(n.type)) return false;
   if(alertsOnly && !(n.status==='alerta'||n.status==='critico'||n.status==='offline')) return false;
   return true;
 }
 function linkVisible(l){
+  if(!activeLifecycleFilters.has(lifecycleOf(l))) return false;
   if(!activeLinkFilters.has(l.type)) return false;
   const a=nodeById(l.from), b=nodeById(l.to);
   if(!a||!b) return false;
@@ -973,6 +982,7 @@ function renderAll(){
     let color=st.color, opacity=.85, weight=st.weight;
     if(l.status==='offline') color=STATUS_COLOR.offline;
     if(l.status==='critico') color=STATUS_COLOR.critico;
+    const lcl = lifecycleOf(l);
     if(pathHighlight){
       if(pathHighlight.linkIds.has(l.id)){ opacity=1; weight=st.weight+1.5; color='#4fd1c5'; }
       else opacity=.08;
@@ -981,7 +991,8 @@ function renderAll(){
       else opacity=.12;
     }
     const p1=toScreen(a.lat,a.lng), p2=toScreen(b.lat,b.lng);
-    const dash = st.dash ? `stroke-dasharray="${st.dash}"` : '';
+    if(lcl==='projeto') opacity *= .6; else if(lcl==='desativado') opacity *= .45;
+    const dash = lcl==='projeto' ? 'stroke-dasharray="3,4"' : (st.dash ? `stroke-dasharray="${st.dash}"` : '');
     parts.push(`<line class="mlink-hit" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"/>`);
     parts.push(`<line class="mlink" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${weight}" opacity="${opacity}" ${dash}/>`);
   });
@@ -995,11 +1006,12 @@ function renderAll(){
     const size = ICON_SIZE[n.type]||18;
     const r = size/2+5;
     const color = STATUS_COLOR[n.status]||'#8a92a3';
-    const op = dim ? .18 : 1;
+    const lc = lifecycleOf(n);
+    const op = dim ? .18 : (lc==='projeto' ? .6 : (lc==='desativado' ? .45 : 1));
     parts.push(`<g class="mnode" data-node="${n.id}" transform="translate(${p.x},${p.y})" opacity="${op}">`);
     parts.push(`<circle class="mnode-hit" r="${r+8}"/>`);
     if(n.id===selectedNodeId) parts.push(`<circle r="${r+4}" fill="none" stroke="#4fd1c5" stroke-width="2.5" opacity=".75"/>`);
-    parts.push(`<circle r="${r}" fill="#11151c" stroke="${color}" stroke-width="2"/>`);
+    parts.push(`<circle r="${r}" fill="#11151c" stroke="${color}" stroke-width="2"${lc==='projeto'?' stroke-dasharray="4,3"':''}/>`);
     parts.push(nodeIconSVG(n.type, color, size*0.62));
     parts.push(`</g>`);
     if(['pop','olt','switch','tower','cto','ceo'].includes(n.type)){
@@ -1165,11 +1177,13 @@ function centerOn(n, targetScale){
    KPIs / TOPBAR
    ============================================================ */
 function updateKPIs(){
-  document.getElementById('kpi-pop').textContent = nodes.filter(n=>n.type==='pop').length;
-  document.getElementById('kpi-cto').textContent = nodes.filter(n=>n.type==='cto').length;
-  document.getElementById('kpi-clients').textContent = nodes.filter(n=>n.type==='client').length;
-  document.getElementById('kpi-links').textContent = links.length;
-  const alertCount = nodes.filter(n=> n.status==='alerta'||n.status==='critico'||n.status==='offline').length;
+  // KPIs e alertas contam só o que está em operação (situação "ativo"); projeto e desativado ficam de fora
+  const ativos = nodes.filter(n=>lifecycleOf(n)==='ativo');
+  document.getElementById('kpi-pop').textContent = ativos.filter(n=>n.type==='pop').length;
+  document.getElementById('kpi-cto').textContent = ativos.filter(n=>n.type==='cto').length;
+  document.getElementById('kpi-clients').textContent = ativos.filter(n=>n.type==='client').length;
+  document.getElementById('kpi-links').textContent = links.filter(l=>lifecycleOf(l)==='ativo').length;
+  const alertCount = ativos.filter(n=> n.status==='alerta'||n.status==='critico'||n.status==='offline').length;
   document.getElementById('kpi-alerts').textContent = alertCount;
   const dot = document.getElementById('net-status-dot');
   dot.style.background = alertCount>0 ? 'var(--yellow)' : 'var(--green)';
@@ -1209,6 +1223,17 @@ function renderSidebar(){
   });
   html += '</div>';
 
+  html += '<div class="sb-section"><h4>Situação</h4>';
+  Object.keys(LIFECYCLE_LABEL).forEach(k=>{
+    const cnt = nodes.filter(n=>lifecycleOf(n)===k).length + links.filter(l=>lifecycleOf(l)===k).length;
+    html += `<div class="layer-row">
+      <input type="checkbox" ${activeLifecycleFilters.has(k)?'checked':''} data-filter-lifecycle="${k}">
+      <label>${LIFECYCLE_LABEL[k]}</label>
+      <span class="count">${cnt}</span>
+    </div>`;
+  });
+  html += '</div>';
+
   html += `<div class="sb-section"><h4>Estado</h4>
     <div class="layer-row"><input type="checkbox" id="chk-alerts-only" ${alertsOnly?'checked':''}>
       <div class="swatch" style="background:${STATUS_COLOR.alerta}"></div>
@@ -1232,6 +1257,13 @@ function renderSidebar(){
       renderAll();
     });
   });
+  c.querySelectorAll('[data-filter-lifecycle]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const t = cb.getAttribute('data-filter-lifecycle');
+      if(cb.checked) activeLifecycleFilters.add(t); else activeLifecycleFilters.delete(t);
+      renderAll();
+    });
+  });
   const chkAlerts = document.getElementById('chk-alerts-only');
   if(chkAlerts) chkAlerts.addEventListener('change', ()=>{ alertsOnly = chkAlerts.checked; renderAll(); });
 }
@@ -1249,6 +1281,10 @@ const connectHint = document.getElementById('connect-hint');
 /* ============================================================
    PAINEL DIREITO — detalhes por tipo
    ============================================================ */
+function lifecyclePill(x){
+  const lc = lifecycleOf(x);
+  return `<span class="status-pill lc-${lc}" style="margin-left:6px;opacity:.85"><span class="d"></span>Situação: ${LIFECYCLE_LABEL[lc]||escapeHtml(lc)}</span>`;
+}
 function statusPill(status){
   return `<span class="status-pill st-${status}"><span class="d"></span>${STATUS_LABEL[status]||status}</span>`;
 }
@@ -1358,7 +1394,7 @@ function openNodePanel(nodeId){
         </div>
         <button class="panel-close" id="panel-close-btn">✕</button>
       </div>
-      ${statusPill(n.status)}
+      ${statusPill(n.status)}${lifecyclePill(n)}
     </div>
     <div class="panel-body">${body}</div>
   `;
@@ -1622,7 +1658,7 @@ function openLinkPanel(linkId){
         </div>
         <button class="panel-close" id="panel-close-btn">✕</button>
       </div>
-      ${statusPill(l.status)}
+      ${statusPill(l.status)}${lifecyclePill(l)}
     </div>
     <div class="panel-body">
       ${fieldsHtml([
@@ -1987,6 +2023,7 @@ function openCreateModal(type, latlng){
           <option value="offline">Offline</option>
         </select>
       </div>
+      <div class="form-field"><label>Situação</label><select id="f-lifecycle"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2" placeholder="Opcional"></textarea></div>
       ${type==='cto' ? `<div class="form-field"><label>Número de portas</label><input id="f-cap" type="number" min="1" max="144" value="16"></div>` : ''}
     </div>
@@ -2009,7 +2046,7 @@ function openCreateModal(type, latlng){
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
     mapPost('/nos', {
       node_type:type, name, lat:latlng.lat, lng:latlng.lng,
-      status:document.getElementById('f-status').value,
+      status:document.getElementById('f-status').value, lifecycle:document.getElementById('f-lifecycle').value,
       notes:document.getElementById('f-obs').value.trim(),
       attrs:JSON.stringify(attrs)
     }).then(data=>{
@@ -2040,6 +2077,7 @@ function openEditModal(n){
           <option value="offline" ${n.status==='offline'?'selected':''}>Offline</option>
         </select>
       </div>
+      <div class="form-field"><label>Situação</label><select id="f-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(n)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2">${escapeHtml(n.desc||'')}</textarea></div>
       ${isCTO ? `<div class="form-field"><label>Número de portas (atual: ${n.capacity||0})</label><input id="f-cap" type="number" min="1" max="144" value="${n.capacity||16}"></div>` : ''}
     </div>
@@ -2058,7 +2096,7 @@ function openEditModal(n){
     if(isCTO) overrides.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||n.capacity||16));
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
     mapPost('/nos/editar', {
-      id:n.dbId, name, status:document.getElementById('f-status').value,
+      id:n.dbId, name, status:document.getElementById('f-status').value, lifecycle:document.getElementById('f-lifecycle').value,
       notes:document.getElementById('f-obs').value.trim(), attrs:nodeAttrsJson(n, overrides)
     }).then(()=>{
       closeModal();
@@ -2112,6 +2150,7 @@ function openLinkTypeModal(origin, dest){
           <option value="wireless">Wireless / enlace rádio</option>
         </select>
       </div>
+      <div class="form-field"><label>Situação</label><select id="f-linklifecycle"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
       <div id="f-cablewrap">
         <div class="form-field"><label>Cabo — nº de fibras</label>
           <select id="f-linkfo">
@@ -2149,7 +2188,7 @@ function openLinkTypeModal(origin, dest){
     const ehFibra = ['backbone','distribuicao','drop'].includes(type);
     if(!origin.dbId || !dest.dbId){ toast('Elemento ainda não salvo. Recarregue o mapa.'); return; }
     const fields = {
-      link_type:type, from_node_id:origin.dbId, to_node_id:dest.dbId,
+      link_type:type, from_node_id:origin.dbId, to_node_id:dest.dbId, lifecycle:document.getElementById('f-linklifecycle').value,
       label:(origin.name+' → '+dest.name).slice(0,120), length_m:Math.round(km*1000*100)/100
     };
     const attrs = {};
@@ -2185,6 +2224,7 @@ function openLinkEditModal(l){
       <div class="form-field"><label>Status</label>
         <select id="f-lk-status">${['normal','alerta','critico','offline'].map(v=>`<option value="${v}" ${l.status===v?'selected':''}>${STATUS_LABEL[v]}</option>`).join('')}</select>
       </div>
+      <div class="form-field"><label>Situação</label><select id="f-lk-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(l)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
       <div class="form-field"><label>Comprimento (metros)</label><input id="f-lk-len" type="number" min="0" step="0.01" value="${l.lengthM!=null?escapeHtml(l.lengthM):''}"></div>
       ${fibra ? `<div class="form-field"><label>Nº de fibras</label><input id="f-lk-fo" type="number" min="1" max="288" value="${l.fiberCount||''}"></div>
       <div class="form-field"><label>Tipo construtivo</label><select id="f-lk-constr"><option value="">—</option>${construtivos.map(c=>`<option ${l.cabo_construtivo===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
@@ -2196,7 +2236,7 @@ function openLinkEditModal(l){
   document.getElementById('modal-save').addEventListener('click', ()=>{
     const attrs = Object.assign({}, l._attrs||{});
     const fields = {id:l.dbId, label:document.getElementById('f-lk-label').value.trim(),
-      status:document.getElementById('f-lk-status').value, length_m:document.getElementById('f-lk-len').value.trim()};
+      status:document.getElementById('f-lk-status').value, lifecycle:document.getElementById('f-lk-lifecycle').value, length_m:document.getElementById('f-lk-len').value.trim()};
     if(fibra){
       fields.fiber_count = document.getElementById('f-lk-fo').value.trim();
       const c = document.getElementById('f-lk-constr').value;
