@@ -1,7 +1,7 @@
 // base jsdom: carrega o HTML com topologia fictícia e captura POSTs
-const {JSDOM, VirtualConsole} = require('jsdom'); const fs=require('fs');
+const {JSDOM, VirtualConsole} = require('jsdom');
 module.exports = function boot(topo, respond){
-  const html=fs.readFileSync(require('path').join(__dirname,'../../modules/isp_map/isp-network-map.html'),'utf8'); const errs=[]; const vc=new VirtualConsole();
+  const html=require('./read_html.js')(); const errs=[]; const vc=new VirtualConsole();
   vc.on('jsdomError',e=>errs.push('jsdomError: '+(e.detail&&e.detail.message||e.message))); vc.on('error',e=>errs.push('console.error: '+e));
   const posts=[]; const json=(st,b)=>Promise.resolve({redirected:false,status:st,ok:st<400,headers:{get:()=>'application/json'},json:()=>Promise.resolve(b)});
   const dom=new JSDOM(html,{runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,url:'http://localhost/mapa',beforeParse(w){

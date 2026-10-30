@@ -1,5 +1,5 @@
-const {JSDOM, VirtualConsole} = require('jsdom'); const fs=require('fs');
-const html=fs.readFileSync(process.argv[2],'utf8'); const errs=[]; const vc=new VirtualConsole();
+const {JSDOM, VirtualConsole} = require('jsdom'); const readMapHtml=require('../read_html.js');
+const html=readMapHtml(process.argv[2]); const errs=[]; const vc=new VirtualConsole();
 vc.on('jsdomError',e=>errs.push('jsdomError: '+(e.detail&&e.detail.message||e.message))); vc.on('error',e=>errs.push('console.error: '+e));
 const db={nodes:[
  {id:1,name:'ZZ TESTE <b>x</b>',lat:-21.0,lng:-42.8,attrs:{ip:'<img src=x onerror=window.__xss=1>',poderia:1},notes:'<script>window.__xss=2</script>'},

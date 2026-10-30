@@ -1,5 +1,5 @@
-const {JSDOM, VirtualConsole} = require('jsdom'); const fs=require('fs');
-const html=fs.readFileSync(process.argv[2],'utf8'); const errs=[]; const vc=new VirtualConsole();
+const {JSDOM, VirtualConsole} = require('jsdom'); const readMapHtml=require('../read_html.js');
+const html=readMapHtml(process.argv[2]); const errs=[]; const vc=new VirtualConsole();
 vc.on('jsdomError',e=>errs.push('jsdomError: '+(e.detail&&e.detail.message||e.message))); vc.on('error',e=>errs.push('console.error: '+e));
 const db={nodes:[]}; let nextId=2; const calls=[];
 const json=(status,body)=>Promise.resolve({redirected:false,status,ok:status<400,headers:{get:()=>'application/json'},json:()=>Promise.resolve(body)});

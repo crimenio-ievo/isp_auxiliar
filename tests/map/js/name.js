@@ -1,5 +1,5 @@
-const {JSDOM, VirtualConsole} = require('jsdom'); const fs=require('fs');
-const html=fs.readFileSync(process.argv[2],'utf8'); const errs=[]; const vc=new VirtualConsole();
+const {JSDOM, VirtualConsole} = require('jsdom'); const readMapHtml=require('../read_html.js');
+const html=readMapHtml(process.argv[2]); const errs=[]; const vc=new VirtualConsole();
 vc.on('jsdomError',e=>errs.push('jsdomError: '+(e.detail&&e.detail.message||e.message))); vc.on('error',e=>errs.push('console.error: '+e));
 const N=(id,t,name)=>({id,node_type:t,name,code:null,lat:-21+id*0.0005,lng:-42.8,parent_node_id:null,status:'normal',attrs_json:null,equipment_id:null,notes:null});
 const nodes=[N(1,'cto','CTO-001'),N(2,'cto','CTO-007'),N(3,'cto','CTO-abc'),N(4,'cto','cto-12'),N(5,'olt','OLT-003'),N(6,'cto','CTO-7 extra'),N(7,'pop','CTO-050')];

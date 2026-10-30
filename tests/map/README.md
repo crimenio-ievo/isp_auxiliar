@@ -43,6 +43,10 @@ WHERE id > ?
 Os jsdom usam topologias e respostas HTTP fictícias, sem gravar no banco.
 `harness.js` resolve o HTML relativamente ao repositório; os scripts antigos
 em `js/` recebem esse caminho pelo runner.
+`read_html.js` inclui o asset separado na ordem dos scripts para o jsdom,
+sem buscar recursos externos. Para validar também a rota e o carregamento
+em subdiretório: `php tests/map/check_diagram_route.php` (somente leitura;
+sem sessão, técnico, gestor e admin; conteúdo, tipo MIME e no-store).
 
 Origem preservada:
 

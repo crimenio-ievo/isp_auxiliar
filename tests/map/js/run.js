@@ -1,6 +1,6 @@
-const {JSDOM, VirtualConsole} = require('jsdom'); const fs=require('fs');
+const {JSDOM, VirtualConsole} = require('jsdom'); const readMapHtml=require('../read_html.js');
 const [,, htmlPath, mode] = process.argv;
-const html = fs.readFileSync(htmlPath,'utf8');
+const html = readMapHtml(htmlPath);
 const errs=[]; const vc=new VirtualConsole();
 vc.on('jsdomError',e=>errs.push('jsdomError: '+(e.detail&&e.detail.message||e.message)));
 vc.on('error',e=>errs.push('console.error: '+e));

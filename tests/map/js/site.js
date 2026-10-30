@@ -1,5 +1,5 @@
-const {JSDOM, VirtualConsole} = require('jsdom'); const fs=require('fs');
-const html=fs.readFileSync(process.argv[2],'utf8'); const errs=[]; const vc=new VirtualConsole();
+const {JSDOM, VirtualConsole} = require('jsdom'); const readMapHtml=require('../read_html.js');
+const html=readMapHtml(process.argv[2]); const errs=[]; const vc=new VirtualConsole();
 vc.on('jsdomError',e=>errs.push('jsdomError: '+(e.detail&&e.detail.message||e.message))); vc.on('error',e=>errs.push('console.error: '+e));
 const N=(id,t,name,lat,lng,parent,attrs)=>({id,node_type:t,name,code:null,lat,lng,parent_node_id:parent||null,status:'normal',lifecycle:'ativo',attrs_json:attrs||null,equipment_id:null,notes:null});
 const nodes=[N(1,'pop','POP-001',-20.85,-42.80),N(2,'olt','OLT-001',null,null,1,{fabricante:'Huawei',modelo:'MA5800'}),N(3,'switch','SW-001',null,null,1),N(4,'router','RT-001',null,null,1),

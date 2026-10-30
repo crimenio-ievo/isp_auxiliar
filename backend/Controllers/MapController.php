@@ -1079,6 +1079,32 @@ final class MapController
         return Response::json(['ok' => false, 'message' => $message], $status, ['Cache-Control' => 'private, no-store']);
     }
 
+    public function diagramScript(Request $request): Response
+    {
+        $user = is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : [];
+        $access = $this->localRepository->accessProfileForUser($user);
+
+        if (!AccessControl::isGestor($access)) {
+            Flash::set('error', 'Seu usuário não possui acesso ao mapa.');
+
+            return new Response('', 302, [
+                'Location' => Url::to('/dashboard'),
+                'Cache-Control' => 'private, no-store',
+            ]);
+        }
+
+        $file = dirname(__DIR__, 2) . '/modules/isp_map/diagram.js';
+        $script = is_file($file) ? file_get_contents($file) : false;
+        $headers = [
+            'Content-Type' => 'application/javascript; charset=UTF-8',
+            'Cache-Control' => 'private, no-store',
+        ];
+
+        return is_string($script)
+            ? new Response($script, 200, $headers)
+            : new Response('', 404, $headers);
+    }
+
     public function show(Request $request): Response
     {
         $user = is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : [];
@@ -1102,6 +1128,7 @@ final class MapController
             JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
         );
         $html = preg_replace('#</head>#i', '<script>window.ISP_MAP=' . $config . ';</script></head>', $html, 1) ?? $html;
+        $html = str_replace('src="/mapa/diagram.js"', 'src="' . htmlspecialchars(Url::to('/mapa/diagram.js'), ENT_QUOTES, 'UTF-8') . '"', $html);
 
         return Response::html($html, 200, ['Cache-Control' => 'private, no-store']);
     }

@@ -20,7 +20,48 @@ Resultado: **23 passaram; 0 falharam**, exit code 0 (7 suites PHP,
   preservadas: **4 nós, 2 ligações, 37 portas**. Limpeza de auditoria
   permanece restrita aos atores fictícios (filtro exato no README).
 
-Pós-extração: pendente no momento deste commit de testes.
+## Comparação após extração
+
+Commit de testes e linha de base: `c77a1ed`. Mesmos comandos, ambiente e
+expectativas após mover o motor para `modules/isp_map/diagram.js`:
+
+| Verificação | Nova linha de base | Após extração |
+| --- | --- | --- |
+| Suites PHP | 7 passaram | 7 passaram |
+| Cenários jsdom | 16 passaram | 16 passaram |
+| Total / exit code | **23 / 0** | **23 / 0** |
+| Falhas / erros de console | 0 / 0 | 0 / 0 |
+| Checagem de escrita em configurações | 1 pulada com aviso | 1 pulada com aviso |
+| Fixtures ZZ TESTE restantes | 0 | 0 |
+| Nós / ligações / portas após limpeza | 4 / 2 / 37 | 4 / 2 / 37 |
+| Hash SVG + painéis do diagrama | `1afbec8e402663b2aec9d7eeea9e53b82e40d2b25c47adb76bdedb21fd641e1c` | Idêntico |
+
+As 1.164 linhas movidas foram comparadas textualmente com o commit de
+testes: idênticas ao normalizar somente os acessores `state.*` para os
+seis arrays compartilhados. SHA-256 desse código normalizado:
+`6a75ffeee623144d4073804005e41d6f64bdd36052db0c858d5d48a363228db3`.
+Constantes de perda e splitter, algoritmos, menus, painéis e estado de
+edição foram preservados. O motor expõe apenas `openDiagram` e `init`;
+a ponte por acessores acompanha substituições dos arrays nas recargas.
+A saída completa dos 16 cenários jsdom também foi comparada textualmente:
+idêntica à linha de base, incluindo hash, mensagens e resumo final.
+
+Verificações adicionais (fora do contador de regressão):
+
+- `php tests/map/check_diagram_route.php`: 12 verificações passaram, sem
+  escrita no banco; sessão exigida, técnico restrito como `/mapa`, gestor
+  e admin recebem JS idêntico ao arquivo com MIME JavaScript e no-store.
+  HTML referencia o asset antes da inicialização, inclusive em subdiretório.
+- Sintaxe PHP do controller, rotas e teste de rota; sintaxe do JS externo
+  e inline; `git diff --check`: passaram.
+- Smoke no vhost local **testes.ievo.com.br** (.89): HTTP `/login` 200;
+  `/mapa` e `/mapa/diagram.js` sem sessão 302. O certificado HTTPS local
+  não cobre esse hostname; repetindo localmente sem validar o certificado,
+  os mesmos status foram obtidos. Configuração do servidor não alterada.
+
+Desvios: somente a checagem de escrita em configurações foi pulada, por
+regra explícita, e os warnings históricos de headers CLI foram mantidos.
+Sem migration, merge, push, deploy ou início de outras fases.
 
 ## Histórico — primeira execução interrompida
 
