@@ -1151,6 +1151,8 @@ function renderAll(){
   mapEl.innerHTML = parts.join('');
   updateKPIs();
   renderSidebar();
+  // comprimento calculado acompanha o arraste dos pontos
+  document.querySelectorAll('[data-link-len]').forEach(el=>{ const x = linkById(el.getAttribute('data-link-len')); if(x) el.textContent = linkLengthText(x); });
 }
 
 /* ---- interação (pointer events: funciona com mouse e toque) ---- */
@@ -1821,6 +1823,7 @@ function openLinkPanel(linkId){
       ${isPendingDetail(l) ? '<div class="cable-meta">Uma ponta é o próprio POP/torre: use "Editar trecho" para escolher o equipamento daquele site.</div>' : ''}
       ${fieldsHtml([
         {label:'Origem (envia) → Destino (recebe)', value:endpointLabel(a, l.fromPort)+' → '+endpointLabel(b, l.toPort), full:true},
+        {label:'Comprimento', value:`<span data-link-len="${l.id}">${escapeHtml(linkLengthText(l))}</span>`, full:true},
         (()=>{ const c=cables.find(cc=>cc.linkId===l.id); return c?{label:'Cabo físico', value:escapeHtml(c.nome)+' · '+c.tipo+' ('+c.totalFibras+' fibras)', full:true}:null; })(),
         l.freq ? {label:'Frequência', value:escapeHtml(l.freq)} : null,
         l.distancia ? {label:'Distância', value:escapeHtml(l.distancia)} : null,
@@ -2328,6 +2331,16 @@ function distanciaKm(a,b){
   return 2*R*Math.asin(Math.sqrt(h));
 }
 
+/* Comprimento exibido: length_m se o usuário informou ("informado"); senão a linha reta calculada na hora
+   (não é gravada; recalcula ao arrastar os pontos). O traçado real (rota + reservas) fica para a 1H. */
+function fmtLength(m){ return m>=1000 ? (m/1000).toFixed(2).replace('.',',')+' km' : Math.round(m)+' m'; }
+function linkLengthText(l){
+  if(l.lengthM!=null) return fmtLength(+l.lengthM)+' (informado)';
+  const a = nodeById(l.from), b = nodeById(l.to);
+  if(!a || !b || a.lat==null || b.lat==null) return '—';
+  return '≈ '+fmtLength(distanciaKm(a,b)*1000)+', linha reta';
+}
+
 /* O cabo nasce aqui, no mapa: junto com o trecho definimos fibras, tipo
    construtivo e distância. O diagrama da caixa só consome o que existe. */
 function openLinkTypeModal(origin, dest){
@@ -2399,7 +2412,7 @@ function openLinkTypeModal(origin, dest){
     if(!origin.dbId || !dest.dbId){ toast('Elemento ainda não salvo. Recarregue o mapa.'); return; }
     const fields = {
       link_type:type, from_node_id:origin.dbId, to_node_id:dest.dbId, lifecycle:document.getElementById('f-linklifecycle').value,
-      label:(origin.name+' → '+dest.name).slice(0,120), length_m:Math.round(km*1000*100)/100,
+      label:(origin.name+' → '+dest.name).slice(0,120),   // sem length_m: comprimento só quando informado
       from_port_id:portFieldValue('f-port-from'), to_port_id:portFieldValue('f-port-to')
     };
     const attrs = {};
@@ -2415,7 +2428,7 @@ function openLinkTypeModal(origin, dest){
     mapPost('/links', fields).then(data=>{
       closeModal(); clearMode();
       loadNetwork(()=>{
-        toastResult(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ${km.toFixed(2)} km.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`, data);
+        toastResult(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ≈ ${fmtLength(km*1000)} em linha reta.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`, data);
         const again = nodes.find(x=>x.dbId===dest.dbId);
         if(again) onNodeClick(again.id);
       });
@@ -2440,7 +2453,8 @@ function openLinkEditModal(l){
         <select id="f-lk-status">${['normal','alerta','critico','offline'].map(v=>`<option value="${v}" ${l.status===v?'selected':''}>${STATUS_LABEL[v]}</option>`).join('')}</select>
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lk-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(l)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
-      <div class="form-field"><label>Comprimento (metros)</label><input id="f-lk-len" type="number" min="0" step="0.01" value="${l.lengthM!=null?escapeHtml(l.lengthM):''}"></div>
+      <div class="form-field"><label>Comprimento informado (metros)</label><input id="f-lk-len" type="number" min="0" step="0.01" value="${l.lengthM!=null?escapeHtml(l.lengthM):''}" placeholder="vazio = linha reta calculada">
+        <div class="cable-meta">Vazio: o mapa mostra a linha reta calculada na hora.</div></div>
       ${fibra ? `<div class="form-field"><label>Nº de fibras</label><input id="f-lk-fo" type="number" min="1" max="288" value="${l.fiberCount||''}"></div>
       <div class="form-field"><label>Tipo construtivo</label><select id="f-lk-constr"><option value="">—</option>${construtivos.map(c=>`<option ${l.cabo_construtivo===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
     </div>
