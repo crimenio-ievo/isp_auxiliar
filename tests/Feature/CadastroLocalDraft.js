@@ -20,10 +20,13 @@ const context = vm.createContext({
     photoInput: null, citySelect: null, signatureInput: null, acceptanceSelect: null,
     cepInput: null, contractCommercialForm: null,
     updatePlanOptions() {}, updateGeoMapButton() {},
+    localDraftSaves: new WeakMap(), autosaveTimer: null,
+    document: {createElement: () => ({setAttribute() {}, focus() {this.focused = true;}})},
 });
 for (const name of ['safeJsonParse', 'getDraftStorageKey', 'isDraftSecurityField',
     'sanitizeLocalDraft', 'readDraftStorage', 'writeDraftStorage', 'collectFormState',
-    'applyDraftToField', 'restoreDraftToForm', 'getFormUploadSizeError']) {
+    'applyDraftToField', 'restoreDraftToForm', 'getFormUploadSizeError',
+    'showLocalDraftStatus', 'saveDraftFromForm', 'wireDraftSubmit']) {
     vm.runInContext(loadFunction(name), context);
 }
 (async () => {
@@ -67,6 +70,68 @@ for (const name of ['safeJsonParse', 'getDraftStorageKey', 'isDraftSecurityField
     assert.equal(context.getFormUploadSizeError(uploadForm), '');
     uploadForm.querySelector = () => ({});
     assert.match(context.getFormUploadSizeError(uploadForm), /Aguarde/);
+    function submitFixture() {
+        const handlers = [];
+        const target = {dataset: {draftKey: 'submit-test'}, elements: [
+            {name: 'nome_completo', type: 'text', value: 'Antes'},
+            {name: 'assinatura_cliente', type: 'hidden', value: 'assinatura-sintética'},
+        ], nativeSubmits: 0, status: null, reject: false,
+        querySelector: () => target.status,
+        prepend: (status) => {target.status = status;},
+        addEventListener: (type, handler) => handlers.push(handler),
+        requestSubmit(submitter) {
+            const event = target.event(submitter);
+            handlers.forEach((handler) => handler(event));
+            if (!event.defaultPrevented) target.nativeSubmits++;
+        },
+        event: (submitter) => ({submitter, defaultPrevented: target.reject,
+            preventDefault() {this.defaultPrevented = true;}}),
+        dispatch() {return Promise.all(handlers.map((handler) => handler(target.event())));},
+        };
+        context.wireDraftSubmit(target);
+        return target;
+    }
+    let releaseFiles;
+    let reads = 0;
+    context.collectFileState = () => {reads++; return new Promise((resolve) => {releaseFiles = resolve;});};
+    const submitting = submitFixture();
+    const first = submitting.dispatch();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(submitting.nativeSubmits, 0, 'Não pode navegar durante FileReader.');
+    await submitting.dispatch();
+    assert.equal(reads, 1, 'Clique duplo não inicia outro envio.');
+    submitting.elements[0].value = 'Durante leitura';
+    releaseFiles({'fotos_instalacao[]': [{dataUrl: 'data:image/jpeg;base64,AA=='}]});
+    await first;
+    assert.equal(submitting.nativeSubmits, 1);
+    const saved = JSON.parse(storage.get('submit-test'));
+    assert.equal(saved.nome_completo, 'Durante leitura');
+    assert.equal(saved.assinatura_cliente, 'assinatura-sintética');
+    assert.ok(saved.__files);
+    context.collectFileState = async () => ({});
+    const invalid = submitFixture();
+    invalid.reject = true;
+    await invalid.dispatch();
+    assert.equal(invalid.nativeSubmits, 0, 'Validador existente continua impedindo envio.');
+    const quota = submitFixture();
+    const originalSet = context.window.localStorage.setItem;
+    context.window.localStorage.setItem = () => {throw new Error('QuotaExceededError');};
+    await quota.dispatch();
+    assert.equal(quota.nativeSubmits, 0, 'Falha de quota mantém página.');
+    assert.match(quota.status.textContent, /Falha ao salvar/);
+    assert.equal(quota.status.focused, true);
+    context.window.localStorage.setItem = originalSet;
+    await quota.dispatch();
+    assert.equal(quota.nativeSubmits, 1, 'Após resolver quota permite tentar novamente.');
+    let activeReads = 0;
+    let maxReads = 0;
+    context.collectFileState = async () => {
+        activeReads++; maxReads = Math.max(maxReads, activeReads);
+        await Promise.resolve(); activeReads--; return {};
+    };
+    await Promise.all([context.saveDraftFromForm(quota), context.saveDraftFromForm(quota)]);
+    assert.equal(maxReads, 1, 'Autosave e submit são serializados por formulário.');
     console.log('OK: rascunhos antigos/novos preservam tokens do servidor e excluem credenciais.');
     console.log('OK: 3 fotos, limites por arquivo/POST, assinatura grande e compressão pendente.');
+    console.log('OK: submit aguarda arquivos, preserva assinatura, respeita validação, bloqueia clique duplo e exibe quota; salvamentos serializados.');
 })().catch((error) => {console.error(error); process.exitCode = 1;});

@@ -63,6 +63,7 @@ let hasSignatureStroke = false;
 let lastPoint = null;
 let activePointerId = null;
 let autosaveTimer = null;
+const localDraftSaves = new WeakMap();
 let autoGeoRequested = false;
 let mapInstance = null;
 let mapMarker = null;
@@ -282,15 +283,28 @@ function writeDraftStorage(form, payload) {
     const key = getDraftStorageKey(form);
 
     if (!key) {
-        return;
+        throw new Error('Rascunho local sem identificação.');
     }
 
     try {
         window.localStorage.setItem(key, JSON.stringify(sanitizeLocalDraft(payload)));
     } catch (error) {
-        // Se a quota do navegador estourar, o formulario continua funcionando
-        // com a sessao do servidor como fallback.
+        throw new Error('Não foi possível salvar o rascunho neste navegador: armazenamento cheio ou indisponível. Os dados continuam nesta página. Libere espaço ou reduza as fotos e tente novamente.');
     }
+}
+
+function showLocalDraftStatus(form, message, failed = false) {
+    let status = form.querySelector('[data-local-draft-status]');
+    if (!status) {
+        status = document.createElement('p');
+        status.setAttribute('data-local-draft-status', '');
+        status.setAttribute('tabindex', '-1');
+        form.prepend(status);
+    }
+    status.className = failed ? 'alert alert--error' : 'field-help';
+    status.setAttribute('role', failed ? 'alert' : 'status');
+    status.textContent = message;
+    return status;
 }
 
 function clearDraftStorageKeys(keys) {
@@ -698,14 +712,55 @@ async function collectFileState(form) {
 }
 
 async function saveDraftFromForm(form) {
-    const payload = collectFormState(form);
-    const files = await collectFileState(form);
+    const previous = localDraftSaves.get(form) || Promise.resolve();
+    const saving = previous.catch(() => {}).then(async () => {
+        try {
+            const files = await collectFileState(form);
+            const payload = collectFormState(form);
 
-    if (Object.keys(files).length > 0) {
-        payload.__files = files;
-    }
+            if (Object.keys(files).length > 0) {
+                payload.__files = files;
+            }
 
-    writeDraftStorage(form, payload);
+            writeDraftStorage(form, payload);
+            showLocalDraftStatus(form, 'Rascunho salvo neste navegador.');
+        } catch (error) {
+            showLocalDraftStatus(form, 'Falha ao salvar o rascunho local. Libere espaço ou reduza as fotos e tente novamente. Os dados continuam nesta página.', true);
+            throw error;
+        }
+    });
+    localDraftSaves.set(form, saving);
+    return saving;
+}
+
+function wireDraftSubmit(form) {
+    let pending = false;
+    let saved = false;
+    // Registrado depois dos validadores existentes; requestSubmit os executa novamente.
+    form.addEventListener('submit', async (event) => {
+        if (event.defaultPrevented || saved) {
+            return;
+        }
+        event.preventDefault();
+        if (pending) {
+            return;
+        }
+        pending = true;
+        const submitter = event.submitter;
+        try {
+            if (autosaveTimer) {
+                window.clearTimeout(autosaveTimer);
+            }
+            await saveDraftFromForm(form);
+            saved = true;
+            form.requestSubmit(submitter || undefined);
+        } catch (error) {
+            form.querySelector('[data-local-draft-status]')?.focus();
+        } finally {
+            saved = false;
+            pending = false;
+        }
+    });
 }
 
 function clearDraftStorageAndServer(form) {
@@ -879,7 +934,7 @@ function wireAutosave(form) {
 
         if (form.dataset.draftKey && form.dataset.draftKey.startsWith('client-acceptance')) {
             if (photoInput && photoInput.files && photoInput.files.length > 0) {
-                await saveDraftFromForm(form);
+                await saveDraftFromForm(form).catch(() => {});
             }
         }
     });
@@ -892,10 +947,6 @@ function wireAutosave(form) {
             window.location.href = buildAppUrl('/clientes/novo');
         });
     }
-
-    form.addEventListener('submit', () => {
-        saveDraftFromForm(form).catch(() => {});
-    });
 
     const focusFieldOnSubmit = (field) => {
         if (!field) {
@@ -4306,3 +4357,6 @@ if (focusOnLoad instanceof HTMLElement) {
         }
     });
 })();
+
+// Após os demais listeners para respeitar aceite, assinatura e validação de campos.
+autosaveForms.forEach((form) => wireDraftSubmit(form));

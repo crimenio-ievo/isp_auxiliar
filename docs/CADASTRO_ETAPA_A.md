@@ -50,3 +50,21 @@ O roteiro manual deve registrar os tamanhos reais exibidos com 3+ fotos.
 Validação: teste JS A1 ampliado para tamanho por arquivo, lote de fotos, assinatura,
 limite ilimitado e processamento pendente; node --check; php -l nas duas views.
 Reversão: `git revert <commit-A3>`. Nenhuma elevação de limite é necessária agora.
+
+## A4 — salvamento antes da navegação
+
+O submit aguarda leitura dos arquivos e gravação local antes de requestSubmit,
+que executa novamente os validadores existentes. O listener fica após os demais
+validadores; eventos já cancelados continuam cancelados. Clique duplo é bloqueado
+durante a gravação e o botão/valor original é preservado. Campos são coletados
+após a leitura dos arquivos. Salvamentos concorrentes são serializados por formulário.
+
+Falha de quota/leitura aparece em alerta dentro do formulário, inclusive durante
+autosave. No submit a página fica aberta e o alerta recebe foco; após liberar espaço
+ou reduzir fotos é possível tentar novamente. Não há promessa de persistência no
+servidor: o texto de sucesso diz “neste navegador”.
+
+Validação: testes JS com leitura retardada, clique duplo, assinatura, validador que
+cancela envio, quota cheia e nova tentativa, concorrência entre autosave e submit;
+node --check e regressões A1–A3. Sem PHP alterado neste commit, php -l não se aplica.
+Reversão: `git revert <commit-A4>`.
