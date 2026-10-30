@@ -47,7 +47,17 @@ final class MapController
         return Response::json(['ok' => true, 'data' => $data], 200, ['Cache-Control' => 'private, no-store']);
     }
 
-    private const NODE_TYPES = ['pop', 'tower', 'olt', 'switch', 'radio', 'ceo', 'cto'];
+    /*
+     * Categorias de nó:
+     * - contêiner (site): pop, tower — coordenada própria; tower pode ficar dentro de um pop.
+     * - equipamento: fica OBRIGATORIAMENTE dentro de um contêiner e não tem coordenada (herda a do site).
+     *   É também o ponto onde as portas da fase 1G vão se pendurar.
+     * - campo: ceo, cto — coordenada própria, sem pai.
+     */
+    private const CONTAINER_TYPES = ['pop', 'tower'];
+    private const EQUIPMENT_TYPES = ['olt', 'switch', 'router', 'radio', 'server', 'other'];
+    private const FIELD_TYPES = ['ceo', 'cto'];
+    private const NODE_TYPES = ['pop', 'tower', 'olt', 'switch', 'router', 'radio', 'server', 'other', 'ceo', 'cto'];
     private const NODE_STATUSES = ['normal', 'alerta', 'critico', 'offline'];
     private const NODE_LIFECYCLES = ['projeto', 'ativo', 'desativado'];
     private const ATTRS_MAX_BYTES = 4096;
@@ -409,15 +419,20 @@ final class MapController
         $fields = [];
         $has = static fn (string $key): bool => $request->input($key) !== null;
 
+        $existing = $selfId === null ? null : $this->mapRepository->findNode($providerId, $selfId);
         if ($creating) {
             $type = trim((string) $request->input('node_type', ''));
             if (!in_array($type, self::NODE_TYPES, true)) {
                 $errors[] = 'Tipo de elemento inválido.';
             }
             $fields['node_type'] = $type;
-        } elseif ($has('node_type')) {
-            $errors[] = 'O tipo do elemento não pode ser alterado.';
+        } else {
+            $type = (string) ($existing['node_type'] ?? '');
+            if ($has('node_type') && trim((string) $request->input('node_type')) !== $type) {
+                $errors[] = 'O tipo do elemento não pode ser alterado.';
+            }
         }
+        $isEquipment = in_array($type, self::EQUIPMENT_TYPES, true);
 
         if ($creating || $has('name')) {
             $name = trim((string) $request->input('name', ''));
@@ -435,7 +450,14 @@ final class MapController
             $fields['code'] = $code === '' ? null : $code;
         }
 
-        foreach (['lat' => 90.0, 'lng' => 180.0] as $key => $limit) {
+        if ($isEquipment) {
+            // Equipamento não tem posição própria: usa a do contêiner.
+            if ($creating || $has('lat') || $has('lng') || ($existing !== null && ($existing['lat'] !== null || $existing['lng'] !== null))) {
+                $fields['lat'] = null;
+                $fields['lng'] = null;
+            }
+        }
+        foreach ($isEquipment ? [] : ['lat' => 90.0, 'lng' => 180.0] as $key => $limit) {
             if ($creating || $has($key)) {
                 $raw = $request->input($key);
                 if (!is_numeric($raw) || abs((float) $raw) > $limit) {
@@ -470,22 +492,36 @@ final class MapController
             $fields['notes'] = $notes === '' ? null : $notes;
         }
 
-        if ($has('parent_node_id')) {
-            $rawParent = trim((string) $request->input('parent_node_id'));
-            if ($rawParent === '') {
-                $fields['parent_node_id'] = null;
-            } else {
+        if ($creating || $has('parent_node_id')) {
+            $rawParent = trim((string) $request->input('parent_node_id', ''));
+            $parent = null;
+            if ($rawParent !== '') {
                 $parentId = $this->intOrNull($rawParent);
-                if ($parentId === null || $parentId === $selfId) {
-                    $errors[] = 'Elemento pai inválido.';
-                } elseif ($this->mapRepository->findNode($providerId, $parentId) === null) {
+                $parent = $parentId === null ? null : $this->mapRepository->findNode($providerId, $parentId);
+                if ($parent === null) {
                     $errors[] = 'Elemento pai não encontrado.';
+                } elseif ($parentId === $selfId) {
+                    $errors[] = 'Um elemento não pode estar dentro dele mesmo.';
                 } elseif ($selfId !== null && in_array($parentId, $this->mapRepository->descendantIds($providerId, $selfId), true)) {
                     $errors[] = 'Elemento pai inválido (geraria um ciclo).';
-                } else {
-                    $fields['parent_node_id'] = $parentId;
                 }
             }
+            $parentType = (string) ($parent['node_type'] ?? '');
+
+            if ($isEquipment) {
+                if ($rawParent === '') {
+                    $errors[] = 'Equipamento precisa estar dentro de um POP ou torre.';
+                } elseif ($parent !== null && !in_array($parentType, self::CONTAINER_TYPES, true)) {
+                    $errors[] = 'Equipamento só pode ficar dentro de um POP ou torre.';
+                }
+            } elseif ($type === 'tower') {
+                if ($parent !== null && $parentType !== 'pop') {
+                    $errors[] = 'Torre só pode ficar dentro de um POP.';
+                }
+            } elseif ($rawParent !== '' && $type !== '') {
+                $errors[] = ($type === 'pop' ? 'POP' : strtoupper($type)) . ' não pode ficar dentro de outro elemento.';
+            }
+            $fields['parent_node_id'] = $parent === null ? null : (int) $parent['id'];
         }
 
         if ($creating || $has('attrs')) {

@@ -442,6 +442,18 @@ button{font-family:inherit;}
 .status-pill.lc-projeto{background:rgba(88,166,255,.12);color:#58a6ff;}.status-pill.lc-projeto .d{background:#58a6ff;}
 .status-pill.lc-ativo{background:rgba(139,148,158,.12);color:#9aa4b2;}.status-pill.lc-ativo .d{background:#9aa4b2;}
 .status-pill.lc-desativado{background:rgba(110,118,129,.12);color:#6e7681;}.status-pill.lc-desativado .d{background:#6e7681;}
+.site-pick{background:rgba(79,209,197,.08);border:1px solid rgba(79,209,197,.35);border-radius:6px;padding:8px;margin:8px 0;font-size:11.5px;line-height:1.6;}
+.site-group{margin-bottom:10px;}
+.site-group-title{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin:6px 0 4px;}
+.site-eq{border:1px solid var(--border-soft);border-radius:6px;padding:7px 8px;margin-bottom:6px;}
+.site-eq.hl{border-color:#4fd1c5;box-shadow:0 0 0 1px #4fd1c5 inset;}
+.site-eq-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;}
+.site-eq-head .status-pill{margin-top:0;}
+.site-eq-meta{font-size:10.5px;color:var(--text-dim);margin-top:3px;}
+.site-eq-links{font-size:10.5px;color:var(--text-dim);margin:4px 0;line-height:1.5;}
+.site-eq .action-row{margin-top:4px;}
+.site-add{display:flex;gap:6px;align-items:center;margin:10px 0;}
+.site-add select{background:var(--bg-panel-alt);color:inherit;border:1px solid var(--border);border-radius:4px;padding:4px;font-size:11px;}
 </style>
 </head>
 <body>
@@ -582,13 +594,34 @@ const ICON_PATHS = {
   cto:      '<rect x="3.5" y="6" width="17" height="13" rx="1.5"/><line x1="3.5" y1="11" x2="20.5" y2="11"/><line x1="8" y1="11" x2="8" y2="19"/><line x1="12" y1="11" x2="12" y2="19"/><line x1="16" y1="11" x2="16" y2="19"/>',
   splitter: '<path d="M3 12h5.5L15 5.5"/><path d="M8.5 12L15 18.5"/><path d="M15 5.5h6"/><path d="M15 18.5h6"/>',
   client:   '<path d="M12 3 L21 10.5 V21 H3 V10.5 Z"/><rect x="9.7" y="13.5" width="4.6" height="7.5"/>',
-  ceo:      '<rect x="2.5" y="8.5" width="19" height="7" rx="3.5"/><circle cx="7" cy="12" r="1.15"/><circle cx="12" cy="12" r="1.15"/><circle cx="17" cy="12" r="1.15"/>'
+  ceo:      '<rect x="2.5" y="8.5" width="19" height="7" rx="3.5"/><circle cx="7" cy="12" r="1.15"/><circle cx="12" cy="12" r="1.15"/><circle cx="17" cy="12" r="1.15"/>',
+  router:   '<circle cx="12" cy="12" r="8.5"/><path d="M8 9h8M13.5 6.5L16 9l-2.5 2.5M16 15H8M10.5 12.5L8 15l2.5 2.5"/>',
+  server:   '<rect x="4" y="3.5" width="16" height="7" rx="1.2"/><rect x="4" y="13.5" width="16" height="7" rx="1.2"/><circle cx="8" cy="7" r="1"/><circle cx="8" cy="17" r="1"/>',
+  other:    '<rect x="4" y="6" width="16" height="12" rx="1.5"/><line x1="8" y1="12" x2="16" y2="12"/>'
 };
-const TYPE_LABEL = {pop:'POP',olt:'OLT',switch:'Switch',tower:'Torre',radio:'Rádio/AP',cto:'CTO',splitter:'Splitter',client:'Cliente',ceo:'CEO'};
-const TYPE_ORDER = ['pop','tower','olt','switch','radio','ceo','cto','splitter','client'];
+const TYPE_LABEL = {pop:'POP',olt:'OLT',switch:'Switch',router:'Roteador',server:'Servidor',other:'Outro',tower:'Torre',radio:'Rádio/AP',cto:'CTO',splitter:'Splitter',client:'Cliente',ceo:'CEO'};
+const TYPE_ORDER = ['pop','tower','olt','switch','router','radio','server','other','ceo','cto','splitter','client'];
+/* Categorias (mesmas regras do servidor):
+   contêiner (site) — pop, tower: ícone no mapa, coordenada própria; tower pode ficar dentro de um pop.
+   equipamento — fica dentro de um contêiner, sem coordenada própria (usa a do site) e sem ícone próprio no mapa.
+                 É onde as portas da fase 1G vão se pendurar (tipo rj45/sfp/pon/fibra, externa/interna).
+   campo — ceo, cto: coordenada própria, sem pai. */
+const CONTAINER_TYPES = ['pop','tower'];
+const EQUIPMENT_TYPES = ['olt','switch','router','radio','server','other'];
+const FIELD_TYPES = ['ceo','cto'];
+const isContainer = n => !!n && CONTAINER_TYPES.includes(n.type);
+const isEquipment = n => !!n && EQUIPMENT_TYPES.includes(n.type);
+/* Nó que representa x no mapa: o próprio site para equipamentos. */
+function siteOf(x){ return x && x.siteId ? (nodeById(x.siteId) || x) : x; }
+function equipmentOf(site){ return nodes.filter(x=>x.siteId===site.id); }
+/* Ligação interna: as duas pontas no mesmo site (equipamento↔equipamento ou site↔equipamento dele). */
+function isInternalLink(l){
+  const a = siteOf(nodeById(l.from)), b = siteOf(nodeById(l.to));
+  return !!a && !!b && a.id===b.id;
+}
 const STATUS_COLOR = {normal:'#3fb950',alerta:'#d29922',critico:'#f85149',offline:'#6e7681',livre:'#3a4353'};
 const STATUS_LABEL = {normal:'Online / Normal',alerta:'Atenção',critico:'Crítico',offline:'Offline',livre:'Livre'};
-const ICON_SIZE = {pop:30,tower:30,olt:26,switch:24,radio:22,ceo:22,cto:20,splitter:16,client:17};
+const ICON_SIZE = {pop:30,tower:30,olt:26,switch:24,router:24,radio:22,server:24,other:22,ceo:22,cto:20,splitter:16,client:17};
 const FIBER_COLOR_HEX = {'Azul':'#3b82f6','Laranja':'#f97316','Verde':'#22c55e','Marrom':'#92400e','Cinza':'#9ca3af','Violeta':'#a855f7','Branco':'#f1f5f9','Vermelho':'#ef4444','Preto':'#111827','Amarelo':'#eab308','Rosa':'#ec4899','Aqua':'#06b6d4'};
 // Sequência de cores padrão ABNT (usada no Brasil). A fibra 6 = Violeta bate com o
 // exemplo que você descreveu, o que indica que sua rede segue esta sequência.
@@ -719,9 +752,9 @@ function applyTopology(data){
   const rawLinks = Array.isArray(data.links) ? data.links : [];
   const byDb = {};
   rawNodes.forEach(r=>{
-    if(r.lat==null || r.lng==null) return;            // sem coordenada não há onde desenhar
     const n = Object.assign({}, r.attrs_json||{}, {
       id:'n'+r.id, dbId:r.id, type:r.node_type, name:r.name, code:r.code, lat:r.lat, lng:r.lng,
+      parentDbId:r.parent_node_id, _inherit:(r.lat==null || r.lng==null),
       status:r.status||'normal', lifecycle:r.lifecycle||'ativo', parent:null, parentLink:null, notes:r.notes, desc:r.notes||'',
       _attrs:Object.assign({}, r.attrs_json||{})
     });
@@ -729,6 +762,15 @@ function applyTopology(data){
     if(n.type==='switch'){ n.ports24 = n.ports24||24; n.used = n.used||0; }
     nodes.push(n); byDb[r.id] = n;
   });
+  // Sem coordenada própria: posição do contêiner (subindo a cadeia). Sem nenhuma na cadeia, não há onde desenhar.
+  nodes.forEach(n=>{
+    if(!n._inherit) return;
+    let p = byDb[n.parentDbId], guard = 0;
+    while(p && p._inherit && guard++ < 20) p = byDb[p.parentDbId];
+    if(p && !p._inherit){ n.lat = p.lat; n.lng = p.lng; } else delete byDb[n.dbId];
+  });
+  nodes = nodes.filter(n=> byDb[n.dbId]===n);
+  nodes.forEach(n=>{ if(isEquipment(n) && byDb[n.parentDbId]) n.siteId = byDb[n.parentDbId].id; });
   rawPorts.forEach(r=>{
     const n = byDb[r.node_id]; if(!n) return;
     const a = r.attrs_json||{};
@@ -970,6 +1012,7 @@ function zoomBy(factor, ax, ay){
 /* ---- render ---- */
 function renderAll(){
   measureMap();
+  nodes.forEach(n=>{ if(n._inherit && n.siteId){ const st = nodeById(n.siteId); if(st){ n.lat = st.lat; n.lng = st.lng; } } });
   const parts = [];
   parts.push(`<svg id="map-svg" width="${mapW}" height="${mapH}" viewBox="0 0 ${mapW} ${mapH}">`);
   renderTiles(parts);
@@ -977,7 +1020,8 @@ function renderAll(){
   // links (abaixo dos nós)
   links.forEach(l=>{
     if(!linkVisible(l)) return;
-    const a=nodeById(l.from), b=nodeById(l.to);
+    if(isInternalLink(l)) return;                 // interna ao site: só aparece no painel do site
+    const a=nodeById(l.from), b=nodeById(l.to);   // equipamento já está na posição do site
     const st = LINK_TYPE_STYLE[l.type];
     let color=st.color, opacity=.85, weight=st.weight;
     if(l.status==='offline') color=STATUS_COLOR.offline;
@@ -1000,6 +1044,7 @@ function renderAll(){
   // nós
   nodes.forEach(n=>{
     if(!nodeVisible(n)) return;
+    if(isEquipment(n)) return;                    // equipamento é desenhado pelo site (selo com a contagem)
     const p = toScreen(n.lat,n.lng);
     if(p.x<-120||p.x>mapW+120||p.y<-120||p.y>mapH+120) return;   // fora da tela: não desenha
     const dim = pathHighlight && !pathHighlight.nodeIds.has(n.id);
@@ -1013,6 +1058,10 @@ function renderAll(){
     if(n.id===selectedNodeId) parts.push(`<circle r="${r+4}" fill="none" stroke="#4fd1c5" stroke-width="2.5" opacity=".75"/>`);
     parts.push(`<circle r="${r}" fill="#11151c" stroke="${color}" stroke-width="2"${lc==='projeto'?' stroke-dasharray="4,3"':''}/>`);
     parts.push(nodeIconSVG(n.type, color, size*0.62));
+    if(isContainer(n)){
+      const qtd = equipmentOf(n).length;
+      if(qtd) parts.push(`<g class="msite-badge" transform="translate(${r-1},${-r+1})"><circle r="7.5" fill="#4fd1c5" stroke="#0a0d12" stroke-width="1.5"/><text text-anchor="middle" y="3.2" font-size="9" font-weight="700" fill="#04211f">${qtd}</text></g>`);
+    }
     parts.push(`</g>`);
     if(['pop','olt','switch','tower','cto','ceo'].includes(n.type)){
       parts.push(`<text class="mlabel${dim?' dim':''}" x="${p.x+r+6}" y="${p.y+4}">${escapeHtml(n.name)}</text>`);
@@ -1061,7 +1110,7 @@ function localPt(e){
 function snapTargetAt(x,y,excludeId){
   let best=null, bestD=34;
   nodes.forEach(n=>{
-    if(n.id===excludeId || !nodeVisible(n)) return;
+    if(n.id===excludeId || !nodeVisible(n) || isEquipment(n)) return;
     const p=toScreen(n.lat,n.lng);
     const d=Math.hypot(p.x-x,p.y-y);
     if(d<bestD){ bestD=d; best=n.id; }
@@ -1289,11 +1338,22 @@ function statusPill(status){
   return `<span class="status-pill st-${status}"><span class="d"></span>${STATUS_LABEL[status]||status}</span>`;
 }
 
-function onNodeClick(nodeId){
+function onNodeClick(nodeId, opts){
   if(mode==='placing') return; // ignora cliques em nós durante posicionamento
+  const target = nodeById(nodeId);
   if(mode==='linking-dest'){
     if(nodeId===linkOrigin.id){ toast('Selecione um nó diferente da origem.'); return; }
-    openLinkTypeModal(linkOrigin, nodeById(nodeId));
+    if(!(opts && opts.pick) && isContainer(target) && equipmentOf(target).some(e=>e.id!==linkOrigin.id)){
+      openNodePanel(target.id, {picking:true});   // escolher o equipamento de destino (ou o próprio site)
+      return;
+    }
+    openLinkTypeModal(linkOrigin, target);
+    return;
+  }
+  if(isEquipment(target) && target.siteId){
+    selectedLinkId = null; selectedNodeId = target.siteId; pathHighlight = null;
+    renderAll();
+    openNodePanel(target.siteId, {highlight:target.id});
     return;
   }
   selectedLinkId = null;
@@ -1369,7 +1429,7 @@ function closePanel(){
   renderAll();
 }
 
-function openNodePanel(nodeId){
+function openNodePanel(nodeId, opts){
   const n = nodeById(nodeId);
   const panel = document.getElementById('panel-right');
   panel.classList.add('show');
@@ -1379,8 +1439,7 @@ function openNodePanel(nodeId){
   else if(n.type==='ceo') body = renderCeoBody(n);
   else if(n.type==='olt') body = renderOLTBody(n);
   else if(n.type==='switch') body = renderSwitchBody(n);
-  else if(n.type==='pop') body = renderPopBody(n);
-  else if(n.type==='tower') body = renderTowerBody(n);
+  else if(isContainer(n)) body = renderSiteBody(n, opts||{});
   else if(n.type==='radio') body = renderRadioBody(n);
   else if(n.type==='splitter') body = renderSplitterBody(n);
   else if(n.type==='client') body = renderClientBody(n);
@@ -1400,6 +1459,7 @@ function openNodePanel(nodeId){
   `;
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
   bindPanelActions(n);
+  if(isContainer(n)) bindSitePanel(n, opts||{});
 }
 
 function fieldsHtml(fields){
@@ -1407,25 +1467,6 @@ function fieldsHtml(fields){
     if(!f) return '';
     return `<div class="field${f.full?' full':''}"><label>${f.label}</label><div class="val${f.big?' big':''}">${f.value}</div></div>`;
   }).join('') + '</div>';
-}
-
-function renderPopBody(n){
-  const children = links.filter(l=>l.from===n.id);
-  return `
-    ${fieldsHtml([
-      {label:'IP de gerência', value:escapeHtml(n.ip||'—')},
-      {label:'Elementos conectados', value:children.length},
-      {label:'Observação', value:escapeHtml(n.desc||'—'), full:true}
-    ])}
-    <div class="section-title">Equipamentos / enlaces</div>
-    <div class="port-list">
-      ${children.map(l=>{
-        const dst = nodeById(l.to);
-        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR[dst.status]}"></span><span class="pl">${escapeHtml(dst.name)}</span><span class="pf">${TYPE_LABEL[dst.type]}</span></div>`;
-      }).join('') || '<div class="empty-state">Nenhum elemento conectado.</div>'}
-    </div>
-    ${actionRow(n)}
-  `;
 }
 
 function renderOLTBody(n){
@@ -1471,24 +1512,77 @@ function renderSwitchBody(n){
   `;
 }
 
-function renderTowerBody(n){
-  const children = links.filter(l=>l.from===n.id && nodeById(l.to).type==='radio');
-  const upstream = n.parentLink ? linkById(n.parentLink) : null;
-  return `
-    ${fieldsHtml([
-      {label:'Altura', value:escapeHtml(n.altura||'—')},
-      {label:'Rádios instalados', value:children.length},
-      upstream ? {label:'Enlace upstream', value:(upstream.freq||'')+' · '+(upstream.distancia||''), full:true} : null
-    ])}
-    <div class="section-title">Rádios / APs</div>
-    <div class="port-list">
-      ${children.map(l=>{
-        const dst = nodeById(l.to);
-        return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR[dst.status]}"></span><span class="pl">${escapeHtml(dst.name)}</span><span class="pf">${dst.freq||''}</span></div>`;
-      }).join('') || '<div class="empty-state">Nenhum rádio instalado.</div>'}
-    </div>
-    ${actionRow(n)}
-  `;
+/* ---- visão do site (POP/Torre): equipamentos agrupados por tipo, com as ligações de cada um ---- */
+function renderSiteBody(n, opts){
+  const eqs = equipmentOf(n);
+  const towers = nodes.filter(x=>x.type==='tower' && x.parentDbId===n.dbId);
+  const picking = !!opts.picking;
+  let h = fieldsHtml([
+    n.type==='pop' ? {label:'IP de gerência', value:escapeHtml(n.ip||'—')} : {label:'Altura', value:escapeHtml(n.altura||'—')},
+    {label:'Equipamentos', value:eqs.length},
+    {label:'Observação', value:escapeHtml(n.desc||'—'), full:true}
+  ]);
+  if(picking) h += `<div class="site-pick">Destino da ligação a partir de <b>${escapeHtml(linkOrigin.name)}</b>: escolha um equipamento abaixo ou
+      <button class="btn btn-sm" id="btn-pick-site">o próprio ${TYPE_LABEL[n.type]}</button></div>`;
+  h += `<div class="section-title">Equipamentos (${eqs.length})</div>`;
+  const grupos = EQUIPMENT_TYPES.map(t=>[t, eqs.filter(e=>e.type===t)]).filter(g=>g[1].length);
+  if(!grupos.length) h += '<div class="empty-state">Nenhum equipamento cadastrado neste site.</div>';
+  grupos.forEach(([t, lista])=>{
+    h += `<div class="site-group"><div class="site-group-title">${TYPE_LABEL[t]} (${lista.length})</div>`;
+    lista.forEach(e=>{
+      const ls = links.filter(l=>l.from===e.id || l.to===e.id);
+      const meta = [e.fabricante, e.modelo].filter(Boolean).join(' · ');
+      h += `<div class="site-eq${opts.highlight===e.id?' hl':''}" data-eq="${e.id}">
+        <div class="site-eq-head"><b>${escapeHtml(e.name)}</b>${statusPill(e.status)}${lifecyclePill(e)}</div>
+        ${meta ? `<div class="site-eq-meta">${escapeHtml(meta)}</div>` : ''}
+        <div class="site-eq-links">${ls.map(l=>{
+          const o = nodeById(l.from===e.id ? l.to : l.from);
+          const interna = isInternalLink(l);
+          const onde = o && o.siteId && !interna ? ' ('+escapeHtml(siteOf(o).name)+')' : '';
+          return `<div>${interna?'interna':'externa'} · ${escapeHtml(LINK_TYPE_LABEL[l.type]||l.type)} → ${escapeHtml(o?o.name:'?')}${onde}</div>`;
+        }).join('') || '<div class="muted">sem ligações</div>'}</div>
+        <div class="action-row">${picking
+          ? (e.id!==linkOrigin.id ? `<button class="btn btn-sm btn-accent" data-eq-pick="${e.id}">Ligar a este</button>` : '<span class="muted">origem</span>')
+          : `<button class="btn btn-sm" data-eq-edit="${e.id}">Editar</button><button class="btn btn-sm" data-eq-link="${e.id}">Conectar</button><button class="btn btn-sm btn-danger" data-eq-del="${e.id}">Excluir</button>`}</div>
+      </div>`;
+    });
+    h += '</div>';
+  });
+  if(towers.length){
+    h += `<div class="section-title">Torres neste POP</div><div class="port-list">${towers.map(t=>
+      `<div class="port-row" data-open-node="${t.id}" style="cursor:pointer"><span class="pd" style="background:${STATUS_COLOR[t.status]||'#8a92a3'}"></span><span class="pl">${escapeHtml(t.name)}</span><span class="pf">${equipmentOf(t).length} equip.</span></div>`).join('')}</div>`;
+  }
+  if(!picking){
+    const tipos = EQUIPMENT_TYPES.concat(n.type==='pop' ? ['tower'] : []);
+    h += `<div class="site-add"><select id="site-add-type">${tipos.map(t=>`<option value="${t}">${TYPE_LABEL[t]}</option>`).join('')}</select>
+      <button class="btn btn-accent btn-sm" id="btn-site-add">Adicionar equipamento aqui dentro</button></div>`;
+    h += actionRow(n);
+  }
+  return h;
+}
+function bindSitePanel(n, opts){
+  const panel = document.getElementById('panel-right');
+  const on = (sel, fn)=> panel.querySelectorAll(sel).forEach(el=> el.addEventListener('click', ()=> fn(el)));
+  on('[data-eq-edit]', el=> openEditModal(nodeById(el.getAttribute('data-eq-edit'))));
+  on('[data-eq-link]', el=> startLinking(nodeById(el.getAttribute('data-eq-link'))));
+  on('[data-eq-del]', el=>{
+    const e = nodeById(el.getAttribute('data-eq-del'));
+    if(e && confirm('Excluir "'+e.name+'"? Só é possível se não tiver ligações.')) deleteNode(e.id);
+  });
+  on('[data-eq-pick]', el=> onNodeClick(el.getAttribute('data-eq-pick'), {pick:true}));
+  on('[data-open-node]', el=> onNodeClick(el.getAttribute('data-open-node')));
+  const pickSite = document.getElementById('btn-pick-site');
+  if(pickSite) pickSite.addEventListener('click', ()=> onNodeClick(n.id, {pick:true}));
+  const add = document.getElementById('btn-site-add');
+  if(add) add.addEventListener('click', ()=>{
+    const t = document.getElementById('site-add-type').value;
+    // torre é contêiner: precisa de coordenada própria (começa na do POP); equipamento não tem posição
+    openCreateModal(t, t==='tower' ? {lat:n.lat, lng:n.lng} : null, {parent:n});
+  });
+  if(opts.highlight){
+    const el = panel.querySelector(`.site-eq[data-eq="${opts.highlight}"]`);
+    if(el && el.scrollIntoView) el.scrollIntoView({block:'nearest'});
+  }
 }
 
 function renderRadioBody(n){
@@ -1918,7 +2012,7 @@ searchInput.addEventListener('input', ()=>{
   const matches = coord ? [] : nodes.filter(n=> n.name.toLowerCase().includes(q)).slice(0,10);
   let htmlOut = '';
   if(coord) htmlOut += `<div class="search-item" data-coord="1"><span>Ir para ${fmtCoord(coord.lat)}, ${fmtCoord(coord.lng)}</span><small>coordenada</small></div>`;
-  htmlOut += matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}</small></div>`).join('');
+  htmlOut += matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}${n.siteId ? ' · '+escapeHtml(siteOf(n).name) : ''}</small></div>`).join('');
   if(!htmlOut) htmlOut = '<div class="search-item">Nenhum resultado</div>';
   searchResults.innerHTML = htmlOut;
   searchResults.classList.add('show');
@@ -1949,7 +2043,7 @@ document.addEventListener('click', (e)=>{
    ADICIONAR ELEMENTO
    ============================================================ */
 const addMenu = document.getElementById('add-menu');
-const ADDABLE = ['pop','olt','switch','radio','tower','ceo','cto'];   // cliente e splitter: fases seguintes
+const ADDABLE = ['pop','tower','ceo','cto'];   // equipamentos entram pelo painel do site; cliente e splitter: fases seguintes
 addMenu.innerHTML = ADDABLE.map(t=>`
   <div class="add-menu-item" data-type="${t}">
     <svg viewBox="0 0 24 24" fill="none" stroke="${STATUS_COLOR.normal}" stroke-width="1.8">${ICON_PATHS[t]}</svg>
@@ -1999,7 +2093,7 @@ const modalEl = document.getElementById('modal-el');
 function closeModal(){ overlay.classList.remove('show'); modalEl.innerHTML=''; }
 overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
 
-const NAME_PREFIX = {pop:'POP', tower:'TORRE', olt:'OLT', switch:'SW', radio:'AP', ceo:'CEO', cto:'CTO'};
+const NAME_PREFIX = {pop:'POP', tower:'TORRE', olt:'OLT', switch:'SW', router:'RT', radio:'AP', server:'SRV', other:'EQP', ceo:'CEO', cto:'CTO'};
 /* Próximo nome da sequência do tipo: PREFIXO-NNN, maior número existente + 1 (001 se não houver). */
 function nextNodeName(type){
   const prefix = NAME_PREFIX[type] || String(type).toUpperCase();
@@ -2008,12 +2102,15 @@ function nextNodeName(type){
   nodes.forEach(n=>{ if(n.type!==type) return; const m = String(n.name||'').match(re); if(m) max = Math.max(max, parseInt(m[1],10)); });
   return prefix+'-'+String(max+1).padStart(3,'0');
 }
-function openCreateModal(type, latlng){
+function openCreateModal(type, latlng, opts){
+  opts = opts || {};
+  const parent = opts.parent || null;
+  const equip = EQUIPMENT_TYPES.includes(type);
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Novo elemento — ${TYPE_LABEL[type]}</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
-      <div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
-      <div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>
+      ${parent ? `<div class="cable-meta">Dentro de: ${escapeHtml(parent.name)} (${TYPE_LABEL[parent.type]})</div>` : ''}
+      ${latlng ? `<div class="cable-meta">Posição: ${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>` : '<div class="cable-meta">Sem posição própria: usa a do site.</div>'}
       <div class="form-field"><label>Nome</label><input id="f-name" type="text" maxlength="120" value="${escapeHtml(nextNodeName(type))}"></div>
       <div class="form-field"><label>Status</label>
         <select id="f-status">
@@ -2024,6 +2121,8 @@ function openCreateModal(type, latlng){
         </select>
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lifecycle"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
+      ${equip ? `<div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" placeholder="Opcional"></div>
+      <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" placeholder="Opcional"></div>` : ''}
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2" placeholder="Opcional"></textarea></div>
       ${type==='cto' ? `<div class="form-field"><label>Número de portas</label><input id="f-cap" type="number" min="1" max="144" value="16"></div>` : ''}
     </div>
@@ -2043,9 +2142,15 @@ function openCreateModal(type, latlng){
     if(!name){ toast('Informe o nome do elemento.'); return; }
     const attrs = {};
     if(type==='cto') attrs.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||16));
+    if(equip){
+      const fab = document.getElementById('f-fab').value.trim(), mod = document.getElementById('f-modelo').value.trim();
+      if(fab) attrs.fabricante = fab;
+      if(mod) attrs.modelo = mod;
+    }
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
     mapPost('/nos', {
-      node_type:type, name, lat:latlng.lat, lng:latlng.lng,
+      node_type:type, name, lat:latlng ? latlng.lat : null, lng:latlng ? latlng.lng : null,
+      parent_node_id:parent ? parent.dbId : null,
       status:document.getElementById('f-status').value, lifecycle:document.getElementById('f-lifecycle').value,
       notes:document.getElementById('f-obs').value.trim(),
       attrs:JSON.stringify(attrs)
@@ -2065,6 +2170,8 @@ function openCreateModal(type, latlng){
    ============================================================ */
 function openEditModal(n){
   const isCTO = n.type==='cto';
+  const equip = isEquipment(n);
+  const sites = equip ? nodes.filter(isContainer) : [];
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Editar — ${escapeHtml(n.name)}</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
@@ -2078,6 +2185,9 @@ function openEditModal(n){
         </select>
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(n)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
+      ${equip ? `<div class="form-field"><label>Site (POP/Torre)</label><select id="f-site">${sites.map(st=>`<option value="${st.dbId}" ${st.dbId===n.parentDbId?'selected':''}>${escapeHtml(st.name)} (${TYPE_LABEL[st.type]})</option>`).join('')}</select></div>
+      <div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" value="${escapeHtml(n.fabricante||'')}"></div>
+      <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" value="${escapeHtml(n.modelo||'')}"></div>` : ''}
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2">${escapeHtml(n.desc||'')}</textarea></div>
       ${isCTO ? `<div class="form-field"><label>Número de portas (atual: ${n.capacity||0})</label><input id="f-cap" type="number" min="1" max="144" value="${n.capacity||16}"></div>` : ''}
     </div>
@@ -2094,15 +2204,24 @@ function openEditModal(n){
     if(!name){ toast('Informe o nome do elemento.'); return; }
     const overrides = {};
     if(isCTO) overrides.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||n.capacity||16));
+    const extra = {};
+    if(equip){
+      overrides.fabricante = document.getElementById('f-fab').value.trim();
+      overrides.modelo = document.getElementById('f-modelo').value.trim();
+      const siteSel = document.getElementById('f-site');
+      if(siteSel && siteSel.value && +siteSel.value!==n.parentDbId) extra.parent_node_id = siteSel.value;   // mover entre sites
+    }
+    const attrs = Object.assign({}, n._attrs||{}, overrides);
+    ['fabricante','modelo'].forEach(k=>{ if(attrs[k]==='') delete attrs[k]; });
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
-    mapPost('/nos/editar', {
+    mapPost('/nos/editar', Object.assign({
       id:n.dbId, name, status:document.getElementById('f-status').value, lifecycle:document.getElementById('f-lifecycle').value,
-      notes:document.getElementById('f-obs').value.trim(), attrs:nodeAttrsJson(n, overrides)
-    }).then(()=>{
+      notes:document.getElementById('f-obs').value.trim(), attrs:JSON.stringify(attrs)
+    }, extra)).then(()=>{
       closeModal();
       loadNetwork(()=>{
         const again = nodes.find(x=>x.dbId===n.dbId);
-        if(again) openNodePanel(again.id);
+        if(again) onNodeClick(again.id);
         toast('Alterações salvas.');
       });
     }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
