@@ -345,6 +345,14 @@ button{font-family:inherit;}
 .port-row.free .pd{background:var(--text-faint);}
 .port-row.free .pl{color:var(--text-faint);font-style:italic;}
 .port-row.alerta .pd{background:var(--yellow);}
+.port-row[data-port]{cursor:pointer;}
+.port-row.defeito .pd{background:var(--red,#f85149);}
+.eq-ports{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0;}
+.eq-port{font:inherit;font-size:9.5px;font-family:var(--font-mono);background:transparent;color:var(--text-dim);border:1px solid var(--border-soft);border-radius:4px;padding:1px 5px;cursor:pointer;}
+.eq-port.occ{color:var(--text);border-color:var(--green);}
+.eq-port.st-reservada{border-style:dashed;}
+.eq-port.st-defeito{border-color:var(--red,#f85149);color:var(--red,#f85149);}
+.eq-port .m{color:var(--text-faint);}
 
 .pon-card{background:var(--bg-input);border:1px solid var(--border-soft);border-radius:5px;padding:8px 9px;margin-bottom:6px;}
 .pon-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
@@ -634,6 +642,30 @@ function portById(id){ return id ? ports.find(p=>p.id===id) || null : null; }
 function linkOfPort(portId){ return links.find(l=>l.fromPort===portId || l.toPort===portId) || null; }
 /* Pontas possíveis ao refinar um trecho: o site da ponta atual e os equipamentos dele (o servidor confere). CTO/CEO: só ela mesma. */
 function endpointChoices(n){ const st = siteOf(n); return isContainer(st) ? [st].concat(equipmentOf(st)) : [n]; }
+/* Compatibilidade porta × ligação (mesmas regras do servidor): mídia × meio do tipo, externa se sair do site, sem defeito. */
+const LINK_MEDIUM = {backbone:'fibra', distribuicao:'fibra', drop:'fibra', ethernet:'cabo', wireless:'radio'};
+const PORT_MEDIA_BY_MEDIUM = {fibra:['pon','fibra','sfp'], cabo:['rj45','sfp'], radio:[]};
+const PORT_STATUS_LABEL = {livre:'normal', reservada:'reservada', defeito:'com defeito'};
+function sameSiteNodes(a, b){ const x = siteOf(a), y = siteOf(b); return isContainer(x) && !!y && x.id===y.id; }
+function portFits(p, linkType, internal){
+  return p.status!=='defeito' && (PORT_MEDIA_BY_MEDIUM[LINK_MEDIUM[linkType]]||[]).includes(p.media) && (internal || p.external);
+}
+/* Select de porta para uma ponta (equipamento/CTO): só as compatíveis e livres; "sem porta" sempre disponível.
+   editingLinkId: a porta já usada por este trecho conta como livre. */
+function portSelectHtml(id, node, linkType, internal, currentPortId, editingLinkId){
+  if(!node || !(isEquipment(node) || node.type==='cto')) return '';
+  const opts = portsOf(node.id).filter(p=>{
+    const lk = linkOfPort(p.id);
+    return portFits(p, linkType, internal) && (!lk || lk.id===editingLinkId);
+  });
+  const sel = opts.some(p=>p.id===currentPortId) ? currentPortId : '';
+  return `<div class="form-field"><label>Porta em ${escapeHtml(node.name)}</label><select id="${id}">
+    <option value="">sem porta</option>${opts.map(p=>`<option value="${p.id}" ${p.id===sel?'selected':''}>${escapeHtml(p.label)} · ${PORT_MEDIA_LABEL[p.media]||p.media} · ${p.external?'ext':'int'}${p.status==='reservada'?' (reservada)':''}</option>`).join('')}
+  </select></div>`;
+}
+function portFieldValue(id){ const el = document.getElementById(id); if(!el) return ''; const p = portById(el.value); return p ? String(p.dbId) : ''; }
+/* Destino de uma porta ocupada: o outro nó da ligação dela. */
+function portTarget(p){ const lk = linkOfPort(p.id); return lk ? nodeById(lk.from===p.nodeId ? lk.to : lk.from) : null; }
 /* "OLT-001 · PON 1 (POP-001)" */
 function endpointLabel(n, portId){
   if(!n) return '?';
@@ -1485,6 +1517,7 @@ function openNodePanel(nodeId, opts){
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
   bindPanelActions(n);
   if(isContainer(n)) bindSitePanel(n, opts||{});
+  panel.querySelectorAll('[data-port]').forEach(el=> el.addEventListener('click', ()=> openPortModal(portById(el.getAttribute('data-port')))));
 }
 
 function fieldsHtml(fields){
@@ -1560,6 +1593,10 @@ function renderSiteBody(n, opts){
       h += `<div class="site-eq${opts.highlight===e.id?' hl':''}" data-eq="${e.id}">
         <div class="site-eq-head"><b>${escapeHtml(e.name)}</b>${statusPill(e.status)}${lifecyclePill(e)}</div>
         ${meta ? `<div class="site-eq-meta">${escapeHtml(meta)}</div>` : ''}
+        ${portsOf(e.id).length ? `<div class="eq-ports">${portsOf(e.id).map(pt=>{
+          const tgt = portTarget(pt);
+          return `<button class="eq-port${tgt?' occ':''} st-${pt.status}" ${picking?'disabled':`data-port="${pt.id}"`} title="${escapeHtml(pt.label)} · ${PORT_MEDIA_LABEL[pt.media]||''} · ${pt.external?'externa':'interna'} · ${PORT_STATUS_LABEL[pt.status]||pt.status}">${escapeHtml(pt.label)} <span class="m">${PORT_MEDIA_LABEL[pt.media]||''}·${pt.external?'ext':'int'}</span> ${tgt?'→ '+escapeHtml(tgt.name):'livre'}</button>`;
+        }).join('')}</div>` : ''}
         <div class="site-eq-links">${ls.map(l=>{
           const o = nodeById(l.from===e.id ? l.to : l.from);
           const interna = isInternalLink(l);
@@ -1665,8 +1702,8 @@ function renderCTOBody(n){
   const originLink = n.parentLink ? linkById(n.parentLink) : null;
   const origin = originLink ? nodeById(originLink.from) : null;
   const nodePorts = portsOf(n.id);
-  const clientCount = nodePorts.filter(p=>p.status==='ocupada'||p.status==='alerta').length;
-  const alertPorts = nodePorts.filter(p=>p.status==='alerta');
+  const clientCount = nodePorts.filter(p=>portTarget(p)).length;
+  const alertPorts = nodePorts.filter(p=>p.status==='defeito');
   const mCalc = measurementsFor(n.id).find(m=>m.kind==='calculado');
   const mMeds = measurementsFor(n.id).filter(m=>m.kind==='medido');
   const mMed = mMeds.length ? mMeds[mMeds.length-1] : null;
@@ -1690,14 +1727,15 @@ function renderCTOBody(n){
     <div class="section-title">Portas</div>
     <div class="port-list">
       ${nodePorts.map(p=>{
-        const cls = p.status==='ocupada' ? 'occ' : (p.status==='alerta' ? 'alerta' : 'free');
-        const label = p.clientName ? escapeHtml(p.clientName) : 'livre';
-        return `<div class="port-row ${cls}"><span class="pn">${escapeHtml(p.label.replace('Porta ',''))}</span><span class="pd"></span><span class="pl">${label}</span></div>`;
-      }).join('')}
+        const tgt = portTarget(p);
+        const cls = p.status==='defeito' ? 'defeito' : (tgt ? 'occ' : (p.status==='reservada' ? 'alerta' : 'free'));
+        const label = tgt ? '→ '+escapeHtml(tgt.name) : (p.status==='livre' ? 'livre' : PORT_STATUS_LABEL[p.status]||escapeHtml(p.status));
+        return `<div class="port-row ${cls}" data-port="${p.id}"><span class="pn">${escapeHtml(p.label.replace('Porta ',''))}</span><span class="pd"></span><span class="pl">${label}</span><span class="pf">${p.external?'ext':'int'}${tgt&&p.status!=='livre'?' · '+(PORT_STATUS_LABEL[p.status]||''):''}</span></div>`;
+      }).join('') || '<div class="empty-state">Nenhuma porta cadastrada (ajuste o número de portas em Editar).</div>'}
     </div>
     <div class="section-title">Alertas</div>
     ${alertPorts.length
-      ? `<div class="alert-box has">${alertPorts.length} porta(s) com sinal degradado / cliente instável.</div>`
+      ? `<div class="alert-box has">${alertPorts.length} porta(s) com defeito.</div>`
       : `<div class="alert-box none">Nenhum alerta ativo.</div>`}
     ${actionRow(n)}
   `;
@@ -2302,6 +2340,7 @@ function openLinkTypeModal(origin, dest){
         {label:'Distância (linha reta)', value:km.toFixed(2)+' km', full:true}
       ])}
       <div class="form-field"><button class="btn btn-sm" id="f-link-invert" type="button">⇄ Inverter sentido</button></div>
+      <div id="f-link-ports"></div>
       <div class="form-field"><label>Tipo de trecho</label>
         <select id="f-linktype">
           <option value="backbone">Fibra backbone</option>
@@ -2336,9 +2375,13 @@ function openLinkTypeModal(origin, dest){
   overlay.classList.add('show');
   const selType=document.getElementById('f-linktype');
   const wrap=document.getElementById('f-cablewrap');
+  const internal = sameSiteNodes(origin, dest);
   function atualizaCampos(){
     const fibra = ['backbone','distribuicao','drop'].includes(selType.value);
     wrap.style.display = fibra ? '' : 'none';
+    const keep = {from:(document.getElementById('f-port-from')||{}).value, to:(document.getElementById('f-port-to')||{}).value};
+    document.getElementById('f-link-ports').innerHTML =
+      portSelectHtml('f-port-from', origin, selType.value, internal, keep.from, null) + portSelectHtml('f-port-to', dest, selType.value, internal, keep.to, null);
   }
   selType.addEventListener('change', atualizaCampos); atualizaCampos();
   document.getElementById('f-link-invert').addEventListener('click', ()=>{
@@ -2356,7 +2399,8 @@ function openLinkTypeModal(origin, dest){
     if(!origin.dbId || !dest.dbId){ toast('Elemento ainda não salvo. Recarregue o mapa.'); return; }
     const fields = {
       link_type:type, from_node_id:origin.dbId, to_node_id:dest.dbId, lifecycle:document.getElementById('f-linklifecycle').value,
-      label:(origin.name+' → '+dest.name).slice(0,120), length_m:Math.round(km*1000*100)/100
+      label:(origin.name+' → '+dest.name).slice(0,120), length_m:Math.round(km*1000*100)/100,
+      from_port_id:portFieldValue('f-port-from'), to_port_id:portFieldValue('f-port-to')
     };
     const attrs = {};
     if(ehFibra){
@@ -2390,6 +2434,7 @@ function openLinkEditModal(l){
       <div class="form-field"><label>Origem (envia)</label><select id="f-lk-from"></select></div>
       <div class="form-field"><label>Destino (recebe)</label><select id="f-lk-to"></select></div>
       <div class="form-field"><button class="btn btn-sm" id="f-lk-invert" type="button">⇄ Inverter sentido</button></div>
+      <div id="f-lk-ports"></div>
       <div class="form-field"><label>Rótulo</label><input id="f-lk-label" type="text" maxlength="120" value="${escapeHtml(l.label||'')}"></div>
       <div class="form-field"><label>Status</label>
         <select id="f-lk-status">${['normal','alerta','critico','offline'].map(v=>`<option value="${v}" ${l.status===v?'selected':''}>${STATUS_LABEL[v]}</option>`).join('')}</select>
@@ -2405,19 +2450,29 @@ function openLinkEditModal(l){
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
   // pontas: cada select oferece o site da ponta e os equipamentos dele; inverter troca as listas
   const selFrom = document.getElementById('f-lk-from'), selTo = document.getElementById('f-lk-to');
-  let ends = {from:{list:endpointChoices(nodeById(l.from)), sel:l.from}, to:{list:endpointChoices(nodeById(l.to)), sel:l.to}};
+  let ends = {from:{list:endpointChoices(nodeById(l.from)), sel:l.from, port:l.fromPort}, to:{list:endpointChoices(nodeById(l.to)), sel:l.to, port:l.toPort}};
+  function fillPorts(){
+    const a2 = nodeById(ends.from.sel), b2 = nodeById(ends.to.sel), internal = sameSiteNodes(a2, b2);
+    document.getElementById('f-lk-ports').innerHTML =
+      portSelectHtml('f-lk-port-from', a2, l.type, internal, ends.from.port, l.id) + portSelectHtml('f-lk-port-to', b2, l.type, internal, ends.to.port, l.id);
+    [['f-lk-port-from', ends.from], ['f-lk-port-to', ends.to]].forEach(([id, e])=>{
+      const el = document.getElementById(id); if(el) el.addEventListener('change', ()=>{ e.port = el.value || null; });
+    });
+  }
   function fillEnds(){
     [[selFrom, ends.from], [selTo, ends.to]].forEach(([sel, e])=>{
       sel.innerHTML = e.list.map(n=>`<option value="${n.id}" ${n.id===e.sel?'selected':''}>${escapeHtml(n.name)} (${TYPE_LABEL[n.type]})</option>`).join('');
     });
+    fillPorts();
   }
   fillEnds();
-  selFrom.addEventListener('change', ()=>{ ends.from.sel = selFrom.value; });
-  selTo.addEventListener('change', ()=>{ ends.to.sel = selTo.value; });
+  selFrom.addEventListener('change', ()=>{ ends.from.sel = selFrom.value; ends.from.port = null; fillPorts(); });
+  selTo.addEventListener('change', ()=>{ ends.to.sel = selTo.value; ends.to.port = null; fillPorts(); });
   document.getElementById('f-lk-invert').addEventListener('click', ()=>{ ends = {from:ends.to, to:ends.from}; fillEnds(); });
   document.getElementById('modal-save').addEventListener('click', ()=>{
     const attrs = Object.assign({}, l._attrs||{});
-    const fields = {id:l.dbId, from_node_id:nodeById(ends.from.sel).dbId, to_node_id:nodeById(ends.to.sel).dbId, label:document.getElementById('f-lk-label').value.trim(),
+    const fields = {id:l.dbId, from_node_id:nodeById(ends.from.sel).dbId, to_node_id:nodeById(ends.to.sel).dbId,
+      from_port_id:portFieldValue('f-lk-port-from'), to_port_id:portFieldValue('f-lk-port-to'), label:document.getElementById('f-lk-label').value.trim(),
       status:document.getElementById('f-lk-status').value, lifecycle:document.getElementById('f-lk-lifecycle').value, length_m:document.getElementById('f-lk-len').value.trim()};
     if(fibra){
       fields.fiber_count = document.getElementById('f-lk-fo').value.trim();
@@ -2435,6 +2490,40 @@ function openLinkEditModal(l){
         toastResult('Trecho salvo.', data);
       });
     }).catch(err=>{ saveBtn.disabled = false; toast(err.message); });
+  });
+}
+/* ---- porta: rótulo, externa/interna e status (a mídia vem do tipo e não muda) ---- */
+function openPortModal(p){
+  if(!p) return;
+  const owner = nodeById(p.nodeId), tgt = portTarget(p), lk = linkOfPort(p.id);
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Porta — ${escapeHtml(p.label)}</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      <div class="cable-meta">${escapeHtml(owner ? owner.name : '')} · mídia ${PORT_MEDIA_LABEL[p.media]||escapeHtml(p.media||'—')} (definida pelo tipo da porta) · ${tgt ? 'em uso → '+escapeHtml(tgt.name)+(lk && lk.label ? ' ('+escapeHtml(lk.label)+')' : '') : 'livre'}</div>
+      <div class="form-field"><label>Rótulo</label><input id="f-pt-label" type="text" maxlength="60" value="${escapeHtml(p.label)}"></div>
+      <div class="form-field"><label>Uso</label><select id="f-pt-ext"><option value="0" ${p.external?'':'selected'}>Interna (só dentro do site)</option><option value="1" ${p.external?'selected':''}>Externa (pode sair do site)</option></select></div>
+      <div class="form-field"><label>Status</label><select id="f-pt-status">${Object.keys(PORT_STATUS_LABEL).map(k=>`<option value="${k}" ${p.status===k?'selected':''}>${PORT_STATUS_LABEL[k]}</option>`).join('')}</select></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="f-pt-del" ${tgt?'disabled title="Porta em uso"':''}>Excluir porta</button>
+      <button class="btn" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-accent" id="modal-save">Salvar porta</button>
+    </div>`;
+  overlay.classList.add('show');
+  const reopen = msg=> loadNetwork(()=>{ const again = nodes.find(x=>owner && x.dbId===owner.dbId); if(again) onNodeClick(again.id); toast(msg); });
+  document.getElementById('modal-x').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    const label = document.getElementById('f-pt-label').value.trim();
+    if(!label){ toast('Informe o rótulo da porta.'); return; }
+    const btn = document.getElementById('modal-save'); btn.disabled = true;
+    mapPost('/portas/editar', {id:p.dbId, label, is_external:document.getElementById('f-pt-ext').value, status:document.getElementById('f-pt-status').value})
+      .then(()=>{ closeModal(); reopen('Porta salva.'); })
+      .catch(err=>{ btn.disabled = false; toast(err.message); });
+  });
+  document.getElementById('f-pt-del').addEventListener('click', ()=>{
+    if(!confirm('Excluir a porta "'+p.label+'"?')) return;
+    mapPost('/portas/excluir', {id:p.dbId}).then(()=>{ closeModal(); reopen('Porta excluída.'); }).catch(err=> toast(err.message));
   });
 }
 /* Toast com os avisos do servidor (warnings[]: ethernet > 100 m, porta reservada…), por mais tempo. */
