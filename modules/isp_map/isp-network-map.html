@@ -369,6 +369,9 @@ button{font-family:inherit;}
   padding:7px 8px;font-size:12px;font-family:inherit;outline:none;resize:vertical;
 }
 .form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:var(--accent-dim);}
+.port-counts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.port-counts label{display:flex;flex-direction:column;gap:3px;}
+.port-counts input{width:100%;min-width:0;}
 
 /* ===== MODAL ===== */
 .modal-overlay{
@@ -609,6 +612,11 @@ const TYPE_ORDER = ['pop','tower','olt','switch','router','radio','server','othe
 const CONTAINER_TYPES = ['pop','tower'];
 const EQUIPMENT_TYPES = ['olt','switch','router','radio','server','other'];
 const FIELD_TYPES = ['ceo','cto'];
+/* Portas (fase 1G): port_role = família/numeração; a mídia é DERIVADA dela no servidor (não editável):
+   eth → rj45, sfp → sfp, pon → pon, fo → fibra. Padrão: PON e portas da CTO externas; demais internas. */
+const PORT_FAMILIES = ['eth','sfp','pon','fo'];
+const PORT_MEDIA = {eth:'rj45', sfp:'sfp', pon:'pon', fo:'fibra'};
+const PORT_MEDIA_LABEL = {rj45:'RJ45', sfp:'SFP', pon:'PON', fibra:'Fibra'};
 const isContainer = n => !!n && CONTAINER_TYPES.includes(n.type);
 const isEquipment = n => !!n && EQUIPMENT_TYPES.includes(n.type);
 /* Nó que representa x no mapa: o próprio site para equipamentos. */
@@ -774,12 +782,10 @@ function applyTopology(data){
   rawPorts.forEach(r=>{
     const n = byDb[r.node_id]; if(!n) return;
     const a = r.attrs_json||{};
-    if(r.port_role==='pon' && n.type==='olt'){
+    if(r.port_role==='pon' && n.type==='olt')
       n.pons.push({ponId:r.label||('PON '+r.port_num), onus:a.onus||0, power:a.power==null?null:a.power, status:r.status||'livre'});
-      return;
-    }
     ports.push(Object.assign({}, a, {id:'p'+r.id, dbId:r.id, nodeId:n.id, label:r.label||('Porta '+r.port_num),
-      status:r.status||'livre', role:r.port_role, num:r.port_num}));
+      status:r.status||'livre', role:r.port_role, num:r.port_num, media:r.media||PORT_MEDIA[r.port_role]||null, external:!!r.is_external}));
   });
   rawLinks.forEach(r=>{
     const a = byDb[r.from_node_id], b = byDb[r.to_node_id]; if(!a || !b) return;
@@ -2102,6 +2108,18 @@ function nextNodeName(type){
   nodes.forEach(n=>{ if(n.type!==type) return; const m = String(n.name||'').match(re); if(m) max = Math.max(max, parseInt(m[1],10)); });
   return prefix+'-'+String(max+1).padStart(3,'0');
 }
+/* Quantidades de portas por tipo (equipamento). Aumentar acrescenta; reduzir só remove portas livres (o servidor confere). */
+function portCountsHtml(n){
+  const cnt = f=> n ? portsOf(n.id).filter(p=>p.role===f).length : 0;
+  return `<div class="form-field"><label>Portas por tipo</label><div class="port-counts">${PORT_FAMILIES.map(f=>
+    `<label>${PORT_MEDIA_LABEL[PORT_MEDIA[f]]}<input id="f-ports-${f}" type="number" min="0" max="128" value="${cnt(f)}"></label>`).join('')}</div>
+    <div class="cable-meta">Geradas como ETH n, SFP n, PON n, FO n. PON nasce externa; as demais, internas (editável por porta).</div></div>`;
+}
+function portCountsFields(){
+  const out = {};
+  PORT_FAMILIES.forEach(f=>{ const el = document.getElementById('f-ports-'+f); if(el) out['ports_'+f] = String(Math.max(0, parseInt(el.value,10)||0)); });
+  return out;
+}
 function openCreateModal(type, latlng, opts){
   opts = opts || {};
   const parent = opts.parent || null;
@@ -2122,7 +2140,8 @@ function openCreateModal(type, latlng, opts){
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lifecycle"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
       ${equip ? `<div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" placeholder="Opcional"></div>
-      <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" placeholder="Opcional"></div>` : ''}
+      <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" placeholder="Opcional"></div>
+      ${portCountsHtml(null)}` : ''}
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2" placeholder="Opcional"></textarea></div>
       ${type==='cto' ? `<div class="form-field"><label>Número de portas</label><input id="f-cap" type="number" min="1" max="144" value="16"></div>` : ''}
     </div>
@@ -2148,13 +2167,13 @@ function openCreateModal(type, latlng, opts){
       if(mod) attrs.modelo = mod;
     }
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
-    mapPost('/nos', {
+    mapPost('/nos', Object.assign({
       node_type:type, name, lat:latlng ? latlng.lat : null, lng:latlng ? latlng.lng : null,
       parent_node_id:parent ? parent.dbId : null,
       status:document.getElementById('f-status').value, lifecycle:document.getElementById('f-lifecycle').value,
       notes:document.getElementById('f-obs').value.trim(),
       attrs:JSON.stringify(attrs)
-    }).then(data=>{
+    }, equip ? portCountsFields() : {})).then(data=>{
       closeModal(); clearMode(); clearSearchPin(true);
       loadNetwork(()=>{
         toast('Elemento "'+name+'" salvo. Use "Conectar" para ligá-lo à rede.');
@@ -2187,7 +2206,8 @@ function openEditModal(n){
       <div class="form-field"><label>Situação</label><select id="f-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(n)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
       ${equip ? `<div class="form-field"><label>Site (POP/Torre)</label><select id="f-site">${sites.map(st=>`<option value="${st.dbId}" ${st.dbId===n.parentDbId?'selected':''}>${escapeHtml(st.name)} (${TYPE_LABEL[st.type]})</option>`).join('')}</select></div>
       <div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" value="${escapeHtml(n.fabricante||'')}"></div>
-      <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" value="${escapeHtml(n.modelo||'')}"></div>` : ''}
+      <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" value="${escapeHtml(n.modelo||'')}"></div>
+      ${portCountsHtml(n)}` : ''}
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2">${escapeHtml(n.desc||'')}</textarea></div>
       ${isCTO ? `<div class="form-field"><label>Número de portas (atual: ${n.capacity||0})</label><input id="f-cap" type="number" min="1" max="144" value="${n.capacity||16}"></div>` : ''}
     </div>
@@ -2210,6 +2230,7 @@ function openEditModal(n){
       overrides.modelo = document.getElementById('f-modelo').value.trim();
       const siteSel = document.getElementById('f-site');
       if(siteSel && siteSel.value && +siteSel.value!==n.parentDbId) extra.parent_node_id = siteSel.value;   // mover entre sites
+      Object.assign(extra, portCountsFields());
     }
     const attrs = Object.assign({}, n._attrs||{}, overrides);
     ['fabricante','modelo'].forEach(k=>{ if(attrs[k]==='') delete attrs[k]; });

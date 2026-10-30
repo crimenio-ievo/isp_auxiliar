@@ -62,6 +62,20 @@ final class MapController
     private const NODE_LIFECYCLES = ['projeto', 'ativo', 'desativado'];
     private const ATTRS_MAX_BYTES = 4096;
 
+    /*
+     * Portas (fase 1G). port_role é a família/numeração; media é DERIVADA dela aqui no servidor e nunca vem do
+     * cliente (nem é editável): eth → rj45, sfp → sfp, pon → pon, fo → fibra.
+     * Padrão de is_external: pon = externa; fo de CTO = externa; eth/sfp/fo de equipamento = interna (editável depois).
+     * Equipamento informa quantidades (ports_eth, ports_sfp, ports_pon, ports_fo); CTO gera "Porta n" (fo) pela
+     * attrs.capacity. Aumentar acrescenta no fim; reduzir remove as de maior número, só se estiverem livres (sem
+     * ligação) — senão 409 listando as ocupadas. "Ocupada" não é gravado: é a porta estar em alguma ligação.
+     */
+    private const PORT_MEDIA = ['eth' => 'rj45', 'sfp' => 'sfp', 'pon' => 'pon', 'fo' => 'fibra'];
+    private const PORT_LABEL_PREFIX = ['eth' => 'ETH', 'sfp' => 'SFP', 'pon' => 'PON', 'fo' => 'FO'];
+    private const PORT_STATUSES = ['livre', 'reservada', 'defeito'];
+    private const PORT_MAX_PER_FAMILY = 128;
+    private const CTO_MAX_CAPACITY = 144;
+
     public function createNode(Request $request): Response
     {
         $guard = $this->guardWrite($request);
@@ -72,6 +86,7 @@ final class MapController
 
         $errors = [];
         $fields = $this->validateNodeInput($request, $providerId, null, true, $errors);
+        $portPlan = $this->validatePortPlan($request, (string) ($fields['node_type'] ?? ''), $fields, $errors);
         if ($errors !== []) {
             return $this->fail(implode(' ', $errors), 422);
         }
@@ -82,6 +97,7 @@ final class MapController
             $id = $this->mapRepository->createNode($providerId, $userId, $fields);
             $node = $this->mapRepository->findNode($providerId, $id);
             $this->audit($userId, $actor, 'map.node.create', $id, ['node' => $node]);
+            $this->applyPortChanges($providerId, $userId, $actor, $node, $this->planPortChanges($providerId, $node, $portPlan));
             $pdo->commit();
         } catch (\Throwable) {
             $pdo->rollBack();
@@ -108,8 +124,20 @@ final class MapController
 
         $errors = [];
         $fields = $this->validateNodeInput($request, $providerId, $id, false, $errors);
+        $portPlan = $this->validatePortPlan($request, (string) $before['node_type'], $fields, $errors);
         if ($errors !== []) {
             return $this->fail(implode(' ', $errors), 422);
+        }
+        $portChanges = $this->planPortChanges($providerId, $before, $portPlan);
+        if ($portChanges['busy'] !== []) {
+            return Response::json([
+                'ok' => false,
+                'message' => 'Não é possível reduzir as portas: ' . implode(', ', array_map(
+                    static fn (array $b): string => $b['label'] . ' (ligação #' . $b['link_id'] . ')',
+                    $portChanges['busy']
+                )) . ' estão em uso. Remova as ligações antes.',
+                'busy_ports' => $portChanges['busy'],
+            ], 409, ['Cache-Control' => 'private, no-store']);
         }
 
         $pdo = $this->mapRepository->pdo();
@@ -120,6 +148,7 @@ final class MapController
             }
             $after = $this->mapRepository->findNode($providerId, $id);
             $this->audit($userId, $actor, 'map.node.update', $id, ['before' => $before, 'after' => $after]);
+            $this->applyPortChanges($providerId, $userId, $actor, $after, $portChanges);
             $pdo->commit();
         } catch (\Throwable) {
             $pdo->rollBack();
@@ -168,6 +197,243 @@ final class MapController
         }
 
         return Response::json(['ok' => true, 'data' => ['id' => $id]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    public function updatePort(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+
+        $id = $this->intOrNull($request->input('id'));
+        $before = $id === null ? null : $this->mapRepository->findPort($providerId, $id);
+        if ($before === null) {
+            return $this->fail('Porta não encontrada.', 404);
+        }
+
+        // Só label, is_external e status: media deriva de port_role e é ignorada se vier do cliente.
+        $errors = [];
+        $fields = [];
+        if ($request->input('label') !== null) {
+            $label = trim((string) $request->input('label'));
+            if ($label === '' || mb_strlen($label) > 60) {
+                $errors[] = 'Rótulo da porta é obrigatório (até 60 caracteres).';
+            }
+            $fields['label'] = $label;
+        }
+        if ($request->input('is_external') !== null) {
+            $raw = trim((string) $request->input('is_external'));
+            if (!in_array($raw, ['0', '1'], true)) {
+                $errors[] = 'Externa/interna inválido (0 ou 1).';
+            }
+            $fields['is_external'] = $raw === '1' ? 1 : 0;
+        }
+        if ($request->input('status') !== null) {
+            $status = trim((string) $request->input('status'));
+            if (!in_array($status, self::PORT_STATUSES, true)) {
+                $errors[] = 'Status da porta inválido (livre, reservada ou defeito).';
+            }
+            $fields['status'] = $status;
+        }
+        if ($errors !== []) {
+            return $this->fail(implode(' ', $errors), 422);
+        }
+
+        // Porta em uso não pode virar interna se a ligação dela sai do site.
+        if (($fields['is_external'] ?? null) === 0 && $before['is_external']) {
+            $using = $this->mapRepository->linkUsingPort($providerId, (int) $before['id']);
+            if ($using !== null && !$this->sameSite($providerId, (int) $using['from_node_id'], (int) $using['to_node_id'])) {
+                return $this->fail('A porta está na ligação #' . $using['id'] . ', que sai do site: ela precisa continuar externa.', 409);
+            }
+        }
+
+        $pdo = $this->mapRepository->pdo();
+        $pdo->beginTransaction();
+        try {
+            if ($fields !== []) {
+                $this->mapRepository->updatePort($providerId, $id, $userId, $fields);
+            }
+            $after = $this->mapRepository->findPort($providerId, $id);
+            $this->audit($userId, $actor, 'map.port.update', $id, ['before' => $before, 'after' => $after], 'map_port');
+            $pdo->commit();
+        } catch (\Throwable) {
+            $pdo->rollBack();
+
+            return $this->fail('Não foi possível salvar a porta.', 500);
+        }
+
+        return Response::json(['ok' => true, 'data' => ['port' => $after]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    public function deletePort(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+
+        $id = $this->intOrNull($request->input('id'));
+        $port = $id === null ? null : $this->mapRepository->findPort($providerId, $id);
+        if ($port === null) {
+            return $this->fail('Porta não encontrada.', 404);
+        }
+        $using = $this->mapRepository->linkUsingPort($providerId, $id);
+        if ($using !== null) {
+            return $this->fail('A porta ' . $port['label'] . ' está em uso na ligação #' . $using['id'] . '. Remova a ligação antes.', 409);
+        }
+
+        $pdo = $this->mapRepository->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->audit($userId, $actor, 'map.port.delete', $id, ['port' => $port], 'map_port');
+            $this->mapRepository->deletePort($providerId, $id);
+            $pdo->commit();
+        } catch (\Throwable) {
+            $pdo->rollBack();
+
+            return $this->fail('Não foi possível excluir a porta.', 500);
+        }
+
+        return Response::json(['ok' => true, 'data' => ['id' => $id]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    /**
+     * Quantidade desejada por família de porta: equipamento via ports_eth/sfp/pon/fo; CTO via attrs.capacity.
+     * Só as famílias enviadas entram no plano (o que não veio fica como está).
+     *
+     * @param array<string, mixed> $fields campos já validados do nó
+     * @param list<string> $errors
+     * @return array<string, int>
+     */
+    private function validatePortPlan(Request $request, string $type, array $fields, array &$errors): array
+    {
+        $plan = [];
+        $sent = array_values(array_filter(array_keys(self::PORT_MEDIA), fn (string $f): bool => $request->input('ports_' . $f) !== null));
+
+        if (in_array($type, self::EQUIPMENT_TYPES, true)) {
+            foreach ($sent as $family) {
+                $raw = trim((string) $request->input('ports_' . $family));
+                $raw = $raw === '' ? '0' : $raw;
+                if (preg_match('/^[0-9]{1,3}$/', $raw) !== 1 || (int) $raw > self::PORT_MAX_PER_FAMILY) {
+                    $errors[] = 'Quantidade de portas ' . self::PORT_LABEL_PREFIX[$family] . ' inválida (0 a ' . self::PORT_MAX_PER_FAMILY . ').';
+                    continue;
+                }
+                $plan[$family] = (int) $raw;
+            }
+
+            return $plan;
+        }
+        if ($sent !== []) {
+            $errors[] = 'Só equipamentos têm quantidades de portas por tipo.';
+        }
+
+        if ($type === 'cto' && array_key_exists('attrs_json', $fields) && is_string($fields['attrs_json'])) {
+            $attrs = json_decode($fields['attrs_json'], true);
+            if (is_array($attrs) && array_key_exists('capacity', $attrs)) {
+                $cap = $attrs['capacity'];
+                if (!is_int($cap) && !(is_string($cap) && preg_match('/^[0-9]{1,3}$/', $cap) === 1)) {
+                    $errors[] = 'Capacidade da CTO inválida (1 a ' . self::CTO_MAX_CAPACITY . ').';
+                } elseif ((int) $cap < 1 || (int) $cap > self::CTO_MAX_CAPACITY) {
+                    $errors[] = 'Capacidade da CTO inválida (1 a ' . self::CTO_MAX_CAPACITY . ').';
+                } else {
+                    $plan['fo'] = (int) $cap;
+                }
+            }
+        }
+
+        return $plan;
+    }
+
+    /**
+     * Compara o plano com as portas existentes. busy = portas que teriam de sair mas estão em ligação.
+     *
+     * @param array<string, mixed> $node
+     * @param array<string, int> $plan
+     * @return array{add: list<array{role: string, num: int, label: string, media: string, external: bool}>, remove: list<array<string, mixed>>, busy: list<array<string, mixed>>}
+     */
+    private function planPortChanges(int $providerId, array $node, array $plan): array
+    {
+        $out = ['add' => [], 'remove' => [], 'busy' => []];
+        $isCto = $node['node_type'] === 'cto';
+        foreach ($plan as $family => $target) {
+            $current = $this->mapRepository->portsOfFamily($providerId, (int) $node['id'], $family);
+            $count = count($current);
+            if ($target > $count) {
+                $next = $current === [] ? 1 : max(array_column($current, 'port_num')) + 1;
+                for ($i = 0; $i < $target - $count; $i++, $next++) {
+                    $out['add'][] = [
+                        'role' => $family,
+                        'num' => $next,
+                        'label' => ($isCto ? 'Porta' : self::PORT_LABEL_PREFIX[$family]) . ' ' . $next,
+                        'media' => self::PORT_MEDIA[$family],
+                        'external' => $family === 'pon' || $isCto,
+                    ];
+                }
+            } elseif ($target < $count) {
+                foreach (array_slice($current, $target) as $port) {
+                    $using = $this->mapRepository->linkUsingPort($providerId, (int) $port['id']);
+                    if ($using !== null) {
+                        $out['busy'][] = ['id' => $port['id'], 'label' => $port['label'], 'link_id' => $using['id']];
+                    }
+                    $out['remove'][] = $port;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Aplica o plano (dentro da transação do nó) e audita como map.port.sync.
+     *
+     * @param array<string, mixed>|null $node
+     * @param array{add: list<array<string, mixed>>, remove: list<array<string, mixed>>, busy: list<array<string, mixed>>} $changes
+     */
+    private function applyPortChanges(int $providerId, ?int $userId, string $actor, ?array $node, array $changes): void
+    {
+        if ($node === null || ($changes['add'] === [] && $changes['remove'] === [])) {
+            return;
+        }
+        if ($changes['busy'] !== []) {
+            throw new \RuntimeException('Portas ocupadas no plano de redução.');
+        }
+        $added = [];
+        foreach ($changes['add'] as $p) {
+            $added[] = $this->mapRepository->findPort($providerId, $this->mapRepository->createPort(
+                $providerId, $userId, (int) $node['id'], $p['role'], $p['num'], $p['label'], $p['media'], $p['external']
+            ));
+        }
+        foreach ($changes['remove'] as $p) {
+            $this->mapRepository->deletePort($providerId, (int) $p['id']);
+        }
+        $this->audit($userId, $actor, 'map.port.sync', (int) $node['id'], ['added' => $added, 'removed' => $changes['remove']]);
+    }
+
+    /**
+     * Site de um nó: o próprio contêiner, o contêiner pai de um equipamento, ou null (campo: CEO/CTO).
+     *
+     * @param array<string, mixed>|null $node
+     */
+    private function siteIdOf(?array $node): ?int
+    {
+        if ($node === null) {
+            return null;
+        }
+        if (in_array($node['node_type'], self::CONTAINER_TYPES, true)) {
+            return (int) $node['id'];
+        }
+
+        return in_array($node['node_type'], self::EQUIPMENT_TYPES, true) && $node['parent_node_id'] !== null ? (int) $node['parent_node_id'] : null;
+    }
+
+    private function sameSite(int $providerId, int $nodeA, int $nodeB): bool
+    {
+        $a = $this->siteIdOf($this->mapRepository->findNode($providerId, $nodeA));
+
+        return $a !== null && $a === $this->siteIdOf($this->mapRepository->findNode($providerId, $nodeB));
     }
 
     private const LINK_MEDIUMS = ['backbone' => 'fibra', 'distribuicao' => 'fibra', 'drop' => 'fibra', 'ethernet' => 'cabo', 'wireless' => 'radio'];

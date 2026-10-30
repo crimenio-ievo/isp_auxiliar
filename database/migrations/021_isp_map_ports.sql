@@ -1,0 +1,3 @@
+ALTER TABLE map_ports
+    ADD COLUMN media VARCHAR(20) NULL AFTER port_role,
+    ADD COLUMN is_external TINYINT(1) NOT NULL DEFAULT 0 AFTER media;

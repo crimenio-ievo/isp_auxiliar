@@ -25,7 +25,7 @@ final class MapRepository
 
         $nodes = $this->fetch($pdo, 'SELECT id, node_type, name, code, lat, lng, parent_node_id, status, lifecycle, attrs_json, equipment_id, notes
              FROM map_nodes WHERE provider_id = :provider_id ORDER BY id', $params);
-        $ports = $this->fetch($pdo, 'SELECT id, node_id, port_num, label, port_role, status, attrs_json
+        $ports = $this->fetch($pdo, 'SELECT id, node_id, port_num, label, port_role, media, is_external, status, attrs_json
              FROM map_ports WHERE provider_id = :provider_id ORDER BY node_id, port_role, port_num', $params);
         $links = $this->fetch($pdo, 'SELECT id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, lifecycle, label,
                     length_m, fiber_count, attrs_json, path_json
@@ -33,7 +33,7 @@ final class MapRepository
 
         return [
             'nodes' => array_map(fn (array $r): array => $this->normalize($r, ['id', 'parent_node_id', 'equipment_id'], ['lat', 'lng'], ['attrs_json']), $nodes),
-            'ports' => array_map(fn (array $r): array => $this->normalize($r, ['id', 'node_id', 'port_num'], [], ['attrs_json']), $ports),
+            'ports' => array_map(fn (array $r): array => $this->normalizePort($r), $ports),
             'links' => array_map(fn (array $r): array => $this->normalize($r, ['id', 'from_node_id', 'to_node_id', 'from_port_id', 'to_port_id', 'fiber_count'], ['length_m'], ['attrs_json', 'path_json']), $links),
         ];
     }
@@ -182,13 +182,13 @@ final class MapRepository
     /**
      * Já existe ligação do mesmo tipo entre os dois nós, em qualquer sentido?
      */
-    public function linkExists(int $providerId, int $nodeA, int $nodeB, string $linkType): bool
+    public function linkExists(int $providerId, int $nodeA, int $nodeB, string $linkType, ?int $exceptLinkId = null): bool
     {
         $rows = $this->fetch(
             $this->database->pdo(),
-            'SELECT id FROM map_links WHERE provider_id = :p AND link_type = :t
+            'SELECT id FROM map_links WHERE provider_id = :p AND link_type = :t AND id <> :except
                AND ((from_node_id = :a AND to_node_id = :b) OR (from_node_id = :b2 AND to_node_id = :a2)) LIMIT 1',
-            ['p' => $providerId, 't' => $linkType, 'a' => $nodeA, 'b' => $nodeB, 'b2' => $nodeB, 'a2' => $nodeA]
+            ['p' => $providerId, 't' => $linkType, 'except' => $exceptLinkId ?? 0, 'a' => $nodeA, 'b' => $nodeB, 'b2' => $nodeB, 'a2' => $nodeA]
         );
 
         return $rows !== [];
@@ -201,9 +201,10 @@ final class MapRepository
     {
         $pdo = $this->database->pdo();
         $pdo->prepare(
-            'INSERT INTO map_links (provider_id, link_type, medium, from_node_id, to_node_id, status, lifecycle, label, length_m, fiber_count, attrs_json,
-                    created_by_user_id, updated_by_user_id, created_at, updated_at)
-             VALUES (:provider_id, :link_type, :medium, :from_node_id, :to_node_id, :status, :lifecycle, :label, :length_m, :fiber_count, :attrs_json,
+            'INSERT INTO map_links (provider_id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, lifecycle, label, length_m,
+                    fiber_count, attrs_json, created_by_user_id, updated_by_user_id, created_at, updated_at)
+             VALUES (:provider_id, :link_type, :medium, :from_node_id, :to_node_id, :from_port_id, :to_port_id, :status, :lifecycle, :label, :length_m,
+                    :fiber_count, :attrs_json,
                     :user_id, :user_id2, NOW(), NOW())'
         )->execute([
             'provider_id' => $providerId,
@@ -211,6 +212,8 @@ final class MapRepository
             'medium' => $fields['medium'],
             'from_node_id' => $fields['from_node_id'],
             'to_node_id' => $fields['to_node_id'],
+            'from_port_id' => $fields['from_port_id'] ?? null,
+            'to_port_id' => $fields['to_port_id'] ?? null,
             'status' => $fields['status'],
             'lifecycle' => $fields['lifecycle'] ?? 'ativo',
             'label' => $fields['label'] ?? null,
@@ -231,7 +234,7 @@ final class MapRepository
      */
     public function updateLink(int $providerId, int $linkId, ?int $userId, array $fields): void
     {
-        $allowed = ['status', 'lifecycle', 'label', 'length_m', 'fiber_count', 'attrs_json'];
+        $allowed = ['from_node_id', 'to_node_id', 'from_port_id', 'to_port_id', 'status', 'lifecycle', 'label', 'length_m', 'fiber_count', 'attrs_json'];
         $sets = [];
         $params = ['id' => $linkId, 'provider_id' => $providerId, 'user_id' => $userId];
         foreach ($allowed as $column) {
@@ -246,6 +249,107 @@ final class MapRepository
         $this->database->pdo()
             ->prepare('UPDATE map_links SET ' . implode(', ', $sets) . ' WHERE id = :id AND provider_id = :provider_id')
             ->execute($params);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findPort(int $providerId, int $portId): ?array
+    {
+        $rows = $this->fetch(
+            $this->database->pdo(),
+            'SELECT id, node_id, port_num, label, port_role, media, is_external, status, attrs_json FROM map_ports WHERE id = :id AND provider_id = :p',
+            ['id' => $portId, 'p' => $providerId]
+        );
+
+        return $rows === [] ? null : $this->normalizePort($rows[0]);
+    }
+
+    /**
+     * Portas de uma família (port_role) do nó, em ordem de número.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function portsOfFamily(int $providerId, int $nodeId, string $role): array
+    {
+        $rows = $this->fetch(
+            $this->database->pdo(),
+            'SELECT id, node_id, port_num, label, port_role, media, is_external, status, attrs_json FROM map_ports
+             WHERE provider_id = :p AND node_id = :n AND port_role = :r ORDER BY port_num',
+            ['p' => $providerId, 'n' => $nodeId, 'r' => $role]
+        );
+
+        return array_map(fn (array $r): array => $this->normalizePort($r), $rows);
+    }
+
+    public function createPort(int $providerId, ?int $userId, int $nodeId, string $role, int $num, string $label, string $media, bool $external): int
+    {
+        $pdo = $this->database->pdo();
+        $pdo->prepare(
+            'INSERT INTO map_ports (provider_id, node_id, port_num, label, port_role, media, is_external, status, created_by_user_id, updated_by_user_id, created_at, updated_at)
+             VALUES (:p, :n, :num, :label, :role, :media, :ext, \'livre\', :u, :u2, NOW(), NOW())'
+        )->execute(['p' => $providerId, 'n' => $nodeId, 'num' => $num, 'label' => $label, 'role' => $role, 'media' => $media, 'ext' => $external ? 1 : 0, 'u' => $userId, 'u2' => $userId]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Atualiza só label, is_external e status (media deriva de port_role e não muda).
+     *
+     * @param array<string, mixed> $fields
+     */
+    public function updatePort(int $providerId, int $portId, ?int $userId, array $fields): void
+    {
+        $sets = [];
+        $params = ['id' => $portId, 'p' => $providerId, 'u' => $userId];
+        foreach (['label', 'is_external', 'status'] as $column) {
+            if (array_key_exists($column, $fields)) {
+                $sets[] = "{$column} = :{$column}";
+                $params[$column] = $fields[$column];
+            }
+        }
+        $sets[] = 'updated_by_user_id = :u';
+        $sets[] = 'updated_at = NOW()';
+
+        $this->database->pdo()
+            ->prepare('UPDATE map_ports SET ' . implode(', ', $sets) . ' WHERE id = :id AND provider_id = :p')
+            ->execute($params);
+    }
+
+    public function deletePort(int $providerId, int $portId): void
+    {
+        $this->database->pdo()
+            ->prepare('DELETE FROM map_ports WHERE id = :id AND provider_id = :p')
+            ->execute(['id' => $portId, 'p' => $providerId]);
+    }
+
+    /**
+     * Ligação que usa a porta (em qualquer ponta), ignorando $exceptLinkId.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function linkUsingPort(int $providerId, int $portId, ?int $exceptLinkId = null): ?array
+    {
+        $rows = $this->fetch(
+            $this->database->pdo(),
+            'SELECT id, label, from_node_id, to_node_id FROM map_links
+             WHERE provider_id = :p AND id <> :except AND (from_port_id = :a OR to_port_id = :b) LIMIT 1',
+            ['p' => $providerId, 'except' => $exceptLinkId ?? 0, 'a' => $portId, 'b' => $portId]
+        );
+
+        return $rows === [] ? null : $this->normalize($rows[0], ['id', 'from_node_id', 'to_node_id'], [], []);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function normalizePort(array $row): array
+    {
+        $row = $this->normalize($row, ['id', 'node_id', 'port_num'], [], ['attrs_json']);
+        $row['is_external'] = (bool) (int) ($row['is_external'] ?? 0);
+
+        return $row;
     }
 
     public function deleteLink(int $providerId, int $linkId): void
