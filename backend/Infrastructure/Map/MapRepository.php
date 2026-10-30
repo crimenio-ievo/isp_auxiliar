@@ -294,7 +294,7 @@ final class MapRepository
     }
 
     /**
-     * Atualiza só label, is_external e status (media deriva de port_role e não muda).
+     * Atualiza só label, is_external, status e attrs_json (media deriva de port_role e não muda).
      *
      * @param array<string, mixed> $fields
      */
@@ -302,7 +302,7 @@ final class MapRepository
     {
         $sets = [];
         $params = ['id' => $portId, 'p' => $providerId, 'u' => $userId];
-        foreach (['label', 'is_external', 'status'] as $column) {
+        foreach (['label', 'is_external', 'status', 'attrs_json'] as $column) {
             if (array_key_exists($column, $fields)) {
                 $sets[] = "{$column} = :{$column}";
                 $params[$column] = $fields[$column];
@@ -357,6 +357,21 @@ final class MapRepository
         $this->database->pdo()
             ->prepare('DELETE FROM map_links WHERE id = :id AND provider_id = :provider_id')
             ->execute(['id' => $linkId, 'provider_id' => $providerId]);
+    }
+
+    /**
+     * Valores de provider_settings (só leitura) para as chaves pedidas.
+     *
+     * @param list<string> $keys
+     * @return array<string, string>
+     */
+    public function settings(int $providerId, array $keys): array
+    {
+        $marks = implode(',', array_fill(0, count($keys), '?'));
+        $statement = $this->database->pdo()->prepare("SELECT setting_key, setting_value FROM provider_settings WHERE provider_id = ? AND setting_key IN ({$marks})");
+        $statement->execute(array_merge([$providerId], $keys));
+
+        return array_map('strval', $statement->fetchAll(\PDO::FETCH_KEY_PAIR));
     }
 
     public function userExists(int $providerId, int $userId): bool

@@ -40,6 +40,7 @@ final class MapController
 
         try {
             $data = $this->mapRepository->topology($providerId);
+            $data['defaults'] = $this->networkDefaults($providerId);
         } catch (\Throwable) {
             return Response::json(['ok' => false, 'message' => 'Não foi possível ler o mapa.'], 500, ['Cache-Control' => 'private, no-store']);
         }
@@ -74,6 +75,14 @@ final class MapController
     private const PORT_LABEL_PREFIX = ['eth' => 'ETH', 'sfp' => 'SFP', 'pon' => 'PON', 'fo' => 'FO'];
     private const PORT_STATUSES = ['livre', 'reservada', 'defeito'];
     private const PORT_MAX_PER_FAMILY = 128;
+
+    /*
+     * Potência por porta PON (fase 2B): attrs da porta guardam tx_dbm (−10 a +10, 2 casas) e max_clientes (1 a 256),
+     * só em port_role 'pon' (o módulo pode variar por porta). A OLT guarda os padrões tx_padrao_dbm e
+     * max_clientes_padrao (mesmas faixas), que só preenchem PONs sem valor próprio. Vazio apaga o valor.
+     * Padrões da rede ficam em provider_settings (chave => valor padrão abaixo) e vão em GET /api/mapa data.defaults.
+     */
+    private const MAP_DEFAULTS = ['map.loss.fusion_db' => 0.1, 'map.loss.connector_db' => 0.5, 'map.atten.1490_db_km' => 0.30, 'map.onu.min_rx_dbm' => -27.0];
     private const CTO_MAX_CAPACITY = 144;
 
     public function createNode(Request $request): Response
@@ -199,6 +208,71 @@ final class MapController
         return Response::json(['ok' => true, 'data' => ['id' => $id]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
+    /**
+     * @return array<string, float>
+     */
+    private function networkDefaults(int $providerId): array
+    {
+        $stored = $this->mapRepository->settings($providerId, array_keys(self::MAP_DEFAULTS));
+        $out = [];
+        foreach (self::MAP_DEFAULTS as $key => $default) {
+            $out[$key] = isset($stored[$key]) && is_numeric($stored[$key]) ? (float) $stored[$key] : $default;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Valida campos de potência (tx_* em dBm; o resto é contagem de clientes) e devolve as mudanças a mesclar em
+     * attrs: chave => valor, ou null para apagar (campo vazio). Só entram as chaves enviadas.
+     *
+     * @param callable(string): mixed $get
+     * @param list<string> $names
+     * @param list<string> $errors
+     * @return array<string, int|float|null>
+     */
+    private function powerAttrChanges(callable $get, array $names, array &$errors): array
+    {
+        $changes = [];
+        foreach ($names as $name) {
+            $raw = $get($name);
+            if ($raw === null) {
+                continue;
+            }
+            $raw = trim(str_replace(',', '.', (string) $raw));
+            $isTx = str_starts_with($name, 'tx');
+            if ($raw === '') {
+                $changes[$name] = null;
+            } elseif ($isTx && (preg_match('/^[+-]?[0-9]{1,2}(\\.[0-9]{1,2})?$/', $raw) !== 1 || abs((float) $raw) > 10)) {
+                $errors[] = 'Potência de saída inválida (−10 a +10 dBm, até 2 casas).';
+            } elseif (!$isTx && (preg_match('/^[0-9]{1,3}$/', $raw) !== 1 || (int) $raw < 1 || (int) $raw > 256)) {
+                $errors[] = 'Máximo de clientes inválido (inteiro de 1 a 256).';
+            } else {
+                $changes[$name] = $isTx ? round((float) $raw, 2) : (int) $raw;
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @param array<string, mixed>|null $current
+     * @param array<string, int|float|null> $changes
+     */
+    private function mergeAttrs(?array $current, array $changes): ?string
+    {
+        $attrs = $current ?? [];
+        foreach ($changes as $key => $value) {
+            if ($value === null) {
+                unset($attrs[$key]);
+            } else {
+                $attrs[$key] = $value;
+            }
+        }
+
+        return $attrs === [] ? null : json_encode($attrs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
     public function updatePort(Request $request): Response
     {
         $guard = $this->guardWrite($request);
@@ -236,6 +310,13 @@ final class MapController
                 $errors[] = 'Status da porta inválido (livre, reservada ou defeito).';
             }
             $fields['status'] = $status;
+        }
+        $power = $this->powerAttrChanges(static fn (string $k): mixed => $request->input($k), ['tx_dbm', 'max_clientes'], $errors);
+        if ($power !== [] && $before['port_role'] !== 'pon') {
+            $errors[] = 'Potência de saída e máximo de clientes só existem em porta PON.';
+        }
+        if ($power !== [] && $errors === []) {
+            $fields['attrs_json'] = $this->mergeAttrs(is_array($before['attrs_json']) ? $before['attrs_json'] : null, $power);
         }
         if ($errors !== []) {
             return $this->fail(implode(' ', $errors), 422);
@@ -921,6 +1002,19 @@ final class MapController
                 $errors[] = 'Atributos inválidos (objeto JSON simples, só valores escalares, até 4 KB).';
             } else {
                 $fields['attrs_json'] = $attrs;
+                $decoded = is_string($attrs) ? json_decode($attrs, true) : null;
+                $hasDefaults = is_array($decoded) && (array_key_exists('tx_padrao_dbm', $decoded) || array_key_exists('max_clientes_padrao', $decoded));
+                if ($hasDefaults && $type !== 'olt') {
+                    $errors[] = 'Padrões de Tx e máximo de clientes só existem na OLT.';
+                } elseif ($hasDefaults) {
+                    // padrões da OLT: mesma faixa das portas; vazio apaga a chave
+                    $norm = $this->powerAttrChanges(
+                        static fn (string $k): mixed => array_key_exists($k, $decoded) ? $decoded[$k] : null,
+                        ['tx_padrao_dbm', 'max_clientes_padrao'],
+                        $errors
+                    );
+                    $fields['attrs_json'] = $this->mergeAttrs($decoded, $norm);
+                }
             }
         }
 

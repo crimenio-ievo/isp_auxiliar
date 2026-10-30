@@ -353,6 +353,12 @@ button{font-family:inherit;}
 .eq-port.st-reservada{border-style:dashed;}
 .eq-port.st-defeito{border-color:var(--red,#f85149);color:var(--red,#f85149);}
 .eq-port .m{color:var(--text-faint);}
+.eq-pons{font-size:10.5px;color:var(--text-dim);margin:4px 0;line-height:1.6;}
+.eq-pons b{color:var(--text);font-weight:600;}
+.src{font-size:9px;padding:0 5px;border-radius:8px;border:1px solid var(--border-soft);color:var(--text-faint);white-space:nowrap;}
+.src-porta{color:var(--green);border-color:var(--green);}
+.src-none{color:var(--yellow);border-color:var(--yellow);}
+.olt-sum{font-size:10.5px;color:var(--text-dim);font-family:var(--font-mono);margin:3px 0;}
 
 .pon-card{background:var(--bg-input);border:1px solid var(--border-soft);border-radius:5px;padding:8px 9px;margin-bottom:6px;}
 .pon-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
@@ -645,6 +651,29 @@ function endpointChoices(n){ const st = siteOf(n); return isContainer(st) ? [st]
 /* Compatibilidade porta × ligação (mesmas regras do servidor): mídia × meio do tipo, externa se sair do site, sem defeito. */
 const LINK_MEDIUM = {backbone:'fibra', distribuicao:'fibra', drop:'fibra', ethernet:'cabo', wireless:'radio'};
 const PORT_MEDIA_BY_MEDIUM = {fibra:['pon','fibra','sfp'], cabo:['rj45','sfp'], radio:[]};
+/* Potência da PON (fase 2B). É POR PORTA (cada porta pode ter módulo diferente): tx_dbm / max_clientes nos attrs da porta.
+   A OLT guarda tx_padrao_dbm / max_clientes_padrao, que só preenchem PONs sem valor próprio. Valor efetivo = da porta
+   (src 'porta') || padrão da OLT (src 'olt') || vazio (src null). */
+function ponEffective(p){
+  const olt = nodeById(p.nodeId) || {};
+  const pick = (own, dflt)=> own!=null && own!=='' ? {v:+own, src:'porta'} : (dflt!=null && dflt!=='' ? {v:+dflt, src:'olt'} : {v:null, src:null});
+  return {tx:pick(p.tx_dbm, olt.tx_padrao_dbm), max:pick(p.max_clientes, olt.max_clientes_padrao)};
+}
+function fmtTx(v){ return (v>0?'+':'')+String(Math.round(v*100)/100).replace('.',',')+' dBm'; }
+const SRC_LABEL = {porta:'da porta', olt:'padrão da OLT'};
+/* "Tx +4,25 dBm (da porta) · clientes — / 64 (padrão da OLT)"; sem valor: "Tx não informado" */
+function ponSummaryHtml(p){
+  const e = ponEffective(p);
+  const tx = e.tx.v!=null ? `Tx ${fmtTx(e.tx.v)} <span class="src src-${e.tx.src}">${SRC_LABEL[e.tx.src]}</span>` : '<span class="src src-none">Tx não informado</span>';
+  const mx = e.max.v!=null ? `clientes — / ${e.max.v} <span class="src src-${e.max.src}">${SRC_LABEL[e.max.src]}</span>` : 'clientes — / máx não informado';
+  return tx+' · '+mx;
+}
+/* Resumo da OLT: "PONs: N · Tx padrão: X dBm · máx/porta: Y" */
+function oltSummaryText(n){
+  const pons = portsOf(n.id).filter(p=>p.role==='pon');
+  return 'PONs: '+pons.length+' · Tx padrão: '+(n.tx_padrao_dbm!=null && n.tx_padrao_dbm!=='' ? fmtTx(+n.tx_padrao_dbm) : '—')
+    +' · máx/porta: '+(n.max_clientes_padrao!=null && n.max_clientes_padrao!=='' ? n.max_clientes_padrao : '—');
+}
 const PORT_STATUS_LABEL = {livre:'normal', reservada:'reservada', defeito:'com defeito'};
 function sameSiteNodes(a, b){ const x = siteOf(a), y = siteOf(b); return isContainer(x) && !!y && x.id===y.id; }
 function portFits(p, linkType, internal){
@@ -703,6 +732,7 @@ function nodeIconSVG(type, color, size){
    links referenciam nodeId + portId (nunca por nome).
    ============================================================ */
 let nodes = [], ports = [], links = [];
+let mapDefaults = {};   // data.defaults do GET /api/mapa (perdas, atenuação, sensibilidade da ONU)
 let cables = [], fiberStrands = [], splitters = [], connections = [], measurements = [];
 let _nid=1,_pid=1,_lid=1,_cid=1,_fid=1,_spid=1,_cnid=1,_mid=1;
 const nid=()=> 'n'+(_nid++);
@@ -800,6 +830,7 @@ function setMapStatus(msg, isError){
   el.classList.toggle('error', !!isError);
 }
 function applyTopology(data){
+  mapDefaults = data.defaults || {};
   const rawNodes = Array.isArray(data.nodes) ? data.nodes : [];
   const rawPorts = Array.isArray(data.ports) ? data.ports : [];
   const rawLinks = Array.isArray(data.links) ? data.links : [];
@@ -1535,6 +1566,7 @@ function renderOLTBody(n){
       {label:'IP', value:escapeHtml(n.ip||'—')},
       {label:'PONs ativas', value:n.pons.filter(p=>p.onus>0).length+' / '+n.pons.length}
     ])}
+    <div class="olt-sum">${escapeHtml(oltSummaryText(n))}</div>
     <div class="section-title">Portas PON</div>
     ${n.pons.map(p=>{
       const pct = Math.min(100, ((Number(p.onus)||0)/32)*100);
@@ -1595,6 +1627,8 @@ function renderSiteBody(n, opts){
       h += `<div class="site-eq${opts.highlight===e.id?' hl':''}" data-eq="${e.id}">
         <div class="site-eq-head"><b>${escapeHtml(e.name)}</b>${statusPill(e.status)}${lifecyclePill(e)}</div>
         ${meta ? `<div class="site-eq-meta">${escapeHtml(meta)}</div>` : ''}
+        ${e.type==='olt' ? `<div class="olt-sum" data-olt-sum="${e.id}">${escapeHtml(oltSummaryText(e))}</div>` : ''}
+        ${portsOf(e.id).some(pt=>pt.role==='pon') ? `<div class="eq-pons">${portsOf(e.id).filter(pt=>pt.role==='pon').map(pt=>`<div data-pon="${pt.id}"><b>${escapeHtml(pt.label)}</b> · ${ponSummaryHtml(pt)}</div>`).join('')}</div>` : ''}
         ${portsOf(e.id).length ? `<div class="eq-ports">${portsOf(e.id).map(pt=>{
           const tgt = portTarget(pt);
           return `<button class="eq-port${tgt?' occ':''} st-${pt.status}" ${picking?'disabled':`data-port="${pt.id}"`} title="${escapeHtml(pt.label)} · ${PORT_MEDIA_LABEL[pt.media]||''} · ${pt.external?'externa':'interna'} · ${PORT_STATUS_LABEL[pt.status]||pt.status}">${escapeHtml(pt.label)} <span class="m">${PORT_MEDIA_LABEL[pt.media]||''}·${pt.external?'ext':'int'}</span> ${tgt?'→ '+escapeHtml(tgt.name):'livre'}</button>`;
@@ -2177,6 +2211,18 @@ function portCountsHtml(n){
     `<label>${PORT_MEDIA_LABEL[PORT_MEDIA[f]]}<input id="f-ports-${f}" type="number" min="0" max="128" value="${cnt(f)}"></label>`).join('')}</div>
     <div class="cable-meta">Geradas como ETH n, SFP n, PON n, FO n. PON nasce externa; as demais, internas (editável por porta).</div></div>`;
 }
+/* Padrões da OLT (herdados pelas PONs sem valor próprio). Na edição, vazio é enviado para apagar. */
+function oltDefaultsHtml(n){
+  return `<div class="form-field"><label>Padrão das PONs (só preenche portas sem valor próprio)</label>
+    <div class="port-counts" style="grid-template-columns:1fr 1fr"><label>Tx padrão (dBm)<input id="f-olt-tx" type="text" inputmode="decimal" placeholder="ex.: 4,5" value="${n&&n.tx_padrao_dbm!=null?escapeHtml(String(n.tx_padrao_dbm).replace('.',',')):''}"></label>
+    <label>Máx. clientes/PON<input id="f-olt-max" type="number" min="1" max="256" value="${n&&n.max_clientes_padrao!=null?escapeHtml(n.max_clientes_padrao):''}"></label></div></div>`;
+}
+function oltDefaultsValues(sendEmpty){
+  const out = {}, tx = document.getElementById('f-olt-tx').value.trim(), mx = document.getElementById('f-olt-max').value.trim();
+  if(tx!=='' || sendEmpty) out.tx_padrao_dbm = tx;
+  if(mx!=='' || sendEmpty) out.max_clientes_padrao = mx;
+  return out;
+}
 function portCountsFields(){
   const out = {};
   PORT_FAMILIES.forEach(f=>{ const el = document.getElementById('f-ports-'+f); if(el) out['ports_'+f] = String(Math.max(0, parseInt(el.value,10)||0)); });
@@ -2203,7 +2249,8 @@ function openCreateModal(type, latlng, opts){
       <div class="form-field"><label>Situação</label><select id="f-lifecycle"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
       ${equip ? `<div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" placeholder="Opcional"></div>
       <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" placeholder="Opcional"></div>
-      ${portCountsHtml(null)}` : ''}
+      ${portCountsHtml(null)}
+      ${type==='olt' ? oltDefaultsHtml(null) : ''}` : ''}
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2" placeholder="Opcional"></textarea></div>
       ${type==='cto' ? `<div class="form-field"><label>Número de portas</label><input id="f-cap" type="number" min="1" max="144" value="16"></div>` : ''}
     </div>
@@ -2227,6 +2274,7 @@ function openCreateModal(type, latlng, opts){
       const fab = document.getElementById('f-fab').value.trim(), mod = document.getElementById('f-modelo').value.trim();
       if(fab) attrs.fabricante = fab;
       if(mod) attrs.modelo = mod;
+      if(type==='olt') Object.assign(attrs, oltDefaultsValues(false));
     }
     const saveBtn = document.getElementById('modal-save'); saveBtn.disabled = true;
     mapPost('/nos', Object.assign({
@@ -2269,7 +2317,8 @@ function openEditModal(n){
       ${equip ? `<div class="form-field"><label>Site (POP/Torre)</label><select id="f-site">${sites.map(st=>`<option value="${st.dbId}" ${st.dbId===n.parentDbId?'selected':''}>${escapeHtml(st.name)} (${TYPE_LABEL[st.type]})</option>`).join('')}</select></div>
       <div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" value="${escapeHtml(n.fabricante||'')}"></div>
       <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" value="${escapeHtml(n.modelo||'')}"></div>
-      ${portCountsHtml(n)}` : ''}
+      ${portCountsHtml(n)}
+      ${n.type==='olt' ? oltDefaultsHtml(n) : ''}` : ''}
       <div class="form-field"><label>Observação</label><textarea id="f-obs" rows="2">${escapeHtml(n.desc||'')}</textarea></div>
       ${isCTO ? `<div class="form-field"><label>Número de portas (atual: ${n.capacity||0})</label><input id="f-cap" type="number" min="1" max="144" value="${n.capacity||16}"></div>` : ''}
     </div>
@@ -2290,6 +2339,7 @@ function openEditModal(n){
     if(equip){
       overrides.fabricante = document.getElementById('f-fab').value.trim();
       overrides.modelo = document.getElementById('f-modelo').value.trim();
+      if(n.type==='olt') Object.assign(overrides, oltDefaultsValues(true));
       const siteSel = document.getElementById('f-site');
       if(siteSel && siteSel.value && +siteSel.value!==n.parentDbId) extra.parent_node_id = siteSel.value;   // mover entre sites
       Object.assign(extra, portCountsFields());
@@ -2516,6 +2566,11 @@ function openPortModal(p){
       <div class="cable-meta">${escapeHtml(owner ? owner.name : '')} · mídia ${PORT_MEDIA_LABEL[p.media]||escapeHtml(p.media||'—')} (definida pelo tipo da porta) · ${tgt ? 'em uso → '+escapeHtml(tgt.name)+(lk && lk.label ? ' ('+escapeHtml(lk.label)+')' : '') : 'livre'}</div>
       <div class="form-field"><label>Rótulo</label><input id="f-pt-label" type="text" maxlength="60" value="${escapeHtml(p.label)}"></div>
       <div class="form-field"><label>Uso</label><select id="f-pt-ext"><option value="0" ${p.external?'':'selected'}>Interna (só dentro do site)</option><option value="1" ${p.external?'selected':''}>Externa (pode sair do site)</option></select></div>
+      ${p.role==='pon' ? (()=>{ const e = ponEffective(p), olt = owner||{};
+        return `<div class="form-field"><label>Potência de saída (dBm)</label><input id="f-pt-tx" type="text" inputmode="decimal" placeholder="${olt.tx_padrao_dbm!=null&&olt.tx_padrao_dbm!==''?'padrão da OLT: '+escapeHtml(fmtTx(+olt.tx_padrao_dbm)):'ex.: 4,5'}" value="${p.tx_dbm!=null?escapeHtml(String(p.tx_dbm).replace('.',',')):''}">
+          <div class="cable-meta">${e.tx.src==='porta' ? 'Valor desta porta.' : e.tx.src==='olt' ? 'Vazio: herda o padrão da OLT ('+escapeHtml(fmtTx(e.tx.v))+').' : 'Não informado (−10 a +10 dBm).'}</div></div>
+        <div class="form-field"><label>Máximo de clientes</label><input id="f-pt-max" type="number" min="1" max="256" placeholder="${olt.max_clientes_padrao!=null&&olt.max_clientes_padrao!==''?'padrão da OLT: '+escapeHtml(olt.max_clientes_padrao):''}" value="${p.max_clientes!=null?escapeHtml(p.max_clientes):''}">
+          <div class="cable-meta">${e.max.src==='porta' ? 'Valor desta porta.' : e.max.src==='olt' ? 'Vazio: herda o padrão da OLT ('+escapeHtml(e.max.v)+').' : 'Não informado (1 a 256).'}</div></div>`; })() : ''}
       <div class="form-field"><label>Status</label><select id="f-pt-status">${Object.keys(PORT_STATUS_LABEL).map(k=>`<option value="${k}" ${p.status===k?'selected':''}>${PORT_STATUS_LABEL[k]}</option>`).join('')}</select></div>
     </div>
     <div class="modal-foot">
@@ -2531,7 +2586,9 @@ function openPortModal(p){
     const label = document.getElementById('f-pt-label').value.trim();
     if(!label){ toast('Informe o rótulo da porta.'); return; }
     const btn = document.getElementById('modal-save'); btn.disabled = true;
-    mapPost('/portas/editar', {id:p.dbId, label, is_external:document.getElementById('f-pt-ext').value, status:document.getElementById('f-pt-status').value})
+    const body = {id:p.dbId, label, is_external:document.getElementById('f-pt-ext').value, status:document.getElementById('f-pt-status').value};
+    if(p.role==='pon'){ body.tx_dbm = document.getElementById('f-pt-tx').value.trim(); body.max_clientes = document.getElementById('f-pt-max').value.trim(); }
+    mapPost('/portas/editar', body)
       .then(()=>{ closeModal(); reopen('Porta salva.'); })
       .catch(err=>{ btn.disabled = false; toast(err.message); });
   });
