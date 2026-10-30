@@ -250,6 +250,19 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
+function isDraftSecurityField(name) {
+    return /(?:csrf|token|password|senha|secret|credential|session|nonce)/i.test(name)
+        || ['draft_id', 'send_request_id', '__proto__', 'constructor', 'prototype'].includes(name);
+}
+
+function sanitizeLocalDraft(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return null;
+    }
+
+    return Object.fromEntries(Object.entries(payload).filter(([name]) => !isDraftSecurityField(name)));
+}
+
 function readDraftStorage(form) {
     const key = getDraftStorageKey(form);
 
@@ -259,7 +272,7 @@ function readDraftStorage(form) {
 
     try {
         const stored = window.localStorage.getItem(key);
-        return stored ? safeJsonParse(stored, null) : null;
+        return stored ? sanitizeLocalDraft(safeJsonParse(stored, null)) : null;
     } catch (error) {
         return null;
     }
@@ -273,7 +286,7 @@ function writeDraftStorage(form, payload) {
     }
 
     try {
-        window.localStorage.setItem(key, JSON.stringify(payload));
+        window.localStorage.setItem(key, JSON.stringify(sanitizeLocalDraft(payload)));
     } catch (error) {
         // Se a quota do navegador estourar, o formulario continua funcionando
         // com a sessao do servidor como fallback.
@@ -606,7 +619,7 @@ function collectFormState(form) {
     const state = {};
 
     Array.from(form.elements).forEach((element) => {
-        if (!element.name || element.disabled) {
+        if (!element.name || element.disabled || isDraftSecurityField(element.name) || element.type === 'password') {
             return;
         }
 
@@ -759,7 +772,7 @@ async function restoreDraftToForm(form) {
     }
 
     Array.from(form.elements).forEach((element) => {
-        if (!element.name || element.disabled || element.type === 'file') {
+        if (!element.name || element.disabled || element.type === 'file' || element.type === 'password' || isDraftSecurityField(element.name)) {
             return;
         }
 
