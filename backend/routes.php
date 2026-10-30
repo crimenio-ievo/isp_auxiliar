@@ -90,6 +90,7 @@ return static function (Router $router): void {
     $router->get('/usuarios', [SystemController::class, 'users'], 'users.index');
     $router->post('/usuarios/gestor', [SystemController::class, 'saveManager'], 'users.manager.save');
     $router->get('/mapa', [MapController::class, 'show'], 'map.show');
+    $router->get('/api/mapa', [MapController::class, 'data'], 'api.map.data');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');

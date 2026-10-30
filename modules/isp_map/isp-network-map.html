@@ -427,6 +427,14 @@ button{font-family:inherit;}
 .add-menu-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:4px;cursor:pointer;font-size:11.5px;color:var(--text);}
 .add-menu-item:hover{background:#1e2530;}
 .add-menu-item svg{width:15px;height:15px;flex-shrink:0;opacity:.8;}
+/* ---- fase 1B: estado da carga e avisos de "não salvo" ---- */
+.map-status{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:900;pointer-events:none;
+  color:var(--text-faint);font-size:13px;text-align:center;padding:24px;}
+.map-status.show{display:flex;}
+.map-status.error{color:var(--yellow);pointer-events:auto;}
+.map-unsaved{position:absolute;left:10px;bottom:10px;z-index:901;font-size:10.5px;color:var(--yellow);
+  background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.35);border-radius:4px;padding:3px 8px;pointer-events:none;}
+.diagram-unsaved{font-size:10px;color:var(--yellow);margin-top:2px;}
 </style>
 </head>
 <body>
@@ -476,6 +484,8 @@ button{font-family:inherit;}
     <!-- MAP -->
     <div id="map-wrap">
       <div id="map"></div>
+      <div class="map-status" id="map-status" role="status"></div>
+      <div class="map-unsaved" id="map-unsaved">Edições ainda não são salvas</div>
       <div id="mode-banner"><span id="mode-banner-text"></span><button id="mode-banner-cancel">CANCELAR (ESC)</button></div>
       <div class="map-legend">
         <div class="lg-item"><div class="lg-dot" style="background:var(--green)"></div>Normal</div>
@@ -510,6 +520,7 @@ button{font-family:inherit;}
     <div>
       <div class="diagram-eyebrow">Diagrama unifilar</div>
       <div class="diagram-title" id="diagram-title">—</div>
+      <div class="diagram-unsaved">Diagrama ainda não é salvo</div>
     </div>
     <div class="diagram-tools">
       <span class="dg-joinsel" id="dg-joinsel">
@@ -877,7 +888,71 @@ function buildNetwork(){
 
   return {popCentral,popNorte,popSul};
 }
-buildNetwork();
+/* ---- carga dos dados reais (GET /api/mapa) ---- */
+function setMapStatus(msg, isError){
+  const el = document.getElementById('map-status');
+  if(!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('show', !!msg);
+  el.classList.toggle('error', !!isError);
+}
+function applyTopology(data){
+  const rawNodes = Array.isArray(data.nodes) ? data.nodes : [];
+  const rawPorts = Array.isArray(data.ports) ? data.ports : [];
+  const rawLinks = Array.isArray(data.links) ? data.links : [];
+  const byDb = {};
+  rawNodes.forEach(r=>{
+    if(r.lat==null || r.lng==null) return;            // sem coordenada não há onde desenhar
+    const n = Object.assign({}, r.attrs_json||{}, {
+      id:'n'+r.id, dbId:r.id, type:r.node_type, name:r.name, code:r.code, lat:r.lat, lng:r.lng,
+      status:r.status||'normal', parent:null, parentLink:null, notes:r.notes
+    });
+    if(n.type==='olt') n.pons = [];
+    if(n.type==='switch'){ n.ports24 = n.ports24||24; n.used = n.used||0; }
+    nodes.push(n); byDb[r.id] = n;
+  });
+  rawPorts.forEach(r=>{
+    const n = byDb[r.node_id]; if(!n) return;
+    const a = r.attrs_json||{};
+    if(r.port_role==='pon' && n.type==='olt'){
+      n.pons.push({ponId:r.label||('PON '+r.port_num), onus:a.onus||0, power:a.power==null?null:a.power, status:r.status||'livre'});
+      return;
+    }
+    ports.push(Object.assign({}, a, {id:'p'+r.id, dbId:r.id, nodeId:n.id, label:r.label||('Porta '+r.port_num),
+      status:r.status||'livre', role:r.port_role, num:r.port_num}));
+  });
+  rawLinks.forEach(r=>{
+    const a = byDb[r.from_node_id], b = byDb[r.to_node_id]; if(!a || !b) return;
+    const extra = Object.assign({}, r.attrs_json||{}, {dbId:r.id, label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json});
+    const l = addLink(r.link_type, a, b, r.status||'normal', extra);
+    if(r.link_type==='backbone'){ b.parent = null; b.parentLink = null; }   // backbone não define hierarquia
+  });
+  // contadores em memória não podem colidir com os ids vindos do banco
+  _nid = Math.max(_nid, ...rawNodes.map(r=>r.id+1)); _pid = Math.max(_pid, ...rawPorts.map(r=>r.id+1)); _lid = Math.max(_lid, ...rawLinks.map(r=>r.id+1));
+  setMapStatus(nodes.length ? '' : 'Nenhum elemento cadastrado');
+  fitToNetwork();
+}
+function loadNetwork(){
+  const cfg = window.ISP_MAP || {};
+  const sessionMsg = 'Sessão expirada — faça login novamente';
+  setMapStatus('Carregando…');
+  fetch(cfg.api || '/api/mapa', {credentials:'same-origin', headers:{'Accept':'application/json'}})
+    .then(resp=>{
+      const ct = resp.headers.get('content-type') || '';
+      if(resp.redirected || !ct.includes('application/json')) throw new Error('session');
+      return resp.json().then(body=>({status:resp.status, body}));
+    })
+    .then(({status, body})=>{
+      if(status===403) throw new Error('forbidden');
+      if(!body || body.ok!==true || !body.data) throw new Error('api');
+      applyTopology(body.data);
+    })
+    .catch(err=>{
+      const m = err && err.message;
+      setMapStatus(m==='session' ? sessionMsg : (m==='forbidden' ? 'Acesso negado ao mapa.' : 'Não foi possível carregar o mapa.'), true);
+    });
+}
+loadNetwork();
 
 /* ============================================================
    MAPA — renderizador SVG próprio (sem biblioteca externa)
