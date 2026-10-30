@@ -141,6 +141,8 @@ ob_start();
         data-acceptance-form
         data-acceptance-send-form
         data-autosave-form
+        data-post-max-bytes="<?= max(0, ini_parse_quantity((string) ini_get('post_max_size'))); ?>"
+        data-upload-max-bytes="<?= max(0, ini_parse_quantity((string) ini_get('upload_max_filesize'))); ?>"
         data-draft-key="client-acceptance-<?= htmlspecialchars($draftId ?? '', ENT_QUOTES, 'UTF-8'); ?>"
         data-draft-json="<?= htmlspecialchars((string) ($draftJson ?? '{}'), ENT_QUOTES, 'UTF-8'); ?>"
     >

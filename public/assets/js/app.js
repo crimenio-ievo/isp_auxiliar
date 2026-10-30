@@ -500,7 +500,8 @@ function refreshPhotoQueue() {
     const items = getPhotoItems();
 
     if (photoCount) {
-        photoCount.textContent = `${items.length} foto${items.length === 1 ? '' : 's'} anexada${items.length === 1 ? '' : 's'}`;
+        const totalBytes = items.reduce((total, item) => total + item.file.size, 0);
+        photoCount.textContent = `${items.length} foto${items.length === 1 ? '' : 's'} anexada${items.length === 1 ? '' : 's'} — ${(totalBytes / 1048576).toFixed(2)} MB`;
         photoCount.dataset.tone = items.length > 0 ? 'success' : 'neutral';
     }
 
@@ -595,13 +596,18 @@ function wirePhotoPicker(button, input, multiple = true) {
             activeInput = nextInput;
             attachChangeHandler(nextInput);
 
+            fileInput.dataset.photoProcessing = '1';
             void (async () => {
-                const compressedFiles = await compressPhotoFiles(selectedFiles);
-                replaceFileInputFiles(fileInput, compressedFiles);
-                refreshPhotoQueue();
+                try {
+                    const compressedFiles = await compressPhotoFiles(selectedFiles);
+                    replaceFileInputFiles(fileInput, compressedFiles);
+                    refreshPhotoQueue();
 
-                if (fileInput.form) {
-                    scheduleDraftSave(fileInput.form);
+                    if (fileInput.form) {
+                        scheduleDraftSave(fileInput.form);
+                    }
+                } finally {
+                    delete fileInput.dataset.photoProcessing;
                 }
             })();
         });
@@ -830,6 +836,28 @@ function scheduleDraftSave(form) {
     }, 150);
 }
 
+function getFormUploadSizeError(form) {
+    if (form.querySelector('[data-photo-processing="1"]')) {
+        return 'Aguarde a preparação das fotos antes de enviar.';
+    }
+
+    const postLimit = Number(form.dataset.postMaxBytes || 0);
+    const fileLimit = Number(form.dataset.uploadMaxBytes || 0);
+    // Reserva para cabeçalhos multipart, boundary e controles de envio.
+    let estimatedBytes = 65536;
+    for (const [name, value] of new FormData(form).entries()) {
+        const bytes = typeof value === 'string' ? new Blob([value]).size : value.size;
+        if (typeof value !== 'string' && fileLimit > 0 && bytes > fileLimit) {
+            return `Uma foto ultrapassa o limite por arquivo de ${(fileLimit / 1048576).toFixed(2)} MB. Reduza a foto antes de enviar.`;
+        }
+        estimatedBytes += bytes + new Blob([name]).size + 1024;
+    }
+    if (postLimit > 0 && estimatedBytes > postLimit) {
+        return `Envio maior que o limite: aproximadamente ${(estimatedBytes / 1048576).toFixed(2)} MB para um limite de ${(postLimit / 1048576).toFixed(2)} MB. Reduza o tamanho ou a quantidade de fotos.`;
+    }
+    return '';
+}
+
 function wireAutosave(form) {
     if (!form) {
         return;
@@ -897,6 +925,13 @@ function wireAutosave(form) {
             if (typeof form.reportValidity === 'function') {
                 form.reportValidity();
             }
+            return;
+        }
+
+        const sizeError = getFormUploadSizeError(form);
+        if (sizeError) {
+            event.preventDefault();
+            window.alert(sizeError);
             return;
         }
 

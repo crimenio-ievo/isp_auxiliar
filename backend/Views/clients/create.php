@@ -106,6 +106,8 @@ ob_start();
     action="<?= htmlspecialchars(Url::to('/clientes/novo'), ENT_QUOTES, 'UTF-8'); ?>"
     enctype="multipart/form-data"
     data-autosave-form
+    data-post-max-bytes="<?= max(0, ini_parse_quantity((string) ini_get('post_max_size'))); ?>"
+    data-upload-max-bytes="<?= max(0, ini_parse_quantity((string) ini_get('upload_max_filesize'))); ?>"
     data-draft-key="<?= htmlspecialchars($draftKey, ENT_QUOTES, 'UTF-8'); ?>"
     data-skip-draft-restore="<?= $skipDraftRestore ? '1' : '0'; ?>"
     data-clear-draft-keys="<?= htmlspecialchars(json_encode($clearDraftKeys, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]', ENT_QUOTES, 'UTF-8'); ?>"

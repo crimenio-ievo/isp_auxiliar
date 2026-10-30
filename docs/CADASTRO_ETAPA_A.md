@@ -28,3 +28,25 @@ query string, corpo, identidade, IP ou token.
 Validação: `php tests/Feature/CadastroPostDiagnostics.php`, lint de Application.php,
 AuthController.php, ClientController.php e do teste; regressão A1.
 Reversão: `git revert <commit-A2>`.
+
+## A3 — proteção de tamanho
+
+Menor solução adotada: reutilizar o compressor que já existe (máximo 1280×1280,
+JPEG qualidade 0,72) e acrescentar pré-checagem dos limites reais publicados pelo
+PHP nas duas views. Sem alteração de php.ini/Apache nem reorganização do JS.
+O envio é bloqueado enquanto fotos são preparadas, se um arquivo ultrapassar
+upload_max_filesize ou se o total estimado exceder post_max_size. O total inclui
+campos/assinatura e reserva conservadora de 64 KiB + 1 KiB por campo para multipart.
+O tamanho total das fotos aparece na fila, além do tamanho individual existente.
+Se o navegador não conseguir comprimir/substituir o arquivo, a checagem ainda
+considera o arquivo original e impede excesso. O servidor mantém a barreira A2.
+
+Estimativa de uso: ordem de centenas de KB por foto, variável conforme conteúdo e
+codificador. Medição sintética local em GD: imagem 1280×960 com gradiente/ruído,
+JPEG Q72 = 346570 bytes (338 KiB); três = 1039710 bytes (0,99 MiB). É referência
+sintética, não medição de fotos reais de celular nem do canvas do navegador.
+O roteiro manual deve registrar os tamanhos reais exibidos com 3+ fotos.
+
+Validação: teste JS A1 ampliado para tamanho por arquivo, lote de fotos, assinatura,
+limite ilimitado e processamento pendente; node --check; php -l nas duas views.
+Reversão: `git revert <commit-A3>`. Nenhuma elevação de limite é necessária agora.
