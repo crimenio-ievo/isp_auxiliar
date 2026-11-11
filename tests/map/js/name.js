@@ -31,13 +31,26 @@ const w=dom.window,d=w.document; const wait=ms=>new Promise(r=>setTimeout(r,ms))
  d.getElementById('modal-x').click();
  // overzoom: Esri e OSM em zoom alto
  const sel=d.getElementById('sel-basemap');
- for(const k of ['sat','osm']){
+ for(const k of ['sat','osm','satStreets','sat']){
   sel.value=k; sel.dispatchEvent(new w.Event('change',{bubbles:true}));
   for(let i=0;i<14;i++) d.getElementById('btn-zoom-in').click();
   await wait(20);
   const zs=[...d.querySelectorAll('image.mtile')].map(i=>{const m=i.getAttribute('href').match(/tile\/(\d+)\/|\/(\d+)\/\d+\/\d+\.png/);return +(m[1]||m[2]);});
   const size=d.querySelector('image.mtile')&&+d.querySelector('image.mtile').getAttribute('width');
   console.log(k,'zoom máximo do mapa: tiles pedidos em z =',[...new Set(zs)].join(','),'| tamanho do tile na tela:',size,'px (>256 = ampliado)');
+  const tiles=[...d.querySelectorAll('image.mtile')];
+  const services=[...new Set(tiles.map(i=>i.getAttribute('href').split('/MapServer/')[0].split('/').pop()))];
+  const expected=k==='satStreets'?['World_Imagery','World_Transportation','World_Boundaries_and_Places']:k==='sat'?['World_Imagery']:['tile.openstreetmap.org'];
+  const actual=k==='osm'?['tile.openstreetmap.org']:services;
+  if(JSON.stringify(actual)!==JSON.stringify(expected)) throw new Error('Camadas/ordem incorretas: '+actual);
+  for(const tile of tiles){
+   const href=tile.getAttribute('href');
+   const native=/World_Transportation|openstreetmap/.test(href)?19:17;
+   const z=+(href.match(/tile\/(\d+)\/|\/(\d+)\/\d+\/\d+\.png/).slice(1).find(Boolean));
+   if(z!==native || +tile.getAttribute('width')!==256*Math.pow(2,20-native)+1) throw new Error('Overzoom incorreto: '+href);
+   if(/Reference\//.test(href)&&tile.parentNode.getAttribute('opacity')!=='1') throw new Error('Rótulos devem manter opacidade própria');
+  }
+  console.log('[OK] camadas em ordem e overzoom independente; '+k);
  }
  console.log('erros:',errs.length?errs.join('\n '):'nenhum'); process.exit(0);
 })();

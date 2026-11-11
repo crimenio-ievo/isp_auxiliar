@@ -1,6 +1,6 @@
 # ISP_Auxiliar — Roadmap e pendências (fonte única)
 
-Atualizado em 2026-10-30.
+Atualizado em 2026-11-11.
 
 ## Estado atual
 
@@ -25,6 +25,7 @@ Atualizado em 2026-10-30.
 
 ## Pendências técnicas
 
+- **ISP Map — Satélite + ruas (2026-11-11, só .89):** nova opção combina World_Imagery (z17), World_Transportation (z19) e World_Boundaries_and_Places (z17), nessa ordem, com overzoom independente por camada; “Satélite (Esri)” continua sem rótulos. Sem biblioteca nova. Verificação por `curl`, sem chave, em Coimbra/MG (-20.857, -42.801): HTTP 200, image/png, PNG32/RGBA 256×256 com transparência. Centro amostrado de z13 a z21; grade 3×3 em Transportation z19/z20 e Places z16–z20: ruas com conteúdo até z19 (8/9 tiles), localidades até z17 (1/9); níveis seguintes amostrados transparentes. Metadados anunciam z0–z23, mas isso não garante conteúdo local (até z24 retornou PNG vazio). Limites adotados refletem a amostra, não garantia de cobertura regional. Reprodução: converter coordenadas para tile XYZ e executar `curl -D - -o /tmp/esri-reference.png 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/19/293213/199810'`; Places: `Reference/World_Boundaries_and_Places/MapServer/tile/17/73302/49952` (vizinho com rótulo). Teste manual: `/mapa` → “Satélite + ruas”, ampliar até z20 e alternar para “Satélite (Esri)”; ruas/localidades devem desaparecer na segunda opção. Suíte `bash tests/map/run_all.sh`: antes e depois, 25 passaram / 0 falharam (incluindo as novas verificações de composição, troca e overzoom em `tests/map/js/name.js`). Avisos de headers e checagem de configuração real pulada já existentes na linha de base. Rota `/mapa` no virtual host `testes.ievo.com.br`: HTTP 302 para login sem sessão; renderização autenticada simulada por jsdom, sem inspeção visual em navegador.
 - **ISP Map 2R concluída (2026-10-30, só .89):** testes corrigidos e ampliados no `c77a1ed`, sem escrita em configurações reais (uma checagem pulada com aviso). Motor unifilar extraído para `modules/isp_map/diagram.js`, GET autenticado `/mapa/diagram.js` pelo MapController, mesma restrição de gestor/admin e no-store. Linha de base e pós-extração: **23 cenários passaram, zero falhas**, mesmo hash de SVG/painéis; 12 verificações adicionais de rota passaram. Evidência, limites e reprodução: `tests/map/BASELINE.md` e `tests/map/README.md`. Próxima etapa 2C não iniciada.
 - **ISP Map 2C concluída (2026-11-11, só .89):** splitter e DIO como nós passivos (detalhes no item 3). Testes: `tests/map/suite_passive.php` (51 verificações) e `tests/map/js/passive.js` (jsdom, 28); `run_all.sh` 23 → 25 cenários, zero falhas; `tests/map/js/site.js` atualizado (a lista de "adicionar aqui dentro" agora inclui splitter e DIO). Sem migration. Próxima etapa 2D (emendas) não iniciada.
 - .86: rodar scripts/migrate_integration_settings.php (simulação, depois --apply) antes de alguém salvar Email/Evotrix pela tela.

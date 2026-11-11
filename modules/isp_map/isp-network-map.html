@@ -996,7 +996,16 @@ const BASEMAPS = {
            filter:'invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)'},   // Carto passou a exigir chave de API
   sat:    {label:'Satélite (Esri)',
            url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
-           attrib:'© Esri, Maxar, Earthstar Geographics', maxNativeZoom:17, dim:0.85}
+           attrib:'© Esri, Maxar, Earthstar Geographics', maxNativeZoom:17, dim:0.85},
+  satStreets: {label:'Satélite + ruas',
+           url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+           attrib:'© Esri, Maxar, Earthstar Geographics; referências © Esri, HERE, Garmin, OpenStreetMap contributors',
+           maxNativeZoom:17, dim:0.85,
+           // Coimbra/MG: referências com conteúdo até z19 (ruas) e z17 (localidades); acima, PNG vazio.
+           overlays:[
+             {url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/${z}/${y}/${x}`, maxNativeZoom:19},
+             {url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`, maxNativeZoom:17}
+           ]}
 };
 /* maxNativeZoom = último zoom em que a camada tem imagem real. Acima dele o mesmo tile do zoom máximo é ampliado
    (overzoom), em vez de pedir tiles que não existem. Esri: z18 é "Map data not yet available" em áreas rurais do
@@ -1007,6 +1016,10 @@ let tileErrors = 0, tileTried = 0;
 function renderTiles(parts){
   const bm = BASEMAPS[basemap];
   if(!bm || !bm.url) return;
+  [bm, ...(bm.overlays||[])].forEach(layer=>renderTileLayer(parts, layer));
+}
+
+function renderTileLayer(parts, bm){
   let z = Math.round(currentZoom());
   z = Math.max(0, Math.min(bm.maxNativeZoom||19, z));   // acima do zoom nativo: overzoom (tile ampliado)
   const n = Math.pow(2,z);
