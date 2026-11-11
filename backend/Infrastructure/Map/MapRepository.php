@@ -282,13 +282,13 @@ final class MapRepository
         return array_map(fn (array $r): array => $this->normalizePort($r), $rows);
     }
 
-    public function createPort(int $providerId, ?int $userId, int $nodeId, string $role, int $num, string $label, string $media, bool $external): int
+    public function createPort(int $providerId, ?int $userId, int $nodeId, string $role, int $num, string $label, string $media, bool $external, ?string $attrsJson = null): int
     {
         $pdo = $this->database->pdo();
         $pdo->prepare(
-            'INSERT INTO map_ports (provider_id, node_id, port_num, label, port_role, media, is_external, status, created_by_user_id, updated_by_user_id, created_at, updated_at)
-             VALUES (:p, :n, :num, :label, :role, :media, :ext, \'livre\', :u, :u2, NOW(), NOW())'
-        )->execute(['p' => $providerId, 'n' => $nodeId, 'num' => $num, 'label' => $label, 'role' => $role, 'media' => $media, 'ext' => $external ? 1 : 0, 'u' => $userId, 'u2' => $userId]);
+            'INSERT INTO map_ports (provider_id, node_id, port_num, label, port_role, media, is_external, status, attrs_json, created_by_user_id, updated_by_user_id, created_at, updated_at)
+             VALUES (:p, :n, :num, :label, :role, :media, :ext, \'livre\', :attrs, :u, :u2, NOW(), NOW())'
+        )->execute(['p' => $providerId, 'n' => $nodeId, 'num' => $num, 'label' => $label, 'role' => $role, 'media' => $media, 'ext' => $external ? 1 : 0, 'attrs' => $attrsJson, 'u' => $userId, 'u2' => $userId]);
 
         return (int) $pdo->lastInsertId();
     }

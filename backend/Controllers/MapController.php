@@ -53,12 +53,25 @@ final class MapController
      * - contêiner (site): pop, tower — coordenada própria; tower pode ficar dentro de um pop.
      * - equipamento: fica OBRIGATORIAMENTE dentro de um contêiner e não tem coordenada (herda a do site).
      *   É também o ponto onde as portas da fase 1G vão se pendurar.
-     * - campo: ceo, cto — coordenada própria, sem pai.
+     * - campo: ceo, cto — coordenada própria, sem pai (fase 2C: aceitam filhos, mas SOMENTE splitter).
+     * - passivo (fase 2C): splitter (pai POP, torre, CEO ou CTO) e dio (pai POP ou torre). Sem coordenada própria
+     *   (herdam a do pai) e sem ícone no mapa. CEO/CTO funcionam como a "caixa" dos splitters que têm dentro.
      */
     private const CONTAINER_TYPES = ['pop', 'tower'];
     private const EQUIPMENT_TYPES = ['olt', 'switch', 'router', 'radio', 'server', 'other'];
     private const FIELD_TYPES = ['ceo', 'cto'];
-    private const NODE_TYPES = ['pop', 'tower', 'olt', 'switch', 'router', 'radio', 'server', 'other', 'ceo', 'cto'];
+    private const PASSIVE_TYPES = ['splitter', 'dio'];
+    private const PASSIVE_PARENTS = ['splitter' => ['pop', 'tower', 'ceo', 'cto'], 'dio' => ['pop', 'tower']];
+    private const NODE_TYPES = ['pop', 'tower', 'olt', 'switch', 'router', 'radio', 'server', 'other', 'ceo', 'cto', 'splitter', 'dio'];
+
+    /*
+     * Splitter (fase 2C): attrs.razao do mesmo catálogo de diagram.js (subconjunto aprovado na 2A). Balanceado 1xN:
+     * 1 'spl_in' + N 'spl_out'. Desbalanceado A/B: 1 'spl_in' + 2 'spl_out' com attrs.percentual (A na saída 1, B na 2).
+     * DIO: attrs.capacidade; portas 'dio' "DIO n".
+     */
+    private const SPLITTER_BALANCED = ['1x2' => 2, '1x4' => 4, '1x8' => 8, '1x16' => 16, '1x32' => 32, '1x64' => 64];
+    private const SPLITTER_UNBALANCED = ['5/95', '10/90', '15/85', '20/80', '30/70', '40/60', '50/50'];
+    private const DIO_CAPACITIES = [12, 24, 36, 48, 72, 96, 144];
     private const NODE_STATUSES = ['normal', 'alerta', 'critico', 'offline'];
     private const NODE_LIFECYCLES = ['projeto', 'ativo', 'desativado'];
     private const ATTRS_MAX_BYTES = 4096;
@@ -71,8 +84,14 @@ final class MapController
      * attrs.capacity. Aumentar acrescenta no fim; reduzir remove as de maior número, só se estiverem livres (sem
      * ligação) — senão 409 listando as ocupadas. "Ocupada" não é gravado: é a porta estar em alguma ligação.
      */
-    private const PORT_MEDIA = ['eth' => 'rj45', 'sfp' => 'sfp', 'pon' => 'pon', 'fo' => 'fibra'];
-    private const PORT_LABEL_PREFIX = ['eth' => 'ETH', 'sfp' => 'SFP', 'pon' => 'PON', 'fo' => 'FO'];
+    /*
+     * port_role → media (derivada aqui, nunca vem do cliente). Fase 2C: spl_in, spl_out (splitter) e dio → fibra.
+     * Manter igual ao PORT_MEDIA de modules/isp_map/isp-network-map.html.
+     */
+    private const PORT_MEDIA = ['eth' => 'rj45', 'sfp' => 'sfp', 'pon' => 'pon', 'fo' => 'fibra', 'spl_in' => 'fibra', 'spl_out' => 'fibra', 'dio' => 'fibra'];
+    /** Famílias que o equipamento aceita por quantidade (ports_*); as passivas têm geração própria. */
+    private const EQUIPMENT_PORT_FAMILIES = ['eth', 'sfp', 'pon', 'fo'];
+    private const PORT_LABEL_PREFIX = ['eth' => 'ETH', 'sfp' => 'SFP', 'pon' => 'PON', 'fo' => 'FO', 'dio' => 'DIO'];
     private const PORT_STATUSES = ['livre', 'reservada', 'defeito'];
     private const PORT_MAX_PER_FAMILY = 128;
 
@@ -141,7 +160,7 @@ final class MapController
         if ($portChanges['busy'] !== []) {
             return Response::json([
                 'ok' => false,
-                'message' => 'Não é possível reduzir as portas: ' . implode(', ', array_map(
+                'message' => ($before['node_type'] === 'splitter' ? 'Não é possível trocar a razão do splitter: ' : 'Não é possível reduzir as portas: ') . implode(', ', array_map(
                     static fn (array $b): string => $b['label'] . ' (ligação #' . $b['link_id'] . ')',
                     $portChanges['busy']
                 )) . ' estão em uso. Remova as ligações antes.',
@@ -387,12 +406,12 @@ final class MapController
      *
      * @param array<string, mixed> $fields campos já validados do nó
      * @param list<string> $errors
-     * @return array<string, int>
+     * @return array<string, int|string> família => quantidade (splitter: 'razao' => razão)
      */
     private function validatePortPlan(Request $request, string $type, array $fields, array &$errors): array
     {
         $plan = [];
-        $sent = array_values(array_filter(array_keys(self::PORT_MEDIA), fn (string $f): bool => $request->input('ports_' . $f) !== null));
+        $sent = array_values(array_filter(self::EQUIPMENT_PORT_FAMILIES, fn (string $f): bool => $request->input('ports_' . $f) !== null));
 
         if (in_array($type, self::EQUIPMENT_TYPES, true)) {
             foreach ($sent as $family) {
@@ -409,6 +428,19 @@ final class MapController
         }
         if ($sent !== []) {
             $errors[] = 'Só equipamentos têm quantidades de portas por tipo.';
+        }
+
+        if ($type === 'splitter' && array_key_exists('attrs_json', $fields) && is_string($fields['attrs_json'])) {
+            $razao = (string) (json_decode($fields['attrs_json'], true)['razao'] ?? '');
+            if (isset(self::SPLITTER_BALANCED[$razao]) || in_array($razao, self::SPLITTER_UNBALANCED, true)) {
+                $plan['razao'] = $razao;
+            }
+        }
+        if ($type === 'dio' && array_key_exists('attrs_json', $fields) && is_string($fields['attrs_json'])) {
+            $cap = json_decode($fields['attrs_json'], true)['capacidade'] ?? null;
+            if (is_int($cap) && in_array($cap, self::DIO_CAPACITIES, true)) {
+                $plan['dio'] = $cap;
+            }
         }
 
         if ($type === 'cto' && array_key_exists('attrs_json', $fields) && is_string($fields['attrs_json'])) {
@@ -440,6 +472,10 @@ final class MapController
         $out = ['add' => [], 'remove' => [], 'busy' => []];
         $isCto = $node['node_type'] === 'cto';
         foreach ($plan as $family => $target) {
+            if ($family === 'razao') {
+                $this->planSplitterPorts($providerId, $node, (string) $target, $out);
+                continue;
+            }
             $current = $this->mapRepository->portsOfFamily($providerId, (int) $node['id'], $family);
             $count = count($current);
             if ($target > $count) {
@@ -450,7 +486,7 @@ final class MapController
                         'num' => $next,
                         'label' => ($isCto ? 'Porta' : self::PORT_LABEL_PREFIX[$family]) . ' ' . $next,
                         'media' => self::PORT_MEDIA[$family],
-                        'external' => $family === 'pon' || $isCto,
+                        'external' => $family === 'pon' || $isCto,   // dio: interna
                     ];
                 }
             } elseif ($target < $count) {
@@ -468,6 +504,33 @@ final class MapController
     }
 
     /**
+     * Splitter: se a razão não mudou e as portas existem, nada a fazer. Trocar a razão regera todas as portas e
+     * só é permitido com todas livres (senão busy → 409 listando as ocupadas).
+     *
+     * @param array<string, mixed> $node
+     * @param array{add: list<array<string, mixed>>, remove: list<array<string, mixed>>, busy: list<array<string, mixed>>} $out
+     */
+    private function planSplitterPorts(int $providerId, array $node, string $razao, array &$out): void
+    {
+        $specs = $this->splitterPortSpecs($razao);
+        $current = $this->mapRepository->portsOfNode($providerId, (int) $node['id']);
+        $before = is_array($node['attrs_json'] ?? null) ? ($node['attrs_json']['razao'] ?? null) : null;
+        if ($current !== [] && $before === $razao && count($current) === count($specs)) {
+            return;
+        }
+        foreach ($current as $port) {
+            $using = $this->mapRepository->linkUsingPort($providerId, (int) $port['id']);
+            if ($using !== null) {
+                $out['busy'][] = ['id' => $port['id'], 'label' => $port['label'], 'link_id' => $using['id']];
+            }
+            $out['remove'][] = $port;
+        }
+        foreach ($specs as $spec) {
+            $out['add'][] = $spec + ['media' => self::PORT_MEDIA[$spec['role']], 'external' => false];
+        }
+    }
+
+    /**
      * Aplica o plano (dentro da transação do nó) e audita como map.port.sync.
      *
      * @param array<string, mixed>|null $node
@@ -481,20 +544,21 @@ final class MapController
         if ($changes['busy'] !== []) {
             throw new \RuntimeException('Portas ocupadas no plano de redução.');
         }
+        // Remove antes de criar: a troca de razão do splitter regera as mesmas chaves (node, role, num).
+        foreach ($changes['remove'] as $p) {
+            $this->mapRepository->deletePort($providerId, (int) $p['id']);
+        }
         $added = [];
         foreach ($changes['add'] as $p) {
             $added[] = $this->mapRepository->findPort($providerId, $this->mapRepository->createPort(
-                $providerId, $userId, (int) $node['id'], $p['role'], $p['num'], $p['label'], $p['media'], $p['external']
+                $providerId, $userId, (int) $node['id'], $p['role'], $p['num'], $p['label'], $p['media'], $p['external'], $p['attrs'] ?? null
             ));
-        }
-        foreach ($changes['remove'] as $p) {
-            $this->mapRepository->deletePort($providerId, (int) $p['id']);
         }
         $this->audit($userId, $actor, 'map.port.sync', (int) $node['id'], ['added' => $added, 'removed' => $changes['remove']]);
     }
 
     /**
-     * Site de um nó: o próprio contêiner, o contêiner pai de um equipamento, ou null (campo: CEO/CTO).
+     * Site/caixa de um nó: o próprio contêiner (POP/torre) ou caixa (CEO/CTO), o pai de um equipamento ou passivo.
      *
      * @param array<string, mixed>|null $node
      */
@@ -503,8 +567,12 @@ final class MapController
         if ($node === null) {
             return null;
         }
-        if (in_array($node['node_type'], self::CONTAINER_TYPES, true)) {
+        // Fase 2C: CEO/CTO são a "caixa" dos seus splitters; POP/torre, o site dos equipamentos e passivos.
+        if (in_array($node['node_type'], self::CONTAINER_TYPES, true) || in_array($node['node_type'], self::FIELD_TYPES, true)) {
             return (int) $node['id'];
+        }
+        if (in_array($node['node_type'], self::PASSIVE_TYPES, true)) {
+            return $node['parent_node_id'] !== null ? (int) $node['parent_node_id'] : null;
         }
 
         return in_array($node['node_type'], self::EQUIPMENT_TYPES, true) && $node['parent_node_id'] !== null ? (int) $node['parent_node_id'] : null;
@@ -905,6 +973,7 @@ final class MapController
             }
         }
         $isEquipment = in_array($type, self::EQUIPMENT_TYPES, true);
+        $isPassive = in_array($type, self::PASSIVE_TYPES, true);
 
         if ($creating || $has('name')) {
             $name = trim((string) $request->input('name', ''));
@@ -922,14 +991,14 @@ final class MapController
             $fields['code'] = $code === '' ? null : $code;
         }
 
-        if ($isEquipment) {
-            // Equipamento não tem posição própria: usa a do contêiner.
+        if ($isEquipment || $isPassive) {
+            // Equipamento e passivo (splitter/DIO) não têm posição própria: usam a do pai.
             if ($creating || $has('lat') || $has('lng') || ($existing !== null && ($existing['lat'] !== null || $existing['lng'] !== null))) {
                 $fields['lat'] = null;
                 $fields['lng'] = null;
             }
         }
-        foreach ($isEquipment ? [] : ['lat' => 90.0, 'lng' => 180.0] as $key => $limit) {
+        foreach ($isEquipment || $isPassive ? [] : ['lat' => 90.0, 'lng' => 180.0] as $key => $limit) {
             if ($creating || $has($key)) {
                 $raw = $request->input($key);
                 if (!is_numeric($raw) || abs((float) $raw) > $limit) {
@@ -980,7 +1049,19 @@ final class MapController
             }
             $parentType = (string) ($parent['node_type'] ?? '');
 
-            if ($isEquipment) {
+            if ($isPassive) {
+                $allowed = self::PASSIVE_PARENTS[$type];
+                if ($rawParent === '') {
+                    $errors[] = ($type === 'dio' ? 'DIO precisa estar dentro de um POP ou torre.' : 'Splitter precisa estar dentro de um POP, torre, CEO ou CTO.');
+                } elseif ($parent !== null && !in_array($parentType, $allowed, true)) {
+                    $errors[] = ($type === 'dio' ? 'DIO só pode ficar dentro de um POP ou torre.' : 'Splitter só pode ficar dentro de um POP, torre, CEO ou CTO.');
+                }
+                // Mover de caixa/site com ligações deixaria as ligações apontando para outro lugar.
+                if ($errors === [] && $existing !== null && $parent !== null && (int) $parent['id'] !== (int) $existing['parent_node_id']
+                    && $this->mapRepository->deleteBlockers($providerId, (int) $existing['id'])['links'] !== []) {
+                    $errors[] = 'Remova as ligações antes de mover o elemento para outro site/caixa.';
+                }
+            } elseif ($isEquipment) {
                 if ($rawParent === '') {
                     $errors[] = 'Equipamento precisa estar dentro de um POP ou torre.';
                 } elseif ($parent !== null && !in_array($parentType, self::CONTAINER_TYPES, true)) {
@@ -991,6 +1072,7 @@ final class MapController
                     $errors[] = 'Torre só pode ficar dentro de um POP.';
                 }
             } elseif ($rawParent !== '' && $type !== '') {
+                // CEO/CTO aceitam filhos (só splitter), mas eles próprios continuam sem pai.
                 $errors[] = ($type === 'pop' ? 'POP' : strtoupper($type)) . ' não pode ficar dentro de outro elemento.';
             }
             $fields['parent_node_id'] = $parent === null ? null : (int) $parent['id'];
@@ -1003,6 +1085,9 @@ final class MapController
             } else {
                 $fields['attrs_json'] = $attrs;
                 $decoded = is_string($attrs) ? json_decode($attrs, true) : null;
+                if ($isPassive) {
+                    $fields['attrs_json'] = $this->normalizePassiveAttrs($type, is_array($decoded) ? $decoded : [], $errors);
+                }
                 $hasDefaults = is_array($decoded) && (array_key_exists('tx_padrao_dbm', $decoded) || array_key_exists('max_clientes_padrao', $decoded));
                 if ($hasDefaults && $type !== 'olt') {
                     $errors[] = 'Padrões de Tx e máximo de clientes só existem na OLT.';
@@ -1019,6 +1104,54 @@ final class MapController
         }
 
         return $fields;
+    }
+
+    /**
+     * Splitter exige attrs.razao do catálogo; DIO exige attrs.capacidade (inteiro da lista). Os valores são
+     * normalizados (capacidade vira int) e as demais chaves ficam como estão.
+     *
+     * @param array<string, mixed> $attrs
+     * @param list<string> $errors
+     */
+    private function normalizePassiveAttrs(string $type, array $attrs, array &$errors): ?string
+    {
+        if ($type === 'splitter') {
+            $razao = isset($attrs['razao']) ? trim((string) $attrs['razao']) : '';
+            if (!isset(self::SPLITTER_BALANCED[$razao]) && !in_array($razao, self::SPLITTER_UNBALANCED, true)) {
+                $errors[] = 'Razão do splitter inválida (1x2, 1x4, 1x8, 1x16, 1x32, 1x64 ou ' . implode(', ', self::SPLITTER_UNBALANCED) . ').';
+            }
+            $attrs['razao'] = $razao;
+        } else {
+            $cap = $attrs['capacidade'] ?? null;
+            if ((!is_int($cap) && !(is_string($cap) && preg_match('/^[0-9]{1,3}$/', $cap) === 1)) || !in_array((int) $cap, self::DIO_CAPACITIES, true)) {
+                $errors[] = 'Capacidade do DIO inválida (' . implode(', ', self::DIO_CAPACITIES) . ').';
+            } else {
+                $attrs['capacidade'] = (int) $cap;
+            }
+        }
+
+        return $attrs === [] ? null : json_encode($attrs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Saídas/entrada de um splitter pela razão: balanceado 1xN → N saídas; desbalanceado A/B → 2 saídas com percentual.
+     *
+     * @return list<array{role: string, num: int, label: string, attrs: ?string}>
+     */
+    private function splitterPortSpecs(string $razao): array
+    {
+        $specs = [['role' => 'spl_in', 'num' => 1, 'label' => 'Entrada', 'attrs' => null]];
+        if (isset(self::SPLITTER_BALANCED[$razao])) {
+            for ($i = 1; $i <= self::SPLITTER_BALANCED[$razao]; $i++) {
+                $specs[] = ['role' => 'spl_out', 'num' => $i, 'label' => 'Saída ' . $i, 'attrs' => null];
+            }
+        } else {
+            foreach (array_map('intval', explode('/', $razao)) as $i => $pct) {
+                $specs[] = ['role' => 'spl_out', 'num' => $i + 1, 'label' => 'Saída ' . ($i + 1), 'attrs' => json_encode(['percentual' => $pct])];
+            }
+        }
+
+        return $specs;
     }
 
     /**

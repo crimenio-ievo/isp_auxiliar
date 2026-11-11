@@ -13,7 +13,7 @@ Requisitos: PHP 8.2 com PDO MySQL, Node 18 ou superior e configuração local
 da aplicação já existente. Não imprimir nem copiar credenciais. A dependência
 jsdom 24.1.0 fica restrita a estes testes; a aplicação não usa npm/bundler.
 
-O runner executa sete suites PHP e dezesseis cenários jsdom, imprime a saída
+O runner executa oito suites PHP e dezessete cenários jsdom, imprime a saída
 original e resume quantos passaram/falharam. Retorna 1 se houver falha,
 exceção ou erro de console. Alguns harnesses antigos são observacionais:
 imprimem valores para revisão, sem afirmar todos os resultados automaticamente.

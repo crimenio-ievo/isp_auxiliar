@@ -41,7 +41,7 @@ let fail=0; const ck=(l,c,x='')=>{ if(!c)fail++; console.log(c?'[OK]  ':'[FALHA]
  ck('ações Editar/Conectar/Excluir por equipamento', !!q('[data-eq-edit="n2"]')&&!!q('[data-eq-link="n2"]')&&!!q('[data-eq-del="n2"]'));
  ck('torre listada no POP', /TORRE-001/.test(pan.textContent));
  const opts=qa('#site-add-type option').map(o=>o.value).join(',');
- ck('adicionar dentro: tipos de equipamento + torre (POP)', opts==='olt,switch,router,radio,server,other,tower', opts);
+ ck('adicionar dentro: equipamentos + splitter + DIO + torre (POP)', opts==='olt,switch,router,radio,server,other,splitter,dio,tower', opts);
  // criar equipamento dentro
  d.getElementById('site-add-type').value='server'; d.getElementById('btn-site-add').click(); await wait(20);
  const mt=d.getElementById('modal-el').textContent;

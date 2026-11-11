@@ -618,8 +618,8 @@ const ICON_PATHS = {
   server:   '<rect x="4" y="3.5" width="16" height="7" rx="1.2"/><rect x="4" y="13.5" width="16" height="7" rx="1.2"/><circle cx="8" cy="7" r="1"/><circle cx="8" cy="17" r="1"/>',
   other:    '<rect x="4" y="6" width="16" height="12" rx="1.5"/><line x1="8" y1="12" x2="16" y2="12"/>'
 };
-const TYPE_LABEL = {pop:'POP',olt:'OLT',switch:'Switch',router:'Roteador',server:'Servidor',other:'Outro',tower:'Torre',radio:'Rádio/AP',cto:'CTO',splitter:'Splitter',client:'Cliente',ceo:'CEO'};
-const TYPE_ORDER = ['pop','tower','olt','switch','router','radio','server','other','ceo','cto','splitter','client'];
+const TYPE_LABEL = {pop:'POP',olt:'OLT',switch:'Switch',router:'Roteador',server:'Servidor',other:'Outro',tower:'Torre',radio:'Rádio/AP',cto:'CTO',splitter:'Splitter',dio:'DIO',client:'Cliente',ceo:'CEO'};
+const TYPE_ORDER = ['pop','tower','olt','switch','router','radio','server','other','ceo','cto','splitter','dio','client'];
 /* Categorias (mesmas regras do servidor):
    contêiner (site) — pop, tower: ícone no mapa, coordenada própria; tower pode ficar dentro de um pop.
    equipamento — fica dentro de um contêiner, sem coordenada própria (usa a do site) e sem ícone próprio no mapa.
@@ -628,16 +628,29 @@ const TYPE_ORDER = ['pop','tower','olt','switch','router','radio','server','othe
 const CONTAINER_TYPES = ['pop','tower'];
 const EQUIPMENT_TYPES = ['olt','switch','router','radio','server','other'];
 const FIELD_TYPES = ['ceo','cto'];
+/* Passivos (fase 2C): splitter (pai POP, torre, CEO ou CTO) e dio (pai POP ou torre). Sem coordenada própria (herdam a
+   do pai) e sem ícone no mapa. CEO/CTO são a "caixa" dos splitters e aceitam SOMENTE splitter como filho. */
+const PASSIVE_TYPES = ['splitter','dio'];
+const PASSIVE_PARENTS = {splitter:['pop','tower','ceo','cto'], dio:['pop','tower']};
+/* Razões do splitter: mesmo catálogo de diagram.js (subconjunto aprovado na 2A). Desbalanceado A/B = 2 saídas (A% e B%). */
+const SPLITTER_BALANCED = ['1x2','1x4','1x8','1x16','1x32','1x64'];
+const SPLITTER_UNBALANCED = ['5/95','10/90','15/85','20/80','30/70','40/60','50/50'];
+const DIO_CAPACITIES = [12,24,36,48,72,96,144];
 /* Portas (fase 1G): port_role = família/numeração; a mídia é DERIVADA dela no servidor (não editável):
-   eth → rj45, sfp → sfp, pon → pon, fo → fibra. Padrão: PON e portas da CTO externas; demais internas. */
-const PORT_FAMILIES = ['eth','sfp','pon','fo'];
-const PORT_MEDIA = {eth:'rj45', sfp:'sfp', pon:'pon', fo:'fibra'};
+   eth → rj45, sfp → sfp, pon → pon, fo → fibra. Padrão: PON e portas da CTO externas; demais internas.
+   Fase 2C: spl_in, spl_out (splitter) e dio → fibra. Manter igual ao PORT_MEDIA do MapController. */
+const PORT_FAMILIES = ['eth','sfp','pon','fo'];   // famílias por quantidade em equipamento (passivos têm geração própria)
+const PORT_MEDIA = {eth:'rj45', sfp:'sfp', pon:'pon', fo:'fibra', spl_in:'fibra', spl_out:'fibra', dio:'fibra'};
 const PORT_MEDIA_LABEL = {rj45:'RJ45', sfp:'SFP', pon:'PON', fibra:'Fibra'};
 const isContainer = n => !!n && CONTAINER_TYPES.includes(n.type);
 const isEquipment = n => !!n && EQUIPMENT_TYPES.includes(n.type);
-/* Nó que representa x no mapa: o próprio site para equipamentos. */
-function siteOf(x){ return x && x.siteId ? (nodeById(x.siteId) || x) : x; }
+const isPassive = n => !!n && PASSIVE_TYPES.includes(n.type);
+/* "Caixa": POP/torre (site) ou CEO/CTO — onde equipamentos/passivos ficam dentro. */
+const isBox = n => !!n && (CONTAINER_TYPES.includes(n.type) || FIELD_TYPES.includes(n.type));
+/* Nó que representa x no mapa: o próprio site para equipamentos; o pai (site ou caixa) para passivos. */
+function siteOf(x){ const k = x && (x.siteId || x.boxId); return k ? (nodeById(k) || x) : x; }
 function equipmentOf(site){ return nodes.filter(x=>x.siteId===site.id); }
+function passivesOf(box){ return nodes.filter(x=>x.boxId===box.id); }
 /* Ligação interna: as duas pontas no mesmo site (equipamento↔equipamento ou site↔equipamento dele). */
 function isInternalLink(l){
   const a = siteOf(nodeById(l.from)), b = siteOf(nodeById(l.to));
@@ -648,7 +661,7 @@ function isPendingDetail(l){ return isContainer(nodeById(l.from)) || isContainer
 function portById(id){ return id ? ports.find(p=>p.id===id) || null : null; }
 function linkOfPort(portId){ return links.find(l=>l.fromPort===portId || l.toPort===portId) || null; }
 /* Pontas possíveis ao refinar um trecho: o site da ponta atual e os equipamentos dele (o servidor confere). CTO/CEO: só ela mesma. */
-function endpointChoices(n){ const st = siteOf(n); return isContainer(st) ? [st].concat(equipmentOf(st)) : [n]; }
+function endpointChoices(n){ const st = siteOf(n); return isContainer(st) ? [st].concat(equipmentOf(st), passivesOf(st)) : (isBox(st) ? [st].concat(passivesOf(st)) : [n]); }
 /* Compatibilidade porta × ligação (mesmas regras do servidor): mídia × meio do tipo, externa se sair do site, sem defeito. */
 const LINK_MEDIUM = {backbone:'fibra', distribuicao:'fibra', drop:'fibra', ethernet:'cabo', wireless:'radio'};
 const PORT_MEDIA_BY_MEDIUM = {fibra:['pon','fibra','sfp'], cabo:['rj45','sfp'], radio:[]};
@@ -676,14 +689,14 @@ function oltSummaryText(n){
     +' · máx/porta: '+(n.max_clientes_padrao!=null && n.max_clientes_padrao!=='' ? n.max_clientes_padrao : '—');
 }
 const PORT_STATUS_LABEL = {livre:'normal', reservada:'reservada', defeito:'com defeito'};
-function sameSiteNodes(a, b){ const x = siteOf(a), y = siteOf(b); return isContainer(x) && !!y && x.id===y.id; }
+function sameSiteNodes(a, b){ const x = siteOf(a), y = siteOf(b); return isBox(x) && !!y && x.id===y.id; }
 function portFits(p, linkType, internal){
   return p.status!=='defeito' && (PORT_MEDIA_BY_MEDIUM[LINK_MEDIUM[linkType]]||[]).includes(p.media) && (internal || p.external);
 }
 /* Select de porta para uma ponta (equipamento/CTO): só as compatíveis e livres; "sem porta" sempre disponível.
    editingLinkId: a porta já usada por este trecho conta como livre. */
 function portSelectHtml(id, node, linkType, internal, currentPortId, editingLinkId){
-  if(!node || !(isEquipment(node) || node.type==='cto')) return '';
+  if(!node || !(isEquipment(node) || isPassive(node) || node.type==='cto')) return '';
   const opts = portsOf(node.id).filter(p=>{
     const lk = linkOfPort(p.id);
     return portFits(p, linkType, internal) && (!lk || lk.id===editingLinkId);
@@ -700,7 +713,7 @@ function portTarget(p){ const lk = linkOfPort(p.id); return lk ? nodeById(lk.fro
 function endpointLabel(n, portId){
   if(!n) return '?';
   const pt = portById(portId);
-  return escapeHtml(n.name) + (pt ? ' · '+escapeHtml(pt.label) : '') + (n.siteId ? ' <span class="muted">('+escapeHtml(siteOf(n).name)+')</span>' : '');
+  return escapeHtml(n.name) + (pt ? ' · '+escapeHtml(pt.label) : '') + ((n.siteId || n.boxId) ? ' <span class="muted">('+escapeHtml(siteOf(n).name)+')</span>' : '');
 }
 const STATUS_COLOR = {normal:'#3fb950',alerta:'#d29922',critico:'#f85149',offline:'#6e7681',livre:'#3a4353'};
 const STATUS_LABEL = {normal:'Online / Normal',alerta:'Atenção',critico:'Crítico',offline:'Offline',livre:'Livre'};
@@ -856,6 +869,7 @@ function applyTopology(data){
   });
   nodes = nodes.filter(n=> byDb[n.dbId]===n);
   nodes.forEach(n=>{ if(isEquipment(n) && byDb[n.parentDbId]) n.siteId = byDb[n.parentDbId].id; });
+  nodes.forEach(n=>{ if(isPassive(n) && byDb[n.parentDbId]) n.boxId = byDb[n.parentDbId].id; });   // splitter/DIO: caixa ou site pai
   rawPorts.forEach(r=>{
     const n = byDb[r.node_id]; if(!n) return;
     const a = r.attrs_json||{};
@@ -1096,7 +1110,7 @@ function zoomBy(factor, ax, ay){
 /* ---- render ---- */
 function renderAll(){
   measureMap();
-  nodes.forEach(n=>{ if(n._inherit && n.siteId){ const st = nodeById(n.siteId); if(st){ n.lat = st.lat; n.lng = st.lng; } } });
+  nodes.forEach(n=>{ if(n._inherit && (n.siteId || n.boxId)){ const st = nodeById(n.siteId || n.boxId); if(st){ n.lat = st.lat; n.lng = st.lng; } } });
   const parts = [];
   parts.push(`<svg id="map-svg" width="${mapW}" height="${mapH}" viewBox="0 0 ${mapW} ${mapH}">`);
   renderTiles(parts);
@@ -1128,7 +1142,7 @@ function renderAll(){
   // nós
   nodes.forEach(n=>{
     if(!nodeVisible(n)) return;
-    if(isEquipment(n)) return;                    // equipamento é desenhado pelo site (selo com a contagem)
+    if(isEquipment(n) || isPassive(n)) return;    // equipamento é desenhado pelo site (selo com a contagem); passivo não vira ícone
     const p = toScreen(n.lat,n.lng);
     if(p.x<-120||p.x>mapW+120||p.y<-120||p.y>mapH+120) return;   // fora da tela: não desenha
     const dim = pathHighlight && !pathHighlight.nodeIds.has(n.id);
@@ -1434,7 +1448,7 @@ function onNodeClick(nodeId, opts){
   const target = nodeById(nodeId);
   if(mode==='linking-dest'){
     if(nodeId===linkOrigin.id){ toast('Selecione um nó diferente da origem.'); return; }
-    if(!(opts && opts.pick) && isContainer(target) && equipmentOf(target).some(e=>e.id!==linkOrigin.id)){
+    if(!(opts && opts.pick) && isContainer(target) && equipmentOf(target).concat(passivesOf(target)).some(e=>e.id!==linkOrigin.id)){
       openNodePanel(target.id, {picking:true});   // escolher o equipamento de destino (ou o próprio site)
       return;
     }
@@ -1445,6 +1459,12 @@ function onNodeClick(nodeId, opts){
     selectedLinkId = null; selectedNodeId = target.siteId; pathHighlight = null;
     renderAll();
     openNodePanel(target.siteId, {highlight:target.id});
+    return;
+  }
+  if(isPassive(target) && target.boxId){      // passivo não tem painel próprio: abre o do site/caixa pai
+    selectedLinkId = null; selectedNodeId = target.boxId; pathHighlight = null;
+    renderAll();
+    openNodePanel(target.boxId, {highlight:target.id});
     return;
   }
   selectedLinkId = null;
@@ -1551,6 +1571,7 @@ function openNodePanel(nodeId, opts){
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
   bindPanelActions(n);
   if(isContainer(n)) bindSitePanel(n, opts||{});
+  if(isBox(n)) bindPassives(n, opts||{});
   panel.querySelectorAll('[data-port]').forEach(el=> el.addEventListener('click', ()=> openPortModal(portById(el.getAttribute('data-port')))));
 }
 
@@ -1605,6 +1626,73 @@ function renderSwitchBody(n){
   `;
 }
 
+/* ---- passivos (fase 2C): splitter e DIO dentro de um site (POP/torre) ou de uma caixa (CEO/CTO) ---- */
+function splitterKind(r){ return SPLITTER_BALANCED.includes(r) ? 'balanceado' : 'desbalanceado'; }
+/* "1x8 · balanceado · 1 entrada + 8 saídas" | "10/90 · desbalanceado · 2 saídas (10% e 90%)" | "DIO · 12 portas" */
+function passiveSummary(e){
+  if(e.type==='dio') return 'DIO · '+(e.capacidade||portsOf(e.id).length)+' portas de fibra';
+  const r = e.razao || '—';
+  if(!SPLITTER_BALANCED.includes(r) && !SPLITTER_UNBALANCED.includes(r)) return 'Razão não informada';
+  return r+' · '+splitterKind(r)+' · '+(SPLITTER_BALANCED.includes(r) ? '1 entrada + '+r.split('x')[1]+' saídas' : '1 entrada + 2 saídas ('+r.split('/').join('% e ')+'%)');
+}
+function passivePortText(pt){ return pt.label+(pt.role==='spl_out' && pt.percentual!=null ? ' · '+pt.percentual+'%' : ''); }
+/* Um splitter/DIO: razão/capacidade, portas (clicáveis) e ações. picking = escolhendo o destino de uma ligação. */
+function passiveItemHtml(e, opts){
+  opts = opts || {};
+  const pts = portsOf(e.id);
+  return `<div class="site-eq${opts.highlight===e.id?' hl':''}" data-eq="${e.id}" data-passive="${e.id}">
+    <div class="site-eq-head"><b>${escapeHtml(e.name)}</b>${statusPill(e.status)}${lifecyclePill(e)}</div>
+    <div class="site-eq-meta">${escapeHtml(passiveSummary(e))}</div>
+    ${pts.length ? `<div class="eq-ports">${pts.map(pt=>{
+      const tgt = portTarget(pt);
+      return `<button class="eq-port${tgt?' occ':''} st-${pt.status}" ${opts.picking?'disabled':`data-port="${pt.id}"`} title="${escapeHtml(passivePortText(pt))} · ${PORT_MEDIA_LABEL[pt.media]||''} · ${pt.external?'externa':'interna'} · ${PORT_STATUS_LABEL[pt.status]||pt.status}">${escapeHtml(passivePortText(pt))} <span class="m">${pt.external?'ext':'int'}</span> ${tgt?'→ '+escapeHtml(tgt.name):'livre'}</button>`;
+    }).join('')}</div>` : ''}
+    <div class="action-row">${opts.picking
+      ? (e.id!==linkOrigin.id ? `<button class="btn btn-sm btn-accent" data-eq-pick="${e.id}">Ligar a este</button>` : '<span class="muted">origem</span>')
+      : `<button class="btn btn-sm" data-pas-edit="${e.id}">Editar</button><button class="btn btn-sm" data-pas-link="${e.id}">Conectar</button><button class="btn btn-sm btn-danger" data-pas-del="${e.id}">Excluir</button>`}</div>
+  </div>`;
+}
+/* Seção "Splitters nesta caixa" (CEO/CTO). */
+function splittersSectionHtml(box){
+  const list = passivesOf(box).filter(x=>x.type==='splitter');
+  return `<div class="section-title">Splitters nesta caixa (${list.length})</div>`
+    + (list.map(e=>passiveItemHtml(e)).join('') || '<div class="empty-state">Nenhum splitter nesta caixa.</div>')
+    + `<div class="site-add"><button class="btn btn-accent btn-sm" id="btn-spl-add">Adicionar splitter</button></div>`;
+}
+/* Seção de passivos de um POP/torre (splitters e DIOs). */
+function sitePassivesHtml(site, opts){
+  const list = passivesOf(site);
+  if(!list.length) return '';
+  return `<div class="section-title">Splitters e DIOs (${list.length})</div>` + list.map(e=>passiveItemHtml(e, opts)).join('');
+}
+function bindPassives(box, opts){
+  const panel = document.getElementById('panel-right');
+  const on = (sel, fn)=> panel.querySelectorAll(sel).forEach(el=> el.addEventListener('click', ()=> fn(el)));
+  on('[data-pas-edit]', el=> openEditModal(nodeById(el.getAttribute('data-pas-edit'))));
+  on('[data-pas-link]', el=> startLinking(nodeById(el.getAttribute('data-pas-link'))));
+  on('[data-pas-del]', el=>{
+    const e = nodeById(el.getAttribute('data-pas-del'));
+    if(e && confirm('Excluir "'+e.name+'"? Só é possível se não tiver ligações.')) deleteNode(e.id);
+  });
+  const add = document.getElementById('btn-spl-add');
+  if(add) add.addEventListener('click', ()=> openCreateModal('splitter', null, {parent:box}));
+  if(opts && opts.highlight){
+    const el = panel.querySelector(`[data-passive="${opts.highlight}"]`);
+    if(el && el.scrollIntoView) el.scrollIntoView({block:'nearest'});
+  }
+}
+/* Campo razão (splitter) ou capacidade (DIO) dos modais; n = nó existente ou null. */
+function passiveFieldHtml(type, n){
+  if(type==='dio') return `<div class="form-field"><label>Capacidade (portas)</label><select id="f-dio-cap">${DIO_CAPACITIES.map(c=>`<option value="${c}" ${n&&+n.capacidade===c?'selected':''}>${c}</option>`).join('')}</select>
+    <div class="cable-meta">Gera DIO 1…n (fibra, internas). Reduzir só remove portas livres.</div></div>`;
+  const opt = r=>`<option value="${r}" ${n&&n.razao===r?'selected':''}>${r}</option>`;
+  return `<div class="form-field"><label>Razão</label><select id="f-razao"><optgroup label="Balanceado">${SPLITTER_BALANCED.map(opt).join('')}</optgroup><optgroup label="Desbalanceado">${SPLITTER_UNBALANCED.map(opt).join('')}</optgroup></select>
+    <div class="cable-meta">Gera 1 entrada + as saídas (no desbalanceado, 2 saídas com o percentual). Trocar a razão regera as portas e só é possível com todas livres.</div></div>`;
+}
+function passiveAttrs(type){
+  return type==='dio' ? {capacidade:parseInt(document.getElementById('f-dio-cap').value,10)} : {razao:document.getElementById('f-razao').value};
+}
+
 /* ---- visão do site (POP/Torre): equipamentos agrupados por tipo, com as ligações de cada um ---- */
 function renderSiteBody(n, opts){
   const eqs = equipmentOf(n);
@@ -1647,12 +1735,13 @@ function renderSiteBody(n, opts){
     });
     h += '</div>';
   });
+  h += sitePassivesHtml(n, {picking, highlight:opts.highlight});
   if(towers.length){
     h += `<div class="section-title">Torres neste POP</div><div class="port-list">${towers.map(t=>
       `<div class="port-row" data-open-node="${t.id}" style="cursor:pointer"><span class="pd" style="background:${STATUS_COLOR[t.status]||'#8a92a3'}"></span><span class="pl">${escapeHtml(t.name)}</span><span class="pf">${equipmentOf(t).length} equip.</span></div>`).join('')}</div>`;
   }
   if(!picking){
-    const tipos = EQUIPMENT_TYPES.concat(n.type==='pop' ? ['tower'] : []);
+    const tipos = EQUIPMENT_TYPES.concat(PASSIVE_TYPES, n.type==='pop' ? ['tower'] : []);
     h += `<div class="site-add"><select id="site-add-type">${tipos.map(t=>`<option value="${t}">${TYPE_LABEL[t]}</option>`).join('')}</select>
       <button class="btn btn-accent btn-sm" id="btn-site-add">Adicionar equipamento aqui dentro</button></div>`;
     h += actionRow(n);
@@ -1721,7 +1810,7 @@ function renderCeoBody(n){
     ${fieldsHtml([
       {label:'Origem', value: origin?escapeHtml(origin.name):'—'},
       {label:'Cabos presentes', value: cablesHere.length},
-      {label:'Splitter interno', value: splitterHere ? splitterHere.razao : 'Não possui'},
+      {label:'Splitter interno (diagrama)', value: splitterHere ? splitterHere.razao : 'Não possui'},
       {label:'Observação', value:escapeHtml(n.desc||'—'), full:true}
     ])}
     <div class="section-title">Cabos</div>
@@ -1731,6 +1820,7 @@ function renderCeoBody(n){
         return `<div class="port-row"><span class="pd" style="background:${STATUS_COLOR.normal}"></span><span class="pl">${escapeHtml(c.nome)}</span><span class="pf">${c.tipo} · ${occ}/${c.totalFibras} em uso</span></div>`;
       }).join('') || '<div class="empty-state">Nenhum cabo registrado ainda. Use "Conectar" para ligar esta CEO à rede.</div>'}
     </div>
+    ${splittersSectionHtml(n)}
     ${actionRow(n)}
   `;
 }
@@ -1774,6 +1864,7 @@ function renderCTOBody(n){
     ${alertPorts.length
       ? `<div class="alert-box has">${alertPorts.length} porta(s) com defeito.</div>`
       : `<div class="alert-box none">Nenhum alerta ativo.</div>`}
+    ${splittersSectionHtml(n)}
     ${actionRow(n)}
   `;
 }
@@ -2030,8 +2121,9 @@ function deleteNode(nodeId){
     closePanel(); toast('Elemento excluído.');
     return;
   }
+  const boxId = n.boxId;   // passivo: volta ao painel do site/caixa pai
   mapPost('/nos/excluir', {id:n.dbId})
-    .then(()=>{ loadNetwork(()=> toast('Elemento excluído.')); })
+    .then(()=>{ loadNetwork(()=>{ toast('Elemento excluído.'); if(boxId && nodeById(boxId)) onNodeClick(boxId); }); })
     .catch(err=> toast(err.message));
 }
 
@@ -2115,7 +2207,7 @@ searchInput.addEventListener('input', ()=>{
   const matches = coord ? [] : nodes.filter(n=> n.name.toLowerCase().includes(q)).slice(0,10);
   let htmlOut = '';
   if(coord) htmlOut += `<div class="search-item" data-coord="1"><span>Ir para ${fmtCoord(coord.lat)}, ${fmtCoord(coord.lng)}</span><small>coordenada</small></div>`;
-  htmlOut += matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}${n.siteId ? ' · '+escapeHtml(siteOf(n).name) : ''}</small></div>`).join('');
+  htmlOut += matches.map(n=>`<div class="search-item" data-id="${n.id}"><span>${escapeHtml(n.name)}</span><small>${TYPE_LABEL[n.type]}${(n.siteId || n.boxId) ? ' · '+escapeHtml(siteOf(n).name) : ''}</small></div>`).join('');
   if(!htmlOut) htmlOut = '<div class="search-item">Nenhum resultado</div>';
   searchResults.innerHTML = htmlOut;
   searchResults.classList.add('show');
@@ -2196,7 +2288,7 @@ const modalEl = document.getElementById('modal-el');
 function closeModal(){ overlay.classList.remove('show'); modalEl.innerHTML=''; }
 overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
 
-const NAME_PREFIX = {pop:'POP', tower:'TORRE', olt:'OLT', switch:'SW', router:'RT', radio:'AP', server:'SRV', other:'EQP', ceo:'CEO', cto:'CTO'};
+const NAME_PREFIX = {pop:'POP', tower:'TORRE', olt:'OLT', switch:'SW', router:'RT', radio:'AP', server:'SRV', other:'EQP', ceo:'CEO', cto:'CTO', splitter:'SPL', dio:'DIO'};
 /* Próximo nome da sequência do tipo: PREFIXO-NNN, maior número existente + 1 (001 se não houver). */
 function nextNodeName(type){
   const prefix = NAME_PREFIX[type] || String(type).toUpperCase();
@@ -2233,6 +2325,7 @@ function openCreateModal(type, latlng, opts){
   opts = opts || {};
   const parent = opts.parent || null;
   const equip = EQUIPMENT_TYPES.includes(type);
+  const passive = PASSIVE_TYPES.includes(type);
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Novo elemento — ${TYPE_LABEL[type]}</h3><button class="panel-close" id="modal-x">✕</button></div>
     <div class="modal-body">
@@ -2248,6 +2341,7 @@ function openCreateModal(type, latlng, opts){
         </select>
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lifecycle"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
+      ${passive ? passiveFieldHtml(type, null) : ''}
       ${equip ? `<div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" placeholder="Opcional"></div>
       <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" placeholder="Opcional"></div>
       ${portCountsHtml(null)}
@@ -2271,6 +2365,7 @@ function openCreateModal(type, latlng, opts){
     if(!name){ toast('Informe o nome do elemento.'); return; }
     const attrs = {};
     if(type==='cto') attrs.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||16));
+    if(passive) Object.assign(attrs, passiveAttrs(type));
     if(equip){
       const fab = document.getElementById('f-fab').value.trim(), mod = document.getElementById('f-modelo').value.trim();
       if(fab) attrs.fabricante = fab;
@@ -2301,6 +2396,7 @@ function openCreateModal(type, latlng, opts){
 function openEditModal(n){
   const isCTO = n.type==='cto';
   const equip = isEquipment(n);
+  const passive = isPassive(n);
   const sites = equip ? nodes.filter(isContainer) : [];
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Editar — ${escapeHtml(n.name)}</h3><button class="panel-close" id="modal-x">✕</button></div>
@@ -2315,6 +2411,7 @@ function openEditModal(n){
         </select>
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(n)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
+      ${passive ? passiveFieldHtml(n.type, n) : ''}
       ${equip ? `<div class="form-field"><label>Site (POP/Torre)</label><select id="f-site">${sites.map(st=>`<option value="${st.dbId}" ${st.dbId===n.parentDbId?'selected':''}>${escapeHtml(st.name)} (${TYPE_LABEL[st.type]})</option>`).join('')}</select></div>
       <div class="form-field"><label>Fabricante</label><input id="f-fab" type="text" maxlength="80" value="${escapeHtml(n.fabricante||'')}"></div>
       <div class="form-field"><label>Modelo</label><input id="f-modelo" type="text" maxlength="80" value="${escapeHtml(n.modelo||'')}"></div>
@@ -2336,6 +2433,7 @@ function openEditModal(n){
     if(!name){ toast('Informe o nome do elemento.'); return; }
     const overrides = {};
     if(isCTO) overrides.capacity = Math.max(1, Math.min(144, parseInt(document.getElementById('f-cap').value,10)||n.capacity||16));
+    if(passive) Object.assign(overrides, passiveAttrs(n.type));
     const extra = {};
     if(equip){
       overrides.fabricante = document.getElementById('f-fab').value.trim();
