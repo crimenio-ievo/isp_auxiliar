@@ -263,5 +263,13 @@ $before = $s->power;
 $run($s, new FakeSnmpTransport($mib($badVals)), null, 1, true);
 $check($s->power === $before, 'dry-run preserva streaks');
 
+// Nova referencia depois de intervencao deve ignorar as amostras first antigas.
+$s = $mkStore();
+for ($i=0; $i<5; $i++) { $run($s, new FakeSnmpTransport($mib($goodVals)), null, 1); }
+$s->power[1] = array_merge($s->power[1], ['baseline_n'=>0,'baseline_rx_dbm'=>null,'baseline_set_at'=>null]);
+$newVals = ['1.1.1' => ['-16.00', '2.40', '30.00']];
+for ($i=0; $i<5; $i++) { $run($s, new FakeSnmpTransport($mib($newVals)), null, 1); }
+$check($s->power[1]['baseline_rx_dbm'] === -16.0 && count($s->samples) === 10, 'rebaseline usa so novas first e preserva historico');
+
 echo "NetPowerCollectorSmoke: {$n} verificações, falhas: {$failures}\n";
 exit($failures === 0 ? 0 : 1);

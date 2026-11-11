@@ -92,4 +92,8 @@ $check($ofType($s,'rx_range')[1]['silenced_until']===null, 'silencio nao vaza pa
 $s->interventions[]=['device_id'=>1,'scope_type'=>'onu','scope_id'=>5,'silenced_until'=>'2026-11-13 13:00:00']; $e->run(1);
 $check($ofType($s,'rx_range')[1]['silenced_until']==='2026-11-13 13:00:00', 'silencio ONU atualiza aberto');
 $before=serialize($s->alerts); $e->run(1,true); $check(serialize($s->alerts)===$before, 'dry-run preserva existentes');
+[$net,$s,$e]=$fixture(); $net->power[1]=$badPower;
+$event($net,1,'rx_deviation','2026-11-12 11:00:00',['state'=>'enter']); $e->run(1);
+$net->events=[]; $e->run(1);
+$check(count($ofType($s,'rx_deviation'))===1, 'retencao de evento antigo nao inventa exit');
 echo "NetAlertEngineSmoke: $n verificacoes, zero falhas\n";

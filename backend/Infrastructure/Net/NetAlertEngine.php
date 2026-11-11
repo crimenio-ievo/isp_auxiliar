@@ -120,7 +120,7 @@ final class NetAlertEngine
             $referenceValid = isset($p['baseline_rx_dbm'], $p['baseline_set_at']) && $e && $e['occurred_at'] >= $p['baseline_set_at'] && $e['occurred_at'] <= $now;
             if ($referenceValid && ($e['details']['state'] ?? '') === 'enter') {
                 $emit('rx_deviation', 'onu', $id, 'atencao', $e['details'], $pon);
-            } elseif ($deviation && (!$referenceValid || ($e['details']['state'] ?? '') === 'exit')) { $close[] = (int) $deviation['id']; }
+            } elseif ($deviation && (!isset($p['baseline_rx_dbm'], $p['baseline_set_at']) || ($e && (!$referenceValid || ($e['details']['state'] ?? '') === 'exit')))) { $close[] = (int) $deviation['id']; }
         }
         return $finish(false);
     }

@@ -54,6 +54,26 @@ try {
     $pdo->exec("INSERT INTO net_interventions (provider_id,device_id,scope_type,scope_id,created_at,silenced_until) VALUES (1,1,'pon',1001,'2026-11-12 12:00:00','2026-11-13 12:00:00')");
     $check($store->silencedUntil(1,'onu',22,1,'2026-11-12 12:00:00')==='2026-11-13 12:00:00', 'PDO silencio herdado');
     $check($store->silencedUntil(1,'onu',22,2,'2026-11-12 12:00:00')===null, 'PDO escopo isolado');
+    $pdo->exec("INSERT INTO net_onus (id,provider_id,device_id,pon_index,onu_index,snmp_index,onu_identifier,identifier_type,first_seen_at,last_seen_at) VALUES (1,1,1,1,1,'1.1.1','001122334455','epon_mac',NOW(),NOW())");
+    $pdo->exec("INSERT INTO net_onu_state (onu_id,oper_status,updated_at) VALUES (1,'online',NOW())");
+    $net=new App\Infrastructure\Net\Store\PdoNetStore($pdo);
+    $fields=['onu_rx_dbm'=>-28,'onu_tx_dbm'=>2,'onu_temp_c'=>30,'measured_at'=>'2026-11-12 12:00:00','rx_band'=>'critico','baseline_rx_dbm'=>-20,'baseline_set_at'=>'2026-11-01 00:00:00','baseline_n'=>5,'last_sample_rx_dbm'=>-28,'last_sample_at'=>'2026-11-12 12:00:00','bad_streak'=>2,'ok_streak'=>0];
+    $net->applyPower(['power'=>[1=>$fields],'samples'=>[],'events'=>[[1,'rx_deviation',['state'=>'enter']],[1,'rx_deviation',['state'=>'exit']]]],'2026-11-12 12:00:00');
+    $check((int)$net->powerStates(1)[1]['bad_streak']===2,'PDO persiste streaks');
+    $check($store->latestDeviations(1)[1]['details']['state']==='exit' && count($store->eventsSince(1,'2026-01-01'))===2,'PDO ultimo evento por data e id');
+    $maintenance=new App\Infrastructure\Net\Store\PdoNetMaintenanceStore($pdo);
+    $i=['provider_id'=>1,'device_id'=>1,'scope_type'=>'pon','scope_id'=>1001,'created_at'=>'2026-11-12 12:00:00','silenced_until'=>'2026-11-14 12:00:00','reason'=>'teste'];
+    $nBefore=(int)$pdo->query('SELECT COUNT(*) FROM net_interventions')->fetchColumn();
+    try { $maintenance->intervene($i,[1]); $check(false,'auditoria ausente deveria falhar'); }
+    catch(PDOException $e) { $check((int)$pdo->query('SELECT COUNT(*) FROM net_interventions')->fetchColumn()===$nBefore && (int)$net->powerStates(1)[1]['baseline_n']===5,'PDO rollback integral se auditoria falhar'); }
+    $pdo->exec('CREATE TABLE audit_logs (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,provider_id BIGINT UNSIGNED,actor_login VARCHAR(80),action VARCHAR(120),entity_type VARCHAR(80),entity_id BIGINT UNSIGNED,context_json JSON,created_at DATETIME)');
+    $maintenance->intervene($i,[1]);
+    $check($net->powerStates(1)[1]['baseline_rx_dbm']===null && (int)$net->powerStates(1)[1]['bad_streak']===0,'PDO intervencao zera referencia/streaks');
+    $check($pdo->query('SELECT action FROM audit_logs')->fetchColumn()==='net.intervention.create','PDO auditoria');
+    $pdo->exec("INSERT INTO net_onu_power_samples (onu_id,sampled_at,reason) VALUES (1,'2026-01-01','first'),(1,'2026-11-12','daily')");
+    $check($maintenance->countExpired('samples',1,'2026-09-01')===1,'PDO conta expiradas');
+    $check($maintenance->purgeBatch('samples',1,'2026-09-01')===1 && $maintenance->purgeBatch('events',1,'2026-01-01')===0,'PDO purga com join e limite');
+    $check($maintenance->purgeBatch('alerts',1,'2027-01-01')===1,'PDO purga somente fechados');
     echo "Net033MigrationSmoke: $n verificacoes, zero falhas\n";
 } finally {
     $pdo->exec('DROP DATABASE `isp_auxiliar_net033_sim`');

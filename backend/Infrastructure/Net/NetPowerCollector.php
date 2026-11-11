@@ -229,7 +229,9 @@ final class NetPowerCollector
             if ($baselineN < $nBase) {
                 $baselineN++;
                 if ($baselineN >= $nBase) {
-                    $vals = array_merge($first[$id] ?? [], [$rx]);
+                    // A intervencao zera baseline_n, mas preserva historico. Usar so a nova serie.
+                    $prior = $baselineN > 1 ? array_slice($first[$id] ?? [], -($baselineN - 1)) : [];
+                    $vals = array_merge($prior, [$rx]);
                     $vals = array_slice($vals, 0, $nBase);
                     sort($vals);
                     $c = count($vals);
