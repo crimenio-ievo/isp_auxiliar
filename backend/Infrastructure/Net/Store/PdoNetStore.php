@@ -13,7 +13,7 @@ final class PdoNetStore implements NetStore
 {
     private const ONU_COLUMNS = ['provider_id', 'device_id', 'slot', 'pon_index', 'onu_index', 'snmp_index', 'onu_identifier', 'identifier_type', 'first_seen_at', 'last_seen_at', 'removed_at'];
     private const STATE_COLUMNS = ['oper_status', 'raw_status_code', 'status_since', 'stale', 'missing_cycles'];
-    private const POLL_COLUMNS = ['last_attempt_at', 'last_success_at', 'last_result', 'consecutive_failures', 'identity_seen_json', 'requests_last_cycle', 'cycle_ms', 'last_uptime_ticks', 'last_error'];
+    private const POLL_COLUMNS = ['last_attempt_at', 'last_power_attempt_at', 'last_success_at', 'last_result', 'consecutive_failures', 'identity_seen_json', 'requests_last_cycle', 'cycle_ms', 'last_uptime_ticks', 'last_error'];
 
     public function __construct(private PDO $pdo)
     {
@@ -166,7 +166,7 @@ final class PdoNetStore implements NetStore
     public function applyPower(array $plan, string $now): void
     {
         $this->transaction(function () use ($plan, $now): void {
-            $cols = ['onu_rx_dbm', 'onu_tx_dbm', 'onu_temp_c', 'measured_at', 'rx_band', 'baseline_rx_dbm', 'baseline_set_at', 'baseline_n', 'last_sample_rx_dbm', 'last_sample_at'];
+            $cols = ['onu_rx_dbm', 'onu_tx_dbm', 'onu_temp_c', 'measured_at', 'rx_band', 'baseline_rx_dbm', 'baseline_set_at', 'baseline_n', 'last_sample_rx_dbm', 'last_sample_at', 'bad_streak', 'ok_streak'];
             $sql = 'INSERT INTO net_onu_power (onu_id, updated_at, ' . implode(', ', $cols) . ') VALUES (:onu_id, :now, '
                 . implode(', ', array_map(static fn ($c) => ':' . $c, $cols)) . ') ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at), '
                 . implode(', ', array_map(static fn ($c) => "{$c} = VALUES({$c})", $cols));

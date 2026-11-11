@@ -247,5 +247,21 @@ $check($r['result'] === 'partial' && $s->power === [] && $r['requests'] === 10, 
 $src = (string) file_get_contents(dirname(__DIR__, 2) . '/backend/Infrastructure/Net/NetPowerCollector.php');
 $check(!preg_match('/1\.3\.6\.1\.4\.1\.\d+/', $src) && stripos($src, 'hioso') === false && !str_contains($src, 'getNext'), 'coletor de potência: sem OID de fabricante e sem GETNEXT');
 
+// Streaks saturam e sao zerados na faixa oposta, sem escrita em dry-run.
+$s = $mkStore();
+$badVals = ['1.1.1' => ['-28.50', '2.40', '30.00']];
+$run($s, new FakeSnmpTransport($mib($badVals)), null, 1);
+$run($s, new FakeSnmpTransport($mib($badVals)), null, 1);
+$check($s->power[1]['bad_streak'] === 2 && $s->power[1]['ok_streak'] === 0, 'duas leituras ruins acumulam bad_streak');
+$goodVals = ['1.1.1' => ['-20.00', '2.40', '30.00']];
+$run($s, new FakeSnmpTransport($mib($goodVals)), null, 1);
+$check($s->power[1]['bad_streak'] === 0 && $s->power[1]['ok_streak'] === 1, 'ok zera bad e incrementa ok');
+$s->power[1]['ok_streak'] = 65535;
+$run($s, new FakeSnmpTransport($mib($goodVals)), null, 1);
+$check($s->power[1]['ok_streak'] === 65535, 'streak satura em SMALLINT');
+$before = $s->power;
+$run($s, new FakeSnmpTransport($mib($badVals)), null, 1, true);
+$check($s->power === $before, 'dry-run preserva streaks');
+
 echo "NetPowerCollectorSmoke: {$n} verificações, falhas: {$failures}\n";
 exit($failures === 0 ? 0 : 1);

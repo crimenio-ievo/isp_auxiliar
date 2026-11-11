@@ -254,6 +254,8 @@ final class NetPowerCollector
             $plan['power'][$id] = [
                 'onu_rx_dbm' => $rx, 'onu_tx_dbm' => $r['onu_tx_dbm'], 'onu_temp_c' => $r['onu_temp_c'], 'measured_at' => $now, 'rx_band' => $band,
                 'baseline_rx_dbm' => $baseline, 'baseline_set_at' => $baselineSetAt, 'baseline_n' => $baselineN,
+                'bad_streak' => $band === 'ok' ? 0 : min(65535, (int) ($p['bad_streak'] ?? 0) + 1),
+                'ok_streak' => $band === 'ok' ? min(65535, (int) ($p['ok_streak'] ?? 0) + 1) : 0,
                 'last_sample_rx_dbm' => $lastSampleRx, 'last_sample_at' => $lastSampleAt,
             ];
         }
