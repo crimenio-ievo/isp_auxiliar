@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require dirname(__DIR__, 2) . '/backend/bootstrap/autoload.php';
 // Exclusivamente socket local, sem .env, sem dados do banco da aplicacao.
 $pdo = new PDO('mysql:unix_socket=/run/mysqld/mysqld.sock;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $schema = 'isp_auxiliar_net033_sim';
@@ -37,6 +38,22 @@ try {
     $check((int) $pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='net_alerts'")->fetchColumn() === 0, 'rollback');
     $apply($file);
     $check((int) $pdo->query('SELECT COUNT(*) FROM net_alerts')->fetchColumn() === 0, 'reaplicar apos rollback');
+    $store = new App\Infrastructure\Net\Store\PdoNetAlertStore($pdo);
+    $a = ['provider_id'=>1,'alert_type'=>'device_unreachable','scope_type'=>'device','scope_id'=>1,'severity'=>'critico','details'=>['x'=>1],'silenced_until'=>null];
+    $store->applyAlerts(1, [$a], [], '2026-11-12 12:00:00');
+    $store->applyAlerts(1, [$a], [], '2026-11-12 12:01:00');
+    $alerts=$store->openAlerts(1);
+    $check(count($alerts)===1 && $alerts[0]['details']===['x'=>1], 'PDO upsert e details');
+    $a['silenced_until']='2026-11-13 12:00:00';
+    $store->applyAlerts(1, [$a], [], '2026-11-12 12:02:00');
+    $a['silenced_until']=null;
+    $store->applyAlerts(1, [$a], [], '2026-11-12 12:03:00');
+    $check($store->openAlerts(1)[0]['silenced_until']==='2026-11-13 12:00:00', 'PDO preserva silencio');
+    $store->applyAlerts(1, [], [$alerts[0]['id']], '2026-11-12 12:04:00');
+    $check($store->openAlerts(1)===[], 'PDO fecha');
+    $pdo->exec("INSERT INTO net_interventions (provider_id,device_id,scope_type,scope_id,created_at,silenced_until) VALUES (1,1,'pon',1001,'2026-11-12 12:00:00','2026-11-13 12:00:00')");
+    $check($store->silencedUntil(1,'onu',22,1,'2026-11-12 12:00:00')==='2026-11-13 12:00:00', 'PDO silencio herdado');
+    $check($store->silencedUntil(1,'onu',22,2,'2026-11-12 12:00:00')===null, 'PDO escopo isolado');
     echo "Net033MigrationSmoke: $n verificacoes, zero falhas\n";
 } finally {
     $pdo->exec('DROP DATABASE `isp_auxiliar_net033_sim`');
