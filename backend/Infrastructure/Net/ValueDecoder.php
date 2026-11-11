@@ -66,6 +66,13 @@ final class ValueDecoder
             return ['unknown', null];
         }
         $raw = trim($v->value);
+        if (($metric['type'] ?? null) === 'int_threshold') {
+            if (!preg_match('/^-?[0-9]+$/', $raw)) {
+                return ['unknown', substr($raw, 0, 32)];
+            }
+
+            return [(int) $raw > (int) $metric['online_if_gt'] ? 'online' : 'offline', substr($raw, 0, 32)];
+        }
         $map = is_array($metric['map'] ?? null) ? $metric['map'] : [];
         $default = (string) ($metric['default'] ?? 'unknown');
         $status = isset($map[$raw]) ? (string) $map[$raw] : $default;

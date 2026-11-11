@@ -377,6 +377,227 @@ $check(!file_exists($conf) && !is_dir($dir), 'transporte real: close() apaga a c
 $collectorSource = (string) file_get_contents(dirname(__DIR__, 2) . '/backend/Infrastructure/Net/NetStatusCollector.php');
 $check(!preg_match('/1\.3\.6\.1\.4\.1\.\d+/', $collectorSource) && stripos($collectorSource, 'hioso') === false, 'coletor: nenhuma OID de fabricante fixa no código');
 
+// ---------- perfil v2 (migration 031): status derivado do RTT, enumeração por GET, registros antigos ----------
+$sql31 = (string) file_get_contents(dirname(__DIR__, 2) . '/database/migrations/031_net_profile_hioso_v2.sql');
+preg_match("/'(\\{\\s*\"schema\".*?\\})',\\s*'active'/s", $sql31, $m31);
+$v2Json = $m31[1] ?? '';
+$check($v2Json !== '' && substr_count($v2Json, ';') === 0 && substr_count($v2Json, "'") === 0, 'perfil v2 encontrado na migration 031, sem ; nem apóstrofo');
+$v2 = DeviceProfile::fromJson('hioso-epon-25355-4-4-v2', $v2Json);
+$v2Data = json_decode($v2Json, true);
+$check($v2->hasStatus() && $v2->statusGet() === ['oper_status'] && $v2->statusWalk() === ['onu_identifier'], 'v2: status por GET, walk só do identificador');
+$check($v2Data['metrics']['oper_status']['type'] === 'int_threshold' && $v2Data['metrics']['oper_status']['online_if_gt'] === 0 && str_ends_with($v2Data['metrics']['oper_status']['oid'], '.2.1.25'), 'v2: status derivado do RTT (coluna 25, online se > 0)');
+$check($v2->identityRecheckEvery() === 50 && $v2->probe() === ['slots' => [1], 'pons' => [1, 2, 3, 4], 'stop_after_absent' => 2, 'max_onu' => 128], 'v2: recheck a cada 50 pedidos e enumeração por GET (PON 1 a 4)');
+$bad = $v2Data;
+unset($bad['metrics']['oper_status']['online_if_gt']);
+try {
+    DeviceProfile::fromJson('x', (string) json_encode($bad));
+    $check(false, 'int_threshold sem online_if_gt deveria ser rejeitado');
+} catch (InvalidArgumentException) {
+    $check(true, 'v2: int_threshold sem online_if_gt rejeitado');
+}
+$check(ValueDecoder::status($v2Data['metrics']['oper_status'], new \App\Infrastructure\Net\Snmp\SnmpValue('x', 'INTEGER', '0')) === ['offline', '0']
+    && ValueDecoder::status($v2Data['metrics']['oper_status'], new \App\Infrastructure\Net\Snmp\SnmpValue('x', 'INTEGER', '10761')) === ['online', '10761']
+    && ValueDecoder::status($v2Data['metrics']['oper_status'], new \App\Infrastructure\Net\Snmp\SnmpValue('x', 'STRING', 'na'))[0] === 'unknown', 'v2: RTT 0 = offline, RTT > 0 = online, texto = unknown');
+
+$colRtt = (string) $v2->metric('oper_status')['oid'];
+$colId2 = (string) $v2->metric('onu_identifier')['oid'];
+$io2 = $v2->identityOids();
+$newStore2 = static function () use ($v2Json): InMemoryNetStore {
+    $s = new InMemoryNetStore();
+    $s->devices[7] = ['id' => 7, 'provider_id' => 1, 'map_node_id' => 42, 'enabled' => 1, 'profile_code' => 'hioso-epon-25355-4-4-v2',
+        'profile_json' => $v2Json, 'mgmt_host' => '192.168.0.89', 'snmp_version' => '2c', 'credential_ref' => 'NET_CRED_TEST', 'expected_identity_json' => null];
+
+    return $s;
+};
+// Gabarito da tela web: PON1 1..23, PON2 1..8, PON3 1..2 (todas vivas) e PON4 1..10 = registros antigos com os MACs de outros índices.
+$gab = [];
+for ($i = 1; $i <= 23; $i++) {
+    $gab["1.1.{$i}"] = [sprintf('006d61%02x%04x', 1, $i), 1000 + $i];
+}
+for ($i = 1; $i <= 8; $i++) {
+    $gab["1.2.{$i}"] = [sprintf('006d61%02x%04x', 2, $i), 5000 + $i];
+}
+for ($i = 1; $i <= 2; $i++) {
+    $gab["1.3.{$i}"] = [sprintf('006d61%02x%04x', 3, $i), 500 + $i];
+}
+$oldMap = ['1.4.1' => '1.3.1', '1.4.2' => '1.3.2', '1.4.3' => '1.2.3', '1.4.4' => '1.2.1', '1.4.5' => '1.2.4', '1.4.6' => '1.2.2', '1.4.7' => '1.2.5', '1.4.8' => '1.2.8', '1.4.9' => '1.2.6', '1.4.10' => '1.2.7'];
+foreach ($oldMap as $old => $live) {
+    $gab[$old] = [$gab[$live][0], 0];
+}
+$uptime2 = 9_000_000;
+$mib2 = static function (array $rows) use ($io2, $identity, $colId2, $colRtt, &$uptime2): array {
+    $uptime2 += 3000;
+    $d = [];
+    foreach (array_merge($identity, ['uptime' => ['Timeticks', (string) $uptime2]]) as $k => $v) {
+        $d[$io2[$k]] = $v;
+    }
+    foreach ($rows as $idx => [$m, $rtt]) {
+        $d["{$colId2}.{$idx}"] = ['STRING', $m];
+        $d["{$colRtt}.{$idx}"] = ['INTEGER', (string) $rtt];
+    }
+    $d['1.3.6.1.4.1.25355.3.2.6.3.2.1.12.1.1.1'] = ['STRING', ''];
+    $d['1.3.6.1.4.1.25355.3.2.6.3.2.1.5.1.1.1'] = ['INTEGER', '1'];
+
+    return $d;
+};
+/** GETNEXT que pula linhas, como o agente real: 1.1.10 a 1.1.23 e 1.4.3 a 1.4.10 não saem no walk da coluna de MAC. */
+$skipping = static function (array $rows) use ($mib2, $colId2): FakeSnmpTransport {
+    $t = new FakeSnmpTransport($mib2($rows));
+    foreach (array_keys($rows) as $idx) {
+        if (preg_match('/^1\.1\.(1[0-9]|2[0-3])$/', $idx) || preg_match('/^1\.4\.([3-9]|10)$/', $idx)) {
+            $t->hideFromWalk("{$colId2}.{$idx}");
+        }
+    }
+
+    return $t;
+};
+$run2 = static function (InMemoryNetStore $store, FakeSnmpTransport $t, bool $approve = false) use ($clock): array {
+    return (new NetStatusCollector($store, static fn () => $t, $clock))->run(7, $approve, false);
+};
+
+$s2 = $newStore2();
+$t = $skipping($gab);
+$r = $run2($s2, $t, true);
+$check($r['result'] === 'ok' && $r['baseline'] === true && $r['onus_seen'] === 33, 'v2 gabarito: baseline com 33 ONUs vivas (43 índices, 10 antigos)');
+$check($r['per_pon'][1]['total'] === 23 && $r['per_pon'][2]['total'] === 8 && $r['per_pon'][3]['total'] === 2 && !isset($r['per_pon'][4]) && $r['per_pon'][1]['online'] === 23, 'v2 gabarito: PON1 23, PON2 8, PON3 2, PON4 sem ONU, todas online');
+$old = $r['registros_antigos'];
+sort($old);
+$expOld = array_keys($oldMap);
+sort($expOld);
+$check($old === $expOld, 'v2 gabarito: registros antigos = 1.4.1 a 1.4.10');
+$check(count($s2->onus) === 33 && $s2->events === [], 'v2 gabarito: 33 ONUs gravadas, nenhum evento');
+$vivo = $s2->onuByIdentifier(strtoupper($gab['1.2.3'][0]));
+$check($vivo !== null && $vivo['snmp_index'] === '1.2.3' && $vivo['oper_status'] === 'online' && $vivo['raw_status_code'] === '5003', 'v2 gabarito: ONU com registro antigo na PON 4 fica no índice vivo 1.2.3');
+$check($r['indices_lidos_por_get'] === 22 && array_diff($t->operations, ['get', 'getnext']) === [] && $r['requests'] <= 300, 'v2: índices pulados lidos por GET, só GET/GETNEXT, dentro do teto (' . $r['requests'] . ' pedidos)');
+
+// Ciclo sem mudanças: nada de eventos, nenhuma ONU nova.
+$r = $run2($s2, $skipping($gab));
+$check($r['result'] === 'ok' && $r['baseline'] === false && $r['events'] === ['new' => 0, 'up' => 0, 'down' => 0, 'moved' => 0, 'removed' => 0] && count($s2->onus) === 33, 'v2: segundo ciclo igual não gera evento nem ONU nova');
+
+// Queda (RTT 0) e volta.
+$g2 = $gab;
+$g2['1.1.15'][1] = 0;
+$r = $run2($s2, $skipping($g2));
+$check($r['events']['down'] === 1 && $s2->eventTypes() === ['down'] && $s2->onuByIdentifier(strtoupper($gab['1.1.15'][0]))['oper_status'] === 'offline', 'v2: RTT 0 vira offline com evento down');
+$s2->events = [];
+$r = $run2($s2, $skipping($gab));
+$check($r['events']['up'] === 1 && $s2->eventTypes() === ['up'], 'v2: RTT volta a positivo gera evento up');
+
+// ONU muda de PON: vivo em outro índice (o antigo continua com RTT 0 e o mesmo MAC).
+$s2->events = [];
+$g3 = $gab;
+$g3['1.2.8'] = [$gab['1.2.8'][0], 0];
+$g3['1.3.3'] = [$gab['1.2.8'][0], 777];
+$r = $run2($s2, $skipping($g3));
+$mv = $s2->onuByIdentifier(strtoupper($gab['1.2.8'][0]));
+$check(in_array('moved', $s2->eventTypes(), true) && $mv['snmp_index'] === '1.3.3' && $mv['pon_index'] === 3 && count($s2->onus) === 33, 'v2: ONU que muda de PON gera moved e continua uma só');
+
+// Nenhum registro vivo para o MAC: mantém um só, offline, sem ONU duplicada.
+$s3 = $newStore2();
+$g4 = $gab;
+$g4['1.2.3'][1] = 0;
+$r = $run2($s3, $skipping($g4), true);
+$o = $s3->onuByIdentifier(strtoupper($gab['1.2.3'][0]));
+$check($r['result'] === 'ok' && $o['oper_status'] === 'offline' && count($s3->onus) === 33 && count($r['registros_antigos']) === 10, 'v2: sem registro vivo, mantém um só como offline');
+
+// Ausência real (some da OLT) depois do baseline: só vira removida após 3 ciclos.
+$g5 = $gab;
+unset($g5['1.1.2']);
+$s7 = $newStore2();
+$run2($s7, $skipping($gab), true);
+$types = [];
+for ($i = 0; $i < 3; $i++) {
+    $run2($s7, $skipping($g5));
+    $types[] = $s7->eventTypes();
+}
+$check($types[0] === [] && $types[1] === [] && $types[2] === ['removed'], 'v2: ausência real vira removed só no 3º ciclo');
+
+// noSuchInstance intermitente na leitura de status: releitura resolve, sem queda falsa.
+$s4 = $newStore2();
+$run2($s4, $skipping($gab), true);
+$s4->events = [];
+$target = "{$colRtt}.1.1.20";
+$state = 0;
+$mibFlaky = $mib2($gab);
+$flaky = new FakeSnmpTransport($mibFlaky, static function (int $n, string $op, string $oid, FakeSnmpTransport $f) use ($target, &$state, $gab, $colRtt): ?string {
+    if ($state === 1) {
+        $f->set($target, 'INTEGER', (string) $gab['1.1.20'][1]);
+        $state = 2;
+    }
+    if ($state === 0 && $oid === $target && $op === 'get') {
+        $f->remove($target);
+        $state = 1;
+    }
+
+    return null;
+});
+foreach (array_keys($gab) as $idx) {
+    if (preg_match('/^1\.1\.(1[0-9]|2[0-3])$/', $idx) || preg_match('/^1\.4\.([3-9]|10)$/', $idx)) {
+        $flaky->hideFromWalk("{$colId2}.{$idx}");
+    }
+}
+$r = $run2($s4, $flaky);
+$check($r['result'] === 'ok' && $s4->events === [] && $s4->onuByIdentifier(strtoupper($gab['1.1.20'][0]))['oper_status'] === 'online', 'v2: noSuchInstance isolado no status é relido, sem down falso');
+
+// Status ilegível no ciclo (ausente nas duas leituras): mantém o último estado.
+$s4->events = [];
+$m6 = $mib2($gab);
+unset($m6[$target]);
+$t6 = new FakeSnmpTransport($m6);
+foreach (array_keys($gab) as $idx) {
+    if (preg_match('/^1\.1\.(1[0-9]|2[0-3])$/', $idx) || preg_match('/^1\.4\.([3-9]|10)$/', $idx)) {
+        $t6->hideFromWalk("{$colId2}.{$idx}");
+    }
+}
+$r = $run2($s4, $t6);
+$check($r['result'] === 'ok' && $s4->events === [] && $s4->onuByIdentifier(strtoupper($gab['1.1.20'][0]))['oper_status'] === 'online', 'v2: status ilegível mantém o último estado, sem evento');
+
+// Duas leituras seguidas falham numa linha que existe (visto na OLT real: 1.1.20): a terceira leitura recupera.
+$s8 = $newStore2();
+$tg = "{$colId2}.1.1.20";
+$gets = 0;
+$flaky2 = new FakeSnmpTransport($mib2($gab), static function (int $n, string $op, string $oid, FakeSnmpTransport $f) use ($tg, &$gets, $gab): ?string {
+    if ($op === 'get' && $oid === $tg) {
+        $gets++;
+        if ($gets === 1) {
+            $f->remove($tg);
+        } elseif ($gets === 3) {
+            $f->set($tg, 'STRING', $gab['1.1.20'][0]);
+        }
+    }
+
+    return null;
+});
+foreach (array_keys($gab) as $idx) {
+    if (preg_match('/^1\.1\.(1[0-9]|2[0-3])$/', $idx) || preg_match('/^1\.4\.([3-9]|10)$/', $idx)) {
+        $flaky2->hideFromWalk("{$colId2}.{$idx}");
+    }
+}
+$r = $run2($s8, $flaky2, true);
+$check($r['result'] === 'ok' && $r['onus_seen'] === 33 && $r['per_pon'][1]['total'] === 23 && $gets === 3, 'v2: duas leituras seguidas sem valor no meio da faixa: terceira leitura recupera a ONU');
+
+// B3: baseline = nenhuma ONU conhecida, mesmo com last_success_at preenchido.
+$s5 = $newStore2();
+$s5->pollStates[7] = ['last_success_at' => '2026-01-01 00:00:00', 'consecutive_failures' => 0];
+$r = $run2($s5, $skipping($gab), true);
+$check($r['baseline'] === true && $s5->events === [] && count($s5->onus) === 33, 'baseline: sem ONU conhecida é baseline mesmo com last_success_at preenchido');
+
+// Identidade diferente durante a enumeração por GET: descarta o ciclo.
+$s6 = $newStore2();
+$run2($s6, $skipping($gab), true);
+$before = count($s6->events);
+$tid = $skipping($gab);
+$cnt = 0;
+$tidHook = new FakeSnmpTransport($mib2($gab), static function (int $n, string $op, string $oid, FakeSnmpTransport $f) use (&$cnt, $io2): ?string {
+    if ($n === 60) {
+        $f->set($io2['self_ip'], 'IpAddress', '10.9.9.9');
+    }
+
+    return null;
+});
+$r = $run2($s6, $tidHook);
+$check($r['result'] === 'identity_mismatch' && count($s6->events) === $before, 'v2: identidade muda no meio do ciclo (pedido 60): descartado, sem eventos');
+
 // ---------- normalização e casamento de MAC ----------
 $check(ValueDecoder::mac('006d61aabbcc') === '006D61AABBCC' && ValueDecoder::mac('00:6d:61:aa:bb:cc') === '006D61AABBCC' && ValueDecoder::mac('00 6D 61 AA BB CC') === '006D61AABBCC', 'MAC: formatos aceitos');
 $check(ValueDecoder::mac('000000000000') === null && ValueDecoder::mac('006d61aabb') === null && ValueDecoder::mac('NA') === null && ValueDecoder::mac('zz6d61aabbcc') === null, 'MAC: inválidos rejeitados');

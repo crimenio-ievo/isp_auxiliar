@@ -14,7 +14,7 @@ final class DeviceProfile
 {
     private const IDENTITY_KEYS = ['sys_object_id', 'self_ip', 'engine_id', 'uptime'];
     private const DECODERS = ['split_dots'];
-    private const TYPES = ['hex12_string', 'int_enum', 'string', 'int'];
+    private const TYPES = ['hex12_string', 'int_enum', 'int_threshold', 'string', 'int'];
 
     /** @param array<string,mixed> $data */
     private function __construct(public readonly string $code, private array $data)
@@ -82,6 +82,32 @@ final class DeviceProfile
         return array_values($this->data['status_walk']);
     }
 
+    /** @return list<string> métricas lidas por GET, um índice por vez (agente que pula linhas no GETNEXT) */
+    public function statusGet(): array
+    {
+        return array_values($this->data['status_get'] ?? []);
+    }
+
+    /**
+     * Enumeração por GET direto dos índices (o GETNEXT do agente pode pular linhas).
+     *
+     * @return array{slots:list<int>,pons:list<int>,stop_after_absent:int,max_onu:int}|null
+     */
+    public function probe(): ?array
+    {
+        $p = $this->data['enumeration']['probe'] ?? null;
+        if (!is_array($p)) {
+            return null;
+        }
+
+        return [
+            'slots' => array_values(array_map('intval', $p['slots'])),
+            'pons' => array_values(array_map('intval', $p['pons'])),
+            'stop_after_absent' => max(1, (int) ($p['stop_after_absent'] ?? 2)),
+            'max_onu' => min(256, max(1, (int) ($p['max_onu'] ?? 128))),
+        ];
+    }
+
     /** @return array<string,mixed> */
     public function metric(string $name): array
     {
@@ -95,7 +121,7 @@ final class DeviceProfile
     /** O perfil só tem status quando oper_status foi validado e entrou na status_walk (com mapa de códigos). */
     public function hasStatus(): bool
     {
-        return in_array('oper_status', $this->data['status_walk'], true);
+        return in_array('oper_status', $this->data['status_walk'], true) || in_array('oper_status', $this->data['status_get'] ?? [], true);
     }
 
     public function identifierType(): string
@@ -165,6 +191,30 @@ final class DeviceProfile
             $metric = $d['metrics'][$m] ?? null;
             if (!is_array($metric) || !self::isOid($metric['oid'] ?? null) || !in_array($metric['type'] ?? null, self::TYPES, true)) {
                 $fail("métrica '{$m}' sem OID ou tipo válido.");
+            }
+        }
+        $get = $d['status_get'] ?? [];
+        if (!is_array($get) || array_diff($get, ['oper_status']) !== []) {
+            $fail('status_get só pode conter oper_status.');
+        }
+        if ($get !== []) {
+            $m = $d['metrics']['oper_status'] ?? null;
+            if (!is_array($m) || !self::isOid($m['oid'] ?? null) || !in_array($m['type'] ?? null, ['int_threshold', 'int_enum'], true)) {
+                $fail('oper_status (status_get) sem OID ou tipo int_threshold/int_enum.');
+            }
+            if ($m['type'] === 'int_threshold' && !isset($m['online_if_gt'])) {
+                $fail('oper_status int_threshold precisa de online_if_gt.');
+            }
+            if ($m['type'] === 'int_enum' && (!is_array($m['map'] ?? null) || $m['map'] === [])) {
+                $fail('oper_status int_enum sem mapa.');
+            }
+        }
+        $probe = $d['enumeration']['probe'] ?? null;
+        if ($probe !== null) {
+            foreach (['slots', 'pons'] as $k) {
+                if (!is_array($probe[$k] ?? null) || $probe[$k] === [] || array_filter($probe[$k], static fn ($x) => !is_int($x) || $x < 0) !== []) {
+                    $fail("enumeration.probe.{$k} inválido.");
+                }
             }
         }
         if (in_array('oper_status', $walk, true)) {

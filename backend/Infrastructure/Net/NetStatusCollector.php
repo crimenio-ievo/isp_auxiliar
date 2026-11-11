@@ -37,6 +37,9 @@ final class NetStatusCollector
     private int $requestsAtLastCheck = 0;
     /** @var array<string,?string> */
     private array $startIdentity = [];
+    /** @var list<string> índices de registros antigos (mesmo identificador vivo em outro índice) ignorados no ciclo */
+    private array $staleRegistrations = [];
+    private int $probed = 0;
 
     public function __construct(private NetStore $store, callable $transportFactory, ?callable $clock = null)
     {
@@ -55,6 +58,8 @@ final class NetStatusCollector
         $this->consecutiveTimeouts = 0;
         $this->requestsAtLastCheck = 0;
         $this->startIdentity = [];
+        $this->staleRegistrations = [];
+        $this->probed = 0;
         $summary = ['device_id' => $deviceId, 'dry_run' => $dryRun, 'started_at' => $now, 'warnings' => []];
 
         $device = $this->store->findDevice($deviceId);
@@ -143,7 +148,12 @@ final class NetStatusCollector
                 foreach ($this->profile->statusWalk() as $metricName) {
                     $columns[$metricName] = $this->walkColumn((string) $this->profile->metric($metricName)['oid']);
                 }
-                $observed = $this->buildObservations($columns, $summary['warnings']);
+                $ids = $this->probeMissing($columns['onu_identifier']);
+                $statuses = $columns['oper_status'] ?? null;
+                if ($this->profile->statusGet() !== []) {
+                    $statuses = $this->readStatuses(array_keys($ids));
+                }
+                $observed = $this->buildObservations($ids, $statuses, $summary['warnings']);
                 if (is_string($observed)) {
                     return $fail('partial', $observed, $identity);
                 }
@@ -186,6 +196,8 @@ final class NetStatusCollector
                 'cycle_ms' => $cycleMs,
                 'baseline' => $plan['baseline'],
                 'status_validated' => $this->profile->hasStatus(),
+                'indices_lidos_por_get' => $this->probed,
+                'registros_antigos' => $this->staleRegistrations,
                 'onus_seen' => count($observed),
                 'per_pon' => $plan['per_pon'],
                 'events' => $plan['event_counts'],
@@ -286,15 +298,131 @@ final class NetStatusCollector
     }
 
     /**
-     * @param array<string, array<string,SnmpValue>> $columns
+     * Leitura por GET dos índices que o GETNEXT do agente pulou: para cada (slot, PON) do perfil confere os números de ONU
+     * em sequência até N ausências seguidas depois do maior índice já visto. Uma ausência só vale após uma releitura.
+     *
+     * @param array<string,SnmpValue> $ids
+     * @return array<string,SnmpValue>
+     */
+    private function probeMissing(array $ids): array
+    {
+        $probe = $this->profile->probe();
+        if ($probe === null) {
+            return $ids;
+        }
+        $idOid = (string) $this->profile->metric('onu_identifier')['oid'];
+        $pons = [];
+        foreach ($probe['slots'] as $slot) {
+            foreach ($probe['pons'] as $pon) {
+                $pons["{$slot}.{$pon}"] = [$slot, $pon];
+            }
+        }
+        foreach (array_keys($ids) as $suffix) {
+            $d = $this->profile->decodeIndex((string) $suffix);
+            if ($d !== null && isset($d['slot'])) {
+                $pons["{$d['slot']}.{$d['pon']}"] = [$d['slot'], $d['pon']];
+            }
+        }
+        ksort($pons, SORT_NATURAL);
+        $gaps = [];
+        foreach ($pons as [$slot, $pon]) {
+            $maxSeen = 0;
+            foreach (array_keys($ids) as $suffix) {
+                $d = $this->profile->decodeIndex((string) $suffix);
+                if ($d !== null && ($d['slot'] ?? null) === $slot && $d['pon'] === $pon) {
+                    $maxSeen = max($maxSeen, $d['onu']);
+                }
+            }
+            $absent = 0;
+            $pending = [];
+            for ($onu = 1; $onu <= $probe['max_onu']; $onu++) {
+                $suffix = "{$slot}.{$pon}.{$onu}";
+                if (isset($ids[$suffix])) {
+                    continue;
+                }
+                $v = $this->getRow($idOid . '.' . $suffix);
+                if ($v !== null && trim($v->value) !== '') {
+                    $ids[$suffix] = $v;
+                    $this->probed++;
+                    $absent = 0;
+                    array_push($gaps, ...$pending);
+                    $pending = [];
+                    continue;
+                }
+                $pending[] = $suffix;
+                if ($onu > $maxSeen && ++$absent >= $probe['stop_after_absent']) {
+                    break;
+                }
+            }
+        }
+        // O agente chegou a falhar duas leituras seguidas numa linha que existe: ausência seguida de uma ONU mais adiante na mesma PON ganha uma terceira
+        // leitura, depois de outros pedidos. Buraco real (ONU apagada) custa só esse GET a mais.
+        foreach ($gaps as $suffix) {
+            $this->maybeRecheckIdentity();
+            $v = $this->request('get', $idOid . '.' . $suffix);
+            if (!$v->isNoSuch() && !$v->isEnd() && trim($v->value) !== '') {
+                $ids[$suffix] = $v;
+                $this->probed++;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * GET de um índice; noSuchInstance pode ser intermitente no agente, então ausência = duas leituras sem valor.
+     */
+    private function getRow(string $oid): ?SnmpValue
+    {
+        $this->maybeRecheckIdentity();
+        for ($try = 0; $try < 2; $try++) {
+            $v = $this->request('get', $oid);
+            if (!$v->isNoSuch() && !$v->isEnd()) {
+                return $v;
+            }
+        }
+
+        return null;
+    }
+
+    private function maybeRecheckIdentity(): void
+    {
+        $every = $this->profile->identityRecheckEvery();
+        if ($every > 0 && $this->requests - $this->requestsAtLastCheck >= $every) {
+            $this->recheckIdentity();
+        }
+    }
+
+    /**
+     * @param list<string|int> $suffixes
+     * @return array<string,SnmpValue> só os índices com valor
+     */
+    private function readStatuses(array $suffixes): array
+    {
+        $oid = (string) $this->profile->metric('oper_status')['oid'];
+        $out = [];
+        foreach ($suffixes as $suffix) {
+            $v = $this->getRow($oid . '.' . $suffix);
+            if ($v !== null) {
+                $out[(string) $suffix] = $v;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mesmo identificador em mais de um índice: vale o registro vivo (online); os demais são "registros antigos"
+     * (sem ONU nem eventos). Sem nenhum vivo, fica um só (o de menor índice).
+     *
+     * @param array<string,SnmpValue> $ids
+     * @param array<string,SnmpValue>|null $statuses
      * @param list<string> $warnings
      * @return array<string, array>|string identificador => observação, ou motivo de descarte
      */
-    private function buildObservations(array $columns, array &$warnings): array|string
+    private function buildObservations(array $ids, ?array $statuses, array &$warnings): array|string
     {
-        $ids = $columns['onu_identifier'];
-        $statuses = $columns['oper_status'] ?? null;
-        if ($statuses !== null) {
+        if ($statuses !== null && $this->profile->statusGet() === []) {
             $a = array_keys($ids);
             $b = array_keys($statuses);
             sort($a);
@@ -303,8 +431,9 @@ final class NetStatusCollector
                 return 'colunas de identificador e status com índices diferentes (' . count($a) . ' x ' . count($b) . ')';
             }
         }
+        uksort($ids, static fn ($x, $y) => SnmpValue::compareOids((string) $x, (string) $y));
         $type = $this->profile->identifierType();
-        $out = [];
+        $groups = [];
         $invalid = 0;
         foreach ($ids as $suffix => $value) {
             if ($this->profile->decodeIndex((string) $suffix) === null) {
@@ -315,11 +444,26 @@ final class NetStatusCollector
                 $invalid++;
                 continue;
             }
-            if (isset($out[$identifier])) {
-                $warnings[] = 'identificador repetido em ' . $out[$identifier]['snmp_index'] . ' e ' . $suffix . ' (' . ValueDecoder::maskMac($identifier) . '); mantido o primeiro';
-                continue;
+            $groups[$identifier][] = $this->observation((string) $suffix, $statuses[$suffix] ?? null, $warnings);
+        }
+        $out = [];
+        foreach ($groups as $identifier => $list) {
+            $chosen = $list[0];
+            foreach ($list as $o) {
+                if ($o['oper_status'] === 'online') {
+                    $chosen = $o;
+                    break;
+                }
             }
-            $out[$identifier] = $this->observation((string) $suffix, $statuses[$suffix] ?? null, $warnings);
+            foreach ($list as $o) {
+                if ($o['snmp_index'] !== $chosen['snmp_index']) {
+                    $this->staleRegistrations[] = $o['snmp_index'];
+                }
+            }
+            $out[$identifier] = $chosen;
+        }
+        if ($this->staleRegistrations !== []) {
+            $warnings[] = count($this->staleRegistrations) . ' registro(s) antigo(s) ignorado(s) (mesmo identificador em outro índice)';
         }
         if ($invalid > 0) {
             $warnings[] = "{$invalid} linha(s) com identificador inválido/vazio ignorada(s)";
@@ -407,7 +551,7 @@ final class NetStatusCollector
         foreach ($this->store->deviceOnus($deviceId) as $row) {
             $known[$row['onu_identifier']] = $row;
         }
-        $baseline = empty($prevPoll['last_success_at']) && $known === [];
+        $baseline = $known === [];
         $missingIds = array_values(array_diff(array_keys($observed), array_keys($known)));
         $elsewhere = $missingIds === [] ? [] : $this->store->onusByIdentifiers($providerId, $type, $missingIds);
 
@@ -451,6 +595,11 @@ final class NetStatusCollector
                 $count('new');
             }
             $prev = (string) ($existing['oper_status'] ?? 'unknown');
+            if ($o['oper_status'] === 'unknown' && $o['raw_status_code'] === null && in_array($prev, ['online', 'offline'], true) && $this->profile->hasStatus()) {
+                // Leitura de status falhou neste ciclo (noSuchInstance persistente): mantém o último estado em vez de inventar mudança.
+                $o['oper_status'] = $prev;
+                $o['raw_status_code'] = $existing['raw_status_code'] ?? null;
+            }
             $changed = $prev !== $o['oper_status'];
             if ($changed && $prev === 'online' && $o['oper_status'] === 'offline') {
                 $events[] = ['down', ['raw_status_code' => $o['raw_status_code'], 'after_stale' => (int) ($existing['stale'] ?? 0) === 1]];
