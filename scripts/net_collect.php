@@ -17,17 +17,20 @@ declare(strict_types=1);
  */
 
 use App\Infrastructure\Database\Database;
+use App\Infrastructure\Net\NetPowerCollector;
 use App\Infrastructure\Net\NetStatusCollector;
 use App\Infrastructure\Net\NetTransportFactory;
 use App\Infrastructure\Net\Store\PdoNetStore;
 
 require dirname(__DIR__) . '/backend/bootstrap/app.php';
 
-$opts = getopt('', ['device:', 'kind:', 'dry-run', 'approve-identity']);
+$opts = getopt('', ['device:', 'kind:', 'dry-run', 'approve-identity', 'pon:', 'onu:']);
 $deviceId = isset($opts['device']) && ctype_digit((string) $opts['device']) ? (int) $opts['device'] : 0;
 $kind = (string) ($opts['kind'] ?? '');
-if ($deviceId < 1 || $kind !== 'status') {
-    fwrite(STDERR, "Uso: php scripts/net_collect.php --device=ID --kind=status [--dry-run] [--approve-identity]\n");
+$pon = isset($opts['pon']) && ctype_digit((string) $opts['pon']) ? (int) $opts['pon'] : null;
+$onuId = isset($opts['onu']) && ctype_digit((string) $opts['onu']) ? (int) $opts['onu'] : null;
+if ($deviceId < 1 || !in_array($kind, ['status', 'power'], true) || (isset($opts['pon']) && $pon === null) || (isset($opts['onu']) && $onuId === null)) {
+    fwrite(STDERR, "Uso: php scripts/net_collect.php --device=ID --kind=status [--dry-run] [--approve-identity]\n     php scripts/net_collect.php --device=ID --kind=power [--pon=N] [--onu=ID_NET_ONUS] [--dry-run]\n");
     exit(1);
 }
 $dryRun = isset($opts['dry-run']);
@@ -43,9 +46,12 @@ if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
 
 $app = bootstrapApplication();
 $pdo = (new Database($app->config()))->pdo();
-$collector = new NetStatusCollector(new PdoNetStore($pdo), new NetTransportFactory());
-
-$summary = $collector->run($deviceId, $approve, $dryRun);
+$store = new PdoNetStore($pdo);
+if ($kind === 'power') {
+    $summary = (new NetPowerCollector($store, new NetTransportFactory()))->run($deviceId, $pon, $onuId, $dryRun);
+} else {
+    $summary = (new NetStatusCollector($store, new NetTransportFactory()))->run($deviceId, $approve, $dryRun);
+}
 $summary['kind'] = $kind;
 $summary['finished_at'] = date('Y-m-d H:i:s');
 
@@ -55,7 +61,7 @@ if (!is_dir($logDir)) {
 }
 @file_put_contents($logDir . '/net_collect-' . date('Y-m-d') . '.log', json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
 
-echo 'Telemetria - ciclo de status do equipamento ' . $deviceId . ($dryRun ? ' (SIMULAÇÃO: nada gravado)' : '') . "\n";
+echo 'Telemetria - ciclo de ' . ($kind === 'power' ? 'potência' : 'status') . ' do equipamento ' . $deviceId . ($dryRun ? ' (SIMULAÇÃO: nada gravado)' : '') . "\n";
 echo 'Resultado: ' . $summary['result'] . (isset($summary['error']) ? ' - ' . $summary['error'] : '') . "\n";
 echo 'Requisições SNMP: ' . ($summary['requests'] ?? 0) . ' | duração: ' . ($summary['cycle_ms'] ?? 0) . " ms\n";
 if (isset($summary['identity'])) {
@@ -77,6 +83,11 @@ if (isset($summary['per_pon'])) {
     if (!empty($summary['rescued_by_get'])) {
         echo 'ONUs confirmadas por GET direto (ausentes do walk): ' . $summary['rescued_by_get'] . "\n";
     }
+}
+if ($kind === 'power' && $summary['result'] === 'ok') {
+    echo "ONUs lidas: {$summary['onus_lidas']} | puladas (não online): {$summary['puladas']} | sem leitura: " . count($summary['sem_leitura']) . "\n";
+    echo 'Faixas: ' . json_encode($summary['faixas']) . ' | rx mín/máx: ' . ($summary['rx_min'] ?? '-') . ' / ' . ($summary['rx_max'] ?? '-') . "\n";
+    echo 'Amostras: ' . $summary['amostras'] . ' | eventos: ' . json_encode($summary['eventos'] ?: new stdClass()) . "\n";
 }
 foreach ($summary['warnings'] ?? [] as $w) {
     echo "AVISO: {$w}\n";

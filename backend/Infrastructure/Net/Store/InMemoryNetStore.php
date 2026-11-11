@@ -18,6 +18,12 @@ final class InMemoryNetStore implements NetStore
     /** @var list<array{onu_id:int,event_type:string,details:array,occurred_at:string}> */
     public array $events = [];
     private int $nextOnuId = 1;
+    /** @var array<string,string> */
+    public array $settings = [];
+    /** @var array<int,array> */
+    public array $power = [];
+    /** @var list<array> */
+    public array $samples = [];
 
     public function findDevice(int $deviceId): ?array
     {
@@ -81,6 +87,43 @@ final class InMemoryNetStore implements NetStore
             $this->devices[$deviceId]['expected_identity_json'] = json_encode($plan['expected_identity']);
         }
         $this->savePollState($deviceId, $plan['poll_state']);
+    }
+
+    public function providerSettings(int $providerId): array
+    {
+        return $this->settings;
+    }
+
+    public function powerStates(int $deviceId): array
+    {
+        $ids = array_map(static fn (array $o): int => (int) $o['id'], $this->deviceOnus($deviceId));
+
+        return array_intersect_key($this->power, array_flip($ids));
+    }
+
+    public function firstSamples(array $onuIds): array
+    {
+        $out = [];
+        foreach ($this->samples as $sm) {
+            if ($sm['reason'] === 'first' && in_array($sm['onu_id'], $onuIds, true) && $sm['onu_rx_dbm'] !== null) {
+                $out[$sm['onu_id']][] = (float) $sm['onu_rx_dbm'];
+            }
+        }
+
+        return $out;
+    }
+
+    public function applyPower(array $plan, string $now): void
+    {
+        foreach ($plan['power'] as $id => $fields) {
+            $this->power[$id] = array_merge($this->power[$id] ?? ['onu_id' => $id, 'olt_rx_from_onu_dbm' => null], $fields, ['updated_at' => $now]);
+        }
+        foreach ($plan['samples'] as $sm) {
+            $this->samples[] = $sm;
+        }
+        foreach ($plan['events'] as [$id, $type, $details]) {
+            $this->events[] = ['onu_id' => $id, 'event_type' => $type, 'details' => $details, 'occurred_at' => $now];
+        }
     }
 
     /** @return list<string> tipos de evento, em ordem */

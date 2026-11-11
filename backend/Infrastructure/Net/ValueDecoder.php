@@ -83,6 +83,21 @@ final class ValueDecoder
         return [$status, substr($raw, 0, 32)];
     }
 
+    /** Número decimal em texto ("-23.19"). "na", vazio, texto ou valor absurdo (fora de -100..100) => null. */
+    public static function float(SnmpValue $v): ?float
+    {
+        if ($v->isEnd() || $v->isNoSuch()) {
+            return null;
+        }
+        $t = trim($v->value);
+        if (!preg_match('/^-?[0-9]{1,3}(\.[0-9]{1,4})?$/', $t)) {
+            return null;
+        }
+        $f = (float) $t;
+
+        return abs($f) > 100.0 ? null : $f;
+    }
+
     /** Normaliza um campo de identidade para comparação estável. */
     public static function identityField(string $name, SnmpValue $v): ?string
     {

@@ -41,4 +41,24 @@ interface NetStore
 
     /** Aplica o ciclo inteiro de forma atômica. */
     public function applyCycle(int $deviceId, array $plan, string $now): void;
+
+    /** @return array<string,string> chave => valor das provider_settings com prefixo "net." */
+    public function providerSettings(int $providerId): array;
+
+    /** @return array<int,array> onu_id => linha de net_onu_power */
+    public function powerStates(int $deviceId): array;
+
+    /**
+     * Valores de rx das amostras "first" de cada ONU, em ordem (base da mediana de referência).
+     *
+     * @param list<int> $onuIds
+     * @return array<int,list<float>>
+     */
+    public function firstSamples(array $onuIds): array;
+
+    /**
+     * Grava a potência de forma atômica. Plano: power: array<onu_id, campos de net_onu_power>,
+     * samples: list<array{onu_id,sampled_at,onu_rx_dbm,onu_tx_dbm,onu_temp_c,reason}>, events: list<array{0:int,1:string,2:array}>.
+     */
+    public function applyPower(array $plan, string $now): void;
 }

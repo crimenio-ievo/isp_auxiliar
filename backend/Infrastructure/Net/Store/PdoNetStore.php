@@ -128,6 +128,62 @@ final class PdoNetStore implements NetStore
         });
     }
 
+    public function providerSettings(int $providerId): array
+    {
+        $st = $this->pdo->prepare("SELECT setting_key, setting_value FROM provider_settings WHERE provider_id = :p AND setting_key LIKE 'net.%'");
+        $st->execute(['p' => $providerId]);
+
+        return $st->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
+    }
+
+    public function powerStates(int $deviceId): array
+    {
+        $st = $this->pdo->prepare('SELECT p.* FROM net_onu_power p JOIN net_onus o ON o.id = p.onu_id WHERE o.device_id = :id');
+        $st->execute(['id' => $deviceId]);
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['onu_id']] = $row;
+        }
+
+        return $out;
+    }
+
+    public function firstSamples(array $onuIds): array
+    {
+        $out = [];
+        foreach (array_chunk($onuIds, 200) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $this->pdo->prepare("SELECT onu_id, onu_rx_dbm FROM net_onu_power_samples WHERE reason = 'first' AND onu_rx_dbm IS NOT NULL AND onu_id IN ({$in}) ORDER BY onu_id, sampled_at, id");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $out[(int) $row['onu_id']][] = (float) $row['onu_rx_dbm'];
+            }
+        }
+
+        return $out;
+    }
+
+    public function applyPower(array $plan, string $now): void
+    {
+        $this->transaction(function () use ($plan, $now): void {
+            $cols = ['onu_rx_dbm', 'onu_tx_dbm', 'onu_temp_c', 'measured_at', 'rx_band', 'baseline_rx_dbm', 'baseline_set_at', 'baseline_n', 'last_sample_rx_dbm', 'last_sample_at'];
+            $sql = 'INSERT INTO net_onu_power (onu_id, updated_at, ' . implode(', ', $cols) . ') VALUES (:onu_id, :now, '
+                . implode(', ', array_map(static fn ($c) => ':' . $c, $cols)) . ') ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at), '
+                . implode(', ', array_map(static fn ($c) => "{$c} = VALUES({$c})", $cols));
+            $st = $this->pdo->prepare($sql);
+            foreach ($plan['power'] as $onuId => $fields) {
+                $st->execute(array_merge($this->only($fields, $cols, true), ['onu_id' => (int) $onuId, 'now' => $now]));
+            }
+            $ins = $this->pdo->prepare('INSERT INTO net_onu_power_samples (onu_id, sampled_at, onu_rx_dbm, onu_tx_dbm, onu_temp_c, reason) VALUES (:onu_id, :sampled_at, :onu_rx_dbm, :onu_tx_dbm, :onu_temp_c, :reason)');
+            foreach ($plan['samples'] as $sm) {
+                $ins->execute($this->only($sm, ['onu_id', 'sampled_at', 'onu_rx_dbm', 'onu_tx_dbm', 'onu_temp_c', 'reason'], true));
+            }
+            foreach ($plan['events'] as [$onuId, $type, $details]) {
+                $this->insertEvents((int) $onuId, [[$type, $details]], $now);
+            }
+        });
+    }
+
     private function upsertState(int $onuId, array $state, string $now): void
     {
         $state = $this->only($state, self::STATE_COLUMNS, false);

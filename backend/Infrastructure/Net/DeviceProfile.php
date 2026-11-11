@@ -14,7 +14,7 @@ final class DeviceProfile
 {
     private const IDENTITY_KEYS = ['sys_object_id', 'self_ip', 'engine_id', 'uptime'];
     private const DECODERS = ['split_dots'];
-    private const TYPES = ['hex12_string', 'int_enum', 'int_threshold', 'string', 'int'];
+    private const TYPES = ['hex12_string', 'int_enum', 'int_threshold', 'string_float', 'string', 'int'];
 
     /** @param array<string,mixed> $data */
     private function __construct(public readonly string $code, private array $data)
@@ -106,6 +106,12 @@ final class DeviceProfile
             'stop_after_absent' => max(1, (int) ($p['stop_after_absent'] ?? 2)),
             'max_onu' => min(256, max(1, (int) ($p['max_onu'] ?? 128))),
         ];
+    }
+
+    /** @return array<string,array<string,mixed>> métricas de potência lidas por GET por índice (nome => definição) */
+    public function powerGet(): array
+    {
+        return $this->data['power_get'] ?? [];
     }
 
     /** @return array<string,mixed> */
@@ -207,6 +213,18 @@ final class DeviceProfile
             }
             if ($m['type'] === 'int_enum' && (!is_array($m['map'] ?? null) || $m['map'] === [])) {
                 $fail('oper_status int_enum sem mapa.');
+            }
+        }
+        $power = $d['power_get'] ?? [];
+        if (!is_array($power)) {
+            $fail('power_get inválido.');
+        }
+        foreach ($power as $name => $m) {
+            if (!in_array($name, ['onu_rx_dbm', 'onu_tx_dbm', 'onu_temp_c'], true) || !is_array($m) || !self::isOid($m['oid'] ?? null) || ($m['type'] ?? null) !== 'string_float') {
+                $fail("power_get.{$name}: nome, OID ou tipo (string_float) inválido.");
+            }
+            if (($m['only_when'] ?? 'online') !== 'online') {
+                $fail("power_get.{$name}: only_when só aceita online.");
             }
         }
         $probe = $d['enumeration']['probe'] ?? null;
