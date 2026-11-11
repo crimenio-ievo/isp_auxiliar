@@ -6,3 +6,4 @@ ALTER TABLE net_device_poll_state DROP COLUMN IF EXISTS last_power_attempt_at;
 ALTER TABLE net_onu_power DROP COLUMN IF EXISTS bad_streak;
 ALTER TABLE net_onu_power DROP COLUMN IF EXISTS ok_streak;
 -- status_interval_s=600 e preservado: nao ha como distinguir ajuste manual de migracao.
+DELETE FROM schema_migrations WHERE version = '033_net_alerts.sql' OR filename = '033_net_alerts.sql';

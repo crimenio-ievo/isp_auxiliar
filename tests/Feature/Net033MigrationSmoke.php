@@ -20,6 +20,7 @@ try {
     $pdo->exec("USE `$schema`");
     $pdo->exec('CREATE TABLE providers (id BIGINT UNSIGNED PRIMARY KEY)');
     $pdo->exec('CREATE TABLE map_nodes (id BIGINT UNSIGNED PRIMARY KEY)');
+    $pdo->exec('CREATE TABLE schema_migrations (version VARCHAR(190) PRIMARY KEY,filename VARCHAR(190))');
     foreach (['030_net_telemetry_core.sql', '031_net_profile_hioso_v2.sql', '032_net_power.sql'] as $f) { $apply("$root/database/migrations/$f"); }
     $pdo->exec('INSERT INTO providers VALUES (1)');
     $pdo->exec('INSERT INTO map_nodes VALUES (1)');
@@ -34,7 +35,9 @@ try {
     $pdo->exec('UPDATE net_alerts SET closed_at=NOW()');
     $pdo->exec($insert); $pdo->exec('UPDATE net_alerts SET closed_at=NOW()'); $pdo->exec($insert);
     $check((int) $pdo->query('SELECT COUNT(*) FROM net_alerts')->fetchColumn() === 3, 'historico fechado e nova abertura');
+    $pdo->exec("INSERT INTO schema_migrations VALUES ('033_net_alerts.sql','033_net_alerts.sql')");
     $apply("$root/scripts/rollback_033_net_alerts.sql");
+    $check((int)$pdo->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn()===0,'rollback remove metadados para permitir reaplicacao oficial');
     $check((int) $pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='net_alerts'")->fetchColumn() === 0, 'rollback');
     $apply($file);
     $check((int) $pdo->query('SELECT COUNT(*) FROM net_alerts')->fetchColumn() === 0, 'reaplicar apos rollback');
