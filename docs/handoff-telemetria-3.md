@@ -30,3 +30,15 @@ Entregue:
 - Teste: `php tests/Feature/Net034MigrationSmoke.php` (schema exclusivo `isp_auxiliar_net034_sim`, socket local, sem `.env`, removido ao final): aplicar/reaplicar, unicidade, source distinto, FK, onu_id NULL, SET NULL, rollback, reaplicar após rollback — 9 verificações. `Net033MigrationSmoke` segue 20/20.
 - `scripts/net_register_device.php`: nova validação de que o `port_num` das PONs do nó é exatamente 1..N (contrato `port_num == pon_index`). Sem `net_device_pon_ports`. Simulação rodada contra o nó 42: sem novo erro.
 - **034 NÃO aplicada no `isp_auxiliar`.** Aplicação futura, só com autorização: `php scripts/apply_migrations.php`.
+
+## CP3 — CLI `scripts/net_log_import.php` (feito)
+
+- Classes: `NetLogImporter`, `Store/NetOutageStore` (interface) com `InMemoryNetOutageStore` e `PdoNetOutageStore`. Sem acesso à OLT.
+- Uso: `php scripts/net_log_import.php --device=ID --file=ARQUIVO [--olt-tz=America/Sao_Paulo] [--apply]`. Simulação por padrão (nada gravado, resumo em JSON); `--apply` grava em UMA transação junto com a auditoria `net.log_import` (guarda só contagens, período, fuso e sha256 do conteúdo, nunca o texto do log). Falha de auditoria desfaz tudo.
+- Idempotência: chave `event_key` (MAC + início no relógio da OLT) + índice único (device, source, event_key). Reimportar o mesmo arquivo: 0 novas, tudo "inalteradas". Queda em aberto é fechada pelo arquivo seguinte que traga o retorno (`atualizadas_com_retorno`); arquivo mais antigo/truncado nunca reabre queda já fechada (`mantidas_fechadas`).
+- Grava também as ocorrências de manutenção/boot, com `category='manutencao'` e motivo, para auditoria; elas NÃO entram nas contagens de queda.
+- MAC sem ONU em `net_onus` é gravado com `onu_id` NULL (continua pelo MAC; se a ONU aparecer depois, o próximo import preenche... **não**: o import só preenche `onu_id` em linhas novas ou fechadas. Limitação conhecida, ver "O que falta").
+- Saída só com MAC mascarado (`xx`). Arquivo até 20 MB.
+- **Fuso (DECISÃO SUA PENDENTE):** o syslog não traz fuso. O relógio da OLT pode estar em UTC ou em horário de Brasília; o servidor está em UTC. `--apply` exige `--olt-tz` explícito para não adivinhar; a simulação assume o fuso do app e imprime isso. A conversão vai do relógio da OLT para o fuso do app (UTC) antes de gravar. Como conferir: comparar um `down` do poll em `net_onu_events` (hora do servidor) com a mesma queda no log; a diferença é o fuso da OLT.
+- Testes: `php tests/Feature/NetLogImportSmoke.php` → 26 verificações, 0 falhas (memória + schema descartável exclusivo `isp_auxiliar_net034imp_sim`, socket local): simulação sem escrita, contagens do fixture, MAC mascarado, apply, reimport sem duplicar, fuso, queda aberta → fechada, arquivo antigo não reabre, atomicidade com falha de auditoria (memória e PDO), equipamento inexistente, fuso inválido, arquivo vazio.
+- A CLI contra o banco real (sem 034) responde "migration 034 não está aplicada"; validação de argumentos conferida à mão. Nenhuma escrita no banco principal.
