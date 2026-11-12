@@ -60,4 +60,16 @@ final class PdoNetOutageStore implements NetOutageStore
 
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    public function pollTransitions(int $deviceId, string $from, string $to): array
+    {
+        $st = $this->pdo->prepare(
+            "SELECT e.onu_id, e.event_type, e.occurred_at FROM net_onu_events e JOIN net_onus o ON o.id = e.onu_id
+              WHERE o.device_id = ? AND e.event_type IN ('up','down') AND e.occurred_at BETWEEN ? AND ?
+              ORDER BY e.onu_id, e.occurred_at, e.id"
+        );
+        $st->execute([$deviceId, $from, $to]);
+
+        return array_map(static fn (array $r): array => ['onu_id' => (int) $r['onu_id'], 'event_type' => $r['event_type'], 'occurred_at' => $r['occurred_at']], $st->fetchAll(PDO::FETCH_ASSOC));
+    }
 }

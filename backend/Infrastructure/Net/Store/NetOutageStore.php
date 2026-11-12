@@ -28,4 +28,11 @@ interface NetOutageStore
      * @return list<array<string,mixed>>
      */
     public function outagesOverlapping(int $deviceId, string $from, string $to): array;
+
+    /**
+     * Eventos up/down do poll (net_onu_events) do equipamento entre from e to, em ordem de ONU, hora e id.
+     *
+     * @return list<array{onu_id:int,event_type:string,occurred_at:string}>
+     */
+    public function pollTransitions(int $deviceId, string $from, string $to): array;
 }

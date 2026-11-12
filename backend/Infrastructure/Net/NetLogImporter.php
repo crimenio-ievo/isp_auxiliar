@@ -79,8 +79,12 @@ final class NetLogImporter
                 if (count($examples) < 5 && $o['counts_as_outage']) {
                     $examples[] = ['mac' => ValueDecoder::maskMac($mac12), 'inicio' => $row['started_at'], 'fim' => $row['ended_at'], 'duracao_s' => $row['duration_s'], 'motivo' => $row['cause']];
                 }
-            } elseif ($old['ended_at'] === null && $row['ended_at'] !== null) {
-                $updates[] = $row; // era em aberto e agora há retorno
+            } elseif (($old['ended_at'] === null && $row['ended_at'] !== null) || ($old['onu_id'] === null && $onuId !== null)) {
+                $updates[] = $row; // era em aberto e agora há retorno, ou a ONU passou a existir em net_onus
+                if ($old['ended_at'] !== null && $row['ended_at'] === null) {
+                    $row = array_merge($row, ['ended_at' => $old['ended_at'], 'duration_s' => $old['duration_s'], 'returned_via' => $old['returned_via']]);
+                    $updates[count($updates) - 1] = $row;
+                }
             } elseif ($old['ended_at'] !== null && $row['ended_at'] === null) {
                 $kept++; // arquivo mais antigo/truncado: nunca reabre uma queda já fechada
             } else {

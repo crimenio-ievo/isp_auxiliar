@@ -65,6 +65,19 @@ $check($s['atualizadas_com_retorno'] === 1 && count($st3->rows) === 1 && $r['end
 $s = $i3->run(1, $open, 'UTC', 'UTC', true);
 $check($s['mantidas_fechadas'] === 1 && array_values($st3->rows)[0]['ended_at'] === '2026-11-12 10:03:00', 'arquivo antigo nao reabre queda fechada');
 
+// ONU que passa a existir em net_onus depois: o proximo import preenche onu_id sem reabrir nem duplicar.
+$net5 = new InMemoryNetStore(); $net5->devices = $net->devices; $st5 = new InMemoryNetOutageStore();
+$i5 = new NetLogImporter($net5, $st5, new OltLogParser(), $clock);
+$i5->run(1, $closed, 'UTC', 'UTC', true);
+$check(array_values($st5->rows)[0]['onu_id'] === null, 'MAC sem ONU: onu_id NULL');
+$net5->onus = [9 => ['id' => 9, 'provider_id' => 1, 'device_id' => 1, 'identifier_type' => 'epon_mac', 'onu_identifier' => 'AABBCC000001']];
+$s = $i5->run(1, $closed, 'UTC', 'UTC', true);
+$check($s['atualizadas_com_retorno'] === 1 && count($st5->rows) === 1 && array_values($st5->rows)[0]['onu_id'] === 9, 'reimport preenche onu_id depois que a ONU e cadastrada');
+$net5->onus[9]['onu_identifier'] = 'AABBCC000001';
+$i5->run(1, $open, 'UTC', 'UTC', true);
+$r5 = array_values($st5->rows)[0];
+$check($r5['ended_at'] === '2026-11-12 10:03:00' && $r5['onu_id'] === 9, 'preencher onu_id com arquivo antigo preserva o retorno');
+
 // Atomicidade e entradas invalidas.
 $net4 = new InMemoryNetStore(); $net4->devices = $net->devices; $st4 = new InMemoryNetOutageStore(); $st4->failAudit = true;
 try { (new NetLogImporter($net4, $st4, new OltLogParser(), $clock))->run(1, $fixture, 'UTC', 'UTC', true); $check(false, 'auditoria falhou e gravou'); }

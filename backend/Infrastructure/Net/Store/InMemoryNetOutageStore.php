@@ -11,6 +11,8 @@ final class InMemoryNetOutageStore implements NetOutageStore
     /** @var list<array<string,mixed>> */
     public array $audit = [];
     public bool $failAudit = false;
+    /** @var list<array{onu_id:int,event_type:string,occurred_at:string,device_id?:int}> eventos do poll nos testes */
+    public array $pollEvents = [];
 
     public function existing(int $deviceId, string $source, array $keys): array
     {
@@ -57,6 +59,14 @@ final class InMemoryNetOutageStore implements NetOutageStore
             }
         }
         usort($out, static fn (array $a, array $b): int => [$a['started_at'], $a['onu_identifier']] <=> [$b['started_at'], $b['onu_identifier']]);
+
+        return $out;
+    }
+
+    public function pollTransitions(int $deviceId, string $from, string $to): array
+    {
+        $out = array_values(array_filter($this->pollEvents, static fn (array $e): bool => in_array($e['event_type'], ['up', 'down'], true) && $e['occurred_at'] >= $from && $e['occurred_at'] <= $to));
+        usort($out, static fn (array $a, array $b): int => [$a['onu_id'], $a['occurred_at']] <=> [$b['onu_id'], $b['occurred_at']]);
 
         return $out;
     }
