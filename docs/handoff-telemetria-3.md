@@ -15,3 +15,18 @@ Worktree `/var/www/html/_isp_auxiliar_telemetria_fibra`, branch `feature/telemet
 - Resultado no log real (somente leitura, local): 226 eventos de ONU; 20 Dying Gasp e 19 linkup duplicados descartados; 69 eventos linkdown→retorno: 22 boot, 29 troca de PON, **18 quedas reais** (16 por energia, 2 sem aviso de energia), nenhuma em aberto.
 - Fixture `tests/fixtures/olt_syslog_reduced.log`: 65 linhas reais, MACs mascarados (OUI mantido, 3 últimos octetos trocados por contador sintético). Sem login/credencial; contém só os IPs de gerência internos já presentes nas linhas de login (10.4.0.2).
 - Teste: `php tests/Feature/OltLogParserSmoke.php` → 37 verificações, 0 falhas (cada regra acima + fixture).
+
+## CP2 — auditoria de net_onu_events e migration 034 (feita, NÃO aplicada)
+
+FATO (auditoria de 030/032 e do código):
+- `net_onu_events`: `id, onu_id (FK net_onus), event_type ENUM(new,up,down,moved,removed,band_change,rx_deviation), details_json, occurred_at`; índices (onu_id, occurred_at) e (occurred_at). Os eventos `up`/`down` são PONTUAIS, gravados pelo poll com a hora do ciclo (precisão de ~10 min), sem fim, duração, motivo, origem ou chave de idempotência.
+- O `NetAlertEngine` consome `up`/`down` (massa por PON, ONU instável, fechamento de alerta). Gravar quedas do log ali como `down`/`up` dobraria a contagem e mudaria alertas já ativos.
+
+Conclusão: NÃO reaproveitar `net_onu_events` para as quedas do log (falta intervalo, motivo, origem e unicidade; e há risco de contagem dobrada nos alertas). Eles continuam sendo a fonte do poll.
+
+Entregue:
+- `database/migrations/034_net_onu_outages.sql` (aditiva, `IF NOT EXISTS`, reaplicável) + `scripts/rollback_034_net_onu_outages.sql`. Tabela `net_onu_outages`: uma linha por queda, `onu_identifier` (MAC, 12 hex) sempre guardado, `onu_id` NULL quando o MAC não está em `net_onus` (FK ON DELETE SET NULL), `source` ('log'|'poll'), `event_key` (sha256 MAC|início), `started_at/ended_at/duration_s`, `cause`, `category`, `maintenance_reason`, `dying_gasp_at`, `returned_via`. Único (device_id, source, event_key) = reimportar não duplica. Não altera `net_onu_events`.
+- Poll × log (sem contar duas vezes) será resolvido na leitura (CP3/CP4): a queda do poll é derivada de pares down→up em `net_onu_events` e descartada quando há queda do log da mesma ONU que a cubra; o log tem preferência.
+- Teste: `php tests/Feature/Net034MigrationSmoke.php` (schema exclusivo `isp_auxiliar_net034_sim`, socket local, sem `.env`, removido ao final): aplicar/reaplicar, unicidade, source distinto, FK, onu_id NULL, SET NULL, rollback, reaplicar após rollback — 9 verificações. `Net033MigrationSmoke` segue 20/20.
+- `scripts/net_register_device.php`: nova validação de que o `port_num` das PONs do nó é exatamente 1..N (contrato `port_num == pon_index`). Sem `net_device_pon_ports`. Simulação rodada contra o nó 42: sem novo erro.
+- **034 NÃO aplicada no `isp_auxiliar`.** Aplicação futura, só com autorização: `php scripts/apply_migrations.php`.

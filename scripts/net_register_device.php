@@ -60,6 +60,13 @@ if ($node === false) {
     if ($pons !== $expectPons) {
         $errors[] = "o nó tem {$pons} portas PON, esperado {$expectPons}: confira antes de registrar.";
     }
+    // Contrato de dados de rede: port_num da PON no mapa == pon_index da OLT (1..N), conferido na OLT 1.
+    $st = $pdo->prepare("SELECT port_num FROM map_ports WHERE node_id = :id AND port_role = 'pon' ORDER BY port_num");
+    $st->execute(['id' => $nodeId]);
+    $nums = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    if ($nums !== range(1, $expectPons)) {
+        $errors[] = 'port_num das PONs no mapa (' . implode(',', $nums) . ') não é 1..' . $expectPons . ': o contrato exige port_num == pon_index.';
+    }
     $st = $pdo->prepare('SELECT id FROM net_devices WHERE map_node_id = :id');
     $st->execute(['id' => $nodeId]);
     if (($existing = $st->fetchColumn()) !== false) {
