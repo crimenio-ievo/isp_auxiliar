@@ -51,3 +51,27 @@ Ferramenta nova, somente leitura: `php scripts/net_log_clock_check.php --device=
 - Página: seção "Eventos recentes" (1 h / 24 h / 1 semana, padrão 24 h) com hora em Brasília, texto, retorno ou "em aberto", precisão, "todas com Dying Gasp" e botões "ONU n" que abrem a ficha; no máximo 20 itens com aviso do total; vazio = "Nenhuma queda no período… Sem registro = estável". Falha nos eventos não derruba a árvore.
 - Testes: `NetOutageReaderSmoke` 42 (janela de 10 s no limite exato e 11 s, PONs distintas no mesmo instante, mistura, em aberto, só poll, manutenção fora) · `NetFiberReaderSmoke` 88 (eventos no schema descartável, chaves, MAC/índice, controller 403/200/422, rota) · `tests/net/rede_fibra.js` 96.
 - Decisão tomada por mim: o grupo usa o início do primeiro, não encadeia. A coleta (poll) tem hora quantizada em ciclos; ONUs que caem no mesmo ciclo agrupam-se com `precisao: aproximada`.
+
+## Resultado final e suíte completa
+
+**Suíte (este worktree, após o CP3):** `tests/Feature/*.php` + `AcceptanceResendRegression.php`: **47 passam, 0 falham** (o `ReleaseScriptsSmoke`, que falhava só porque a 034 estava pendente, passou: a 034 já está aplicada no banco principal); `bash tests/map/run_all.sh`: **25 cenários, 0 falhas**; `bash tests/net/run_all.sh`: **0 falhas** (NetOutageReaderSmoke 42, NetFiberReaderSmoke 88, jsdom 96). Nenhum schema descartável ficou para trás.
+
+**Conferido em leitura no banco real:** `tree()` com site POP "iEvo" e tecnologia `epon`; `saude` do OLT-001 = ok (8 min); `events(1,'7d')` = 8 grupos, todos só da coleta ("motivo não informado", hora aproximada), porque `net_onu_outages` ainda está VAZIA (import real não feito).
+
+**Não verificado:** aparência em navegador (não há navegador neste servidor); `/rede-fibra` logado pelo vhost 8445 (só confirmei o redirecionamento sem sessão); comportamento com várias OLTs/sites reais (só um equipamento no banco real; o resto foi testado em schema descartável); constância do erro do relógio da OLT antes de 11/11.
+
+### FATO
+- Passo 0: acesso do 10.4.0.2 liberado no vhost 8445 (um IP), sem sessão continua indo ao login.
+- Simulação do import bate com a sua contagem (92/22/29/41/0).
+- O relógio da OLT estava ≈ 19h49m atrás de Brasília (8 pares MAC a MAC, 22h49m–22h53m contra UTC; salto de 19h50m no arquivo entre 12/11 14:23:39 e 13/11 10:13:47).
+- Tela: Site > Equipamento > PON > ONU, saúde da coleta, ONU "Sem resposta", eventos recentes correlacionados.
+
+### HIPÓTESE
+- O desvio de ≈ 19h49m era constante desde o início do período coberto pela coleta (11/11 ~20:44 em diante); antes disso não há como conferir.
+- ONUs que caem no mesmo ciclo de coleta são "o mesmo evento" só de forma aproximada (10 min de resolução).
+
+### Próximos passos / decisões suas
+1. **Decidir como corrigir a hora do import** (bloqueia o `--apply`): somar ≈ 19h49m às linhas até o salto (e escolher desde quando), ou importar só o que veio depois do ajuste, ou importar como "hora não confiável". Posso implementar uma opção de correção por trecho (ex.: `--clock-offset="ATE_HORA_LOGADA,+SEGUNDOS"`) assim que escolher; depois repetir `net_log_clock_check.php` com `--expect=` e rodar a simulação.
+2. Conferir `/rede-fibra` logado no navegador (vhost 8445, IP 10.4.0.2).
+3. Vínculo cliente↔ONU/CTO e sinal recebido na OLT continuam "sem vínculo"/"ainda não lido".
+4. Remover o IP extra do vhost quando não for mais necessário (instruções no PASSO 0).
