@@ -33,7 +33,6 @@ ob_start();
                 <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Desconhecido</option><option value="sem_resposta">Sem resposta (desatualizado)</option>
             </select>
         </label>
-        <label class="rf-field"><span>Buscar MAC</span><input id="rf-f-q" type="search" placeholder="ex.: 00:2E:C7" autocomplete="off"></label>
         <label class="rf-check"><input id="rf-f-down24" type="checkbox"> Caíram em 24 h</label>
         <label class="rf-check"><input id="rf-f-novinc" type="checkbox"> Sem vínculo</label>
         <details class="rf-cols" id="rf-cols"><summary>Colunas</summary><div class="rf-cols__list" id="rf-cols-list"></div></details>

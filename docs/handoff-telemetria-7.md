@@ -23,3 +23,7 @@ Fato: `[hidden]` vence os layouts grid/flex da tela; personalizado vazio não co
 
 ## Passo 5 — integração, somente leitura
 Auditoria em `docs/integracao-telemetria-testes.md`: testes serve mapa-fase1 em cf85e9a, ancestral da telemetria; simulação sem conflitos e FF possível. 030–034 extras no banco não quebram o auditor de pendências. Banco efetivo dos dois vhosts não confirmado: `.env` não lido e arquivos distintos. Plano e rollback descritos, nenhum merge/checkout executado.
+
+## CP-C — busca global
+Fato: sugestões locais de ONU por MAC com pelo menos 4 hex (formatos normalizados), equipamento por nome/host, somente gestor/admin, endpoint GET isolado por provedor. A busca global mantém o fluxo existente de clientes e acrescenta sugestões de rede. Resultado de ONU abre `?onu=ID`; link inválido/inexistente mostra aviso, API valida provedor. Filtro MAC local removido. Login/nome de cliente não são vinculados à ONU: vínculo ainda não existe. Nenhuma consulta à OLT.
+Testes net 42/99/105 + 7 de sugestões globais, todos verdes. Nenhuma chave da árvore/ficha foi alterada; rota adicional de busca testada para técnico/admin, MAC parcial e isolamento.

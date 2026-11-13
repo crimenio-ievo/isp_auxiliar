@@ -57,7 +57,7 @@ async function boot(opts) {
   opts = opts || {};
   const errs = [], vc = new VirtualConsole(); vc.on('jsdomError', e => errs.push(String(e.detail && e.detail.message || e.message))); vc.on('error', e => errs.push(String(e)));
   const calls = [];
-  const dom = new JSDOM(html, {runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc, url: 'http://localhost/rede-fibra'});
+  const dom = new JSDOM(html, {runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc, url: opts.url || 'http://localhost/rede-fibra'});
   const w = dom.window;
   const style = w.document.createElement('style'); style.textContent = fs.readFileSync(path.join(root, 'public/assets/css/rede-fibra.css'), 'utf8'); w.document.head.appendChild(style);
   const treeData = opts.tree ? opts.tree(JSON.parse(JSON.stringify(tree))) : tree;
@@ -87,6 +87,12 @@ async function boot(opts) {
   ok(row1.indexOf('sem vínculo') !== -1 && row1.indexOf('ainda não lido') !== -1 && row1.indexOf('-20.00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada, "sem vinculo" e "ainda nao lido"');
   ok(t.qa('.rf-row--onu')[3].textContent.indexOf('sem leitura') !== -1, 'ONU sem leitura de sinal');
   ok(!/simulad|fict[ií]c|fake/i.test(t.d.body.textContent), 'nenhum texto de dado simulado');
+  let linked = await boot({url:'http://localhost/rede-fibra?onu=2'});
+  ok(linked.calls.some(u=>/\/onu\?id=2&periodo=7d$/.test(u)) && !linked.q('#rf-panel').hidden, 'deep link abre ficha');
+  let invalidLink = await boot({url:'http://localhost/rede-fibra?onu=abc'});
+  ok(invalidLink.q('#rf-note').textContent==='ONU inválida.' && !invalidLink.calls.some(u=>u.includes('/onu?')), 'deep link invalido nao consulta ficha');
+  let missingLink = await boot({url:'http://localhost/rede-fibra?onu=999',status:u=>u.includes('/onu?')?404:0});
+  ok(missingLink.q('#rf-p-body').textContent==='Acesso negado.' && missingLink.errs.length===0, 'deep link inexistente mostra erro sem quebrar script');
   ok(t.q('#rf-note').textContent.indexOf('Quedas do log da OLT ainda não importadas') !== -1, 'aviso quando o log da OLT ainda nao foi importado');
 
   // Filtros
@@ -103,8 +109,7 @@ async function boot(opts) {
   t.q('#rf-f-novinc').checked = true; t.ev(t.q('#rf-f-novinc'), 'change'); ok(t.qa('.rf-row--onu').length === 4, 'filtro "sem vinculo" (todas, pois nao ha vinculo)');
   t.q('#rf-f-novinc').checked = false; t.ev(t.q('#rf-f-novinc'), 'change');
   sel('#rf-f-pon', '2'); ok(t.qa('.rf-row--onu').length === 1 && t.qa('.rf-row--pon').length === 1, 'filtro PON');
-  sel('#rf-f-pon', ''); t.q('#rf-f-q').value = '00:2e:c7:00:00:03'; t.ev(t.q('#rf-f-q'), 'input'); ok(t.qa('.rf-row--onu').length === 1, 'busca por MAC');
-  t.q('#rf-f-q').value = ''; t.ev(t.q('#rf-f-q'), 'input');
+  sel('#rf-f-pon', ''); ok(!t.q('#rf-f-q'), 'busca MAC local removida');
   ok(t.qa('#rf-f-olt option').length === 3 && t.qa('#rf-f-pon option').length === 4, 'seletores de equipamento e PON preenchidos');
   sel('#rf-f-status', 'unknown'); ok(t.qa('.rf-row--onu').length === 0 && !t.q('#rf-empty').hidden, 'sem resultado: mensagem de vazio'); sel('#rf-f-status', ''); ok(t.q('#rf-empty').hidden, 'mensagem de vazio some');
 

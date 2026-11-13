@@ -19,7 +19,7 @@ $root = dirname(__DIR__, 2);
 // Rotas registradas (GET apenas: tela somente leitura, sem CSRF).
 $router = new Router();
 (require $root . '/backend/routes.php')($router);
-foreach (['/rede-fibra', '/api/rede-fibra', '/api/rede-fibra/onu'] as $path) {
+foreach (['/rede-fibra', '/api/rede-fibra', '/api/rede-fibra/onu', '/api/rede-fibra/buscar'] as $path) {
     $check($router->match('GET', $path) !== null, "rota GET {$path}");
     $check($router->match('POST', $path) === null, "rota POST {$path} nao existe (somente leitura)");
 }
@@ -201,13 +201,20 @@ try {
     $ctl = new NetFiberController(new View($root . '/backend/Views'), $cfg, $local, $db);
     $call = static function (string $method, array $q = []) use ($ctl): Response { return $ctl->$method(new Request('GET', '/x', '', $q)); };
     $_SESSION = ['user' => ['login' => 'tec', 'role' => 'technician', 'name' => 'Tec']];
-    foreach (['tree', 'onu'] as $m) {
+    foreach (['tree', 'onu', 'search'] as $m) {
         $r = $call($m, ['id' => '1']);
         $check($status->getValue($r) === 403 && str_contains((string) $body->getValue($r), 'Acesso negado') && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', "tecnico: {$m} 403 sem cache");
     }
     $r = $call('page');
     $check($status->getValue($r) === 302 && ($headers->getValue($r)['Location'] ?? '') === '/dashboard', 'tecnico: pagina redireciona');
     $_SESSION = ['user' => ['login' => 'adm', 'role' => 'admin', 'is_admin' => true, 'name' => 'Adm']];
+    $network = new \App\Infrastructure\Net\NetSearchReader($pdo);
+    $check(count(array_filter($network->search($providerId,'00:2e:c7:00:00:01'),static fn($r)=>$r['tipo']==='onu'))===1, 'busca MAC formatado');
+    $check(count(array_filter($network->search($providerId,'002e'),static fn($r)=>$r['tipo']==='onu'))>0, 'busca MAC parcial de quatro hex');
+    $check(count(array_filter($network->search($providerId,'002'),static fn($r)=>$r['tipo']==='onu'))===0, 'MAC curto nao consulta ONU');
+    $check($network->search(999999,'002e')===[], 'busca isolada por provedor');
+    $check(count($network->search($providerId,'fake'))>0, 'busca equipamento por IP/host');
+    $check($status->getValue($call('search',['q'=>'002e']))===200, 'busca autorizada na rota');
     $r = $call('tree');
     $d = json_decode((string) $body->getValue($r), true);
     $check($status->getValue($r) === 200 && $d['ok'] === true && $d['data']['resumo']['onus'] === 6 && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', 'admin: arvore 200');

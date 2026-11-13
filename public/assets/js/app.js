@@ -4309,3 +4309,30 @@ document.addEventListener('keydown', (event) => {
         }
     }
 });
+
+// Sugestões locais de rede na busca global. Endpoint restrito a gestor/admin.
+document.querySelectorAll('[data-network-search]').forEach((form) => {
+    const input = form.querySelector('input[name="q"]');
+    if (!input) return;
+    const list = document.createElement('div');
+    list.className = 'network-search-results'; list.hidden = true; list.setAttribute('aria-live', 'polite');
+    form.style.position = 'relative'; form.appendChild(list);
+    let timer, generation = 0;
+    input.addEventListener('input', () => {
+        clearTimeout(timer); const token = ++generation; list.replaceChildren(); list.hidden = true;
+        const q = input.value.trim(); if (q.length < 2) return;
+        timer = setTimeout(async () => {
+            try {
+                const response = await fetch(form.dataset.networkSearch + '?q=' + encodeURIComponent(q), {credentials:'same-origin', headers:{Accept:'application/json'}});
+                if (!response.ok) return;
+                const result = await response.json(); if (generation !== token || !result.ok) return;
+                result.data.forEach((item) => {
+                    const a = document.createElement('a'); a.textContent = item.titulo; a.href = item.url; list.appendChild(a);
+                });
+                list.hidden = list.childElementCount === 0;
+            } catch (_) { list.hidden = true; }
+        }, 250);
+    });
+    input.addEventListener('keydown', (event) => { if (event.key === 'Escape') { generation++; list.hidden = true; } });
+    document.addEventListener('click', (event) => { if (!form.contains(event.target)) { generation++; list.hidden = true; } });
+});

@@ -65,7 +65,7 @@
   /* ---------- filtros e árvore ---------- */
   function filters() {
     return { site: $('rf-f-site').value, olt: $('rf-f-olt').value, pon: $('rf-f-pon').value, status: $('rf-f-status').value, down: $('rf-f-down24').checked,
-      novinc: $('rf-f-novinc').checked, q: $('rf-f-q').value.replace(/[^0-9a-f]/gi, '').toLowerCase() };
+      novinc: $('rf-f-novinc').checked, q: '' };
   }
   function onuLevel(f) { return !!(f.status || f.down || f.novinc || f.q); }
   function keep(o, f) {
@@ -409,11 +409,12 @@
   /* ---------- carga e eventos ---------- */
   function loadTree() {
     $('rf-summary').textContent = 'Carregando…';
-    return get(API.tree).then(function (d) { state.tree = d; fillSelectors(); renderTree(); if (state.selected) { loadSheet(); } })
+    var params = new URLSearchParams(window.location.search), device = params.get('dispositivo');
+    var url = API.tree + (device && /^[1-9][0-9]{0,14}$/.test(device) ? '?dispositivo=' + encodeURIComponent(device) : '');
+    return get(url).then(function (d) { state.tree = d; fillSelectors(); renderTree(); if (state.selected) { loadSheet(); } })
       .catch(function (e) { $('rf-summary').textContent = e.message; });
   }
   ['rf-f-status', 'rf-f-down24', 'rf-f-novinc'].forEach(function (id) { $(id).addEventListener('change', function () { if (state.tree) { renderTree(); } }); });
-  $('rf-f-q').addEventListener('input', function () { if (state.tree) { renderTree(); } });
   $('rf-f-olt').addEventListener('change', function () { if (state.tree) { fillPons(); renderTree(); } });
   $('rf-f-site').addEventListener('change', function () { if (state.tree) { fillPons(); renderTree(); } });
   $('rf-f-pon').addEventListener('change', function () { if (state.tree) { renderTree(); } });
@@ -424,6 +425,6 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { $('rf-modal').hidden = true; } });
   renderColsMenu();
   renderEventPeriods();
-  loadTree();
+  loadTree().then(function () { var id = new URLSearchParams(window.location.search).get('onu'); if (id !== null) { if (/^[1-9][0-9]{0,14}$/.test(id)) { openSheet(id); } else { $('rf-note').hidden = false; $('rf-note').textContent = 'ONU inválida.'; } } });
   loadEvents();
 })();

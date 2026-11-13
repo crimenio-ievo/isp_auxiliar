@@ -105,6 +105,7 @@ return static function (Router $router): void {
     $router->get('/api/rede-fibra', [NetFiberController::class, 'tree'], 'api.net.fiber.tree');
     $router->get('/api/rede-fibra/onu', [NetFiberController::class, 'onu'], 'api.net.fiber.onu');
     $router->get('/api/rede-fibra/eventos', [NetFiberController::class, 'events'], 'api.net.fiber.events');
+    $router->get('/api/rede-fibra/buscar', [NetFiberController::class, 'search'], 'api.net.fiber.search');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');

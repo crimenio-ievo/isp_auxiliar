@@ -4913,3 +4913,8 @@ button.app-nav__brand {
         text-decoration: none;
     }
 }
+
+.network-search-results { position:absolute; top:100%; left:0; right:0; z-index:50; display:grid; background:var(--surface,#fff); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); max-height:320px; overflow:auto; }
+.network-search-results[hidden] { display:none!important; }
+.network-search-results a { padding:10px 14px; text-decoration:none; color:var(--text); }
+.network-search-results a:hover, .network-search-results a:focus { background:var(--surface-muted); }

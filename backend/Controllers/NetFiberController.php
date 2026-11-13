@@ -66,6 +66,17 @@ final class NetFiberController
         return Response::json(['ok' => true, 'data' => $data], 200, self::NO_STORE);
     }
 
+    public function search(Request $request): Response
+    {
+        $providerId=$this->guard($denied);
+        if ($providerId===null) { return $denied; }
+        $q=$request->query('q','');
+        if (!is_string($q)) { return Response::json(['ok'=>false,'message'=>'Busca inválida.'],422,self::NO_STORE); }
+        $results=(new \App\Infrastructure\Net\NetSearchReader($this->database->pdo()))->search($providerId,$q);
+        foreach($results as &$result) { $result['url']=\App\Core\Url::to($result['url']); }
+        return Response::json(['ok'=>true,'data'=>$results],200,self::NO_STORE);
+    }
+
     public function onu(Request $request): Response
     {
         $providerId = $this->guard($denied);
