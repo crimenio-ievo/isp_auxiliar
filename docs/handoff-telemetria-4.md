@@ -42,3 +42,10 @@ Worktree `_isp_auxiliar_telemetria_fibra`, branch `feature/telemetria-fibra`, s�
 - Sinal recebido na OLT (`olt_rx_dbm`): não existe por SNMP identificado.
 - Conferência visual em navegador (não há navegador neste servidor).
 - Distância é estimativa pelo RTT; trocar quando houver fonte direta.
+
+## Ajustes pós-CP3 (2026-11-13)
+
+### 1. Horário em Brasília na tela
+- A API entrega horários em UTC (`AAAA-MM-DD hh:mm:ss`). `public/assets/js/rede-fibra.js` agora interpreta como UTC e mostra tudo em `America/Sao_Paulo` via `Intl.DateTimeFormat`: `fmtDT` (árvore, resumo, listas, ficha), eixo do gráfico (dia = meia-noite de Brasília), cursor e dicas das faixas de queda. O texto do período indica "horário de Brasília".
+- Período personalizado: os campos `datetime-local` são horário de Brasília; antes de enviar, `de`/`ate` são convertidos para UTC (08:00 → 11:00; 23:30 → 02:30 do dia seguinte). O campo continua mostrando o que o usuário digitou; `ate` vazio não é enviado.
+- Servidor e API inalterados. Teste: `node tests/net/rede_fibra.js` (60 verificações) cobre as conversões, o eixo, o cursor e as listas.

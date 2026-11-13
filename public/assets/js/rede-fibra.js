@@ -28,8 +28,22 @@
   function svg(tag, attrs) { var n = document.createElementNS(NS, tag); Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); }); return n; }
   function clear(n) { while (n.firstChild) { n.removeChild(n.firstChild); } }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
-  function fmtDT(s) { return s ? s.slice(8, 10) + '/' + s.slice(5, 7) + ' ' + s.slice(11, 16) : '—'; }
-  function parse(s) { return new Date(String(s).replace(' ', 'T')).getTime(); }
+  /* Horários da API estão em UTC ("AAAA-MM-DD hh:mm:ss"); a tela mostra America/Sao_Paulo. */
+  var TZ = 'America/Sao_Paulo';
+  var fmtParts = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  var fullParts = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+  function parts(f, ms) { var o = {}; f.formatToParts(new Date(ms)).forEach(function (p) { o[p.type] = p.value; }); return o; }
+  function parse(s) { var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s)); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN; }
+  function fmtMs(ms) { var p = parts(fmtParts, ms); return p.day + '/' + p.month + ' ' + p.hour + ':' + p.minute; }
+  function fmtDT(s) { var ms = s ? parse(s) : NaN; return isNaN(ms) ? '—' : fmtMs(ms); }
+  function fmtDay(ms) { var p = parts(fmtParts, ms); return p.day + '/' + p.month; }
+  function spOffsetMs(utcMs) { var p = parts(fullParts, utcMs); return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(utcMs / 1000) * 1000; }
+  /* "AAAA-MM-DDThh:mm" digitado em horário de Brasília -> "AAAA-MM-DDThh:mm" em UTC. */
+  function brtToUtc(v) {
+    var local = parse(v); if (isNaN(local)) { return ''; }
+    var utc = local - spOffsetMs(local); utc = local - spOffsetMs(utc);
+    var d = new Date(utc); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + 'T' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+  }
   function dur(sec) {
     if (sec === null || sec === undefined) { return '—'; }
     if (sec < 60) { return sec + ' s'; }
@@ -158,7 +172,7 @@
   }
   function loadSheet() {
     var q = '?id=' + encodeURIComponent(state.selected) + '&periodo=' + encodeURIComponent(state.period);
-    if (state.period === 'custom') { q += '&de=' + encodeURIComponent(state.from) + '&ate=' + encodeURIComponent(state.to); }
+    if (state.period === 'custom') { q += '&de=' + encodeURIComponent(brtToUtc(state.from)) + (state.to ? '&ate=' + encodeURIComponent(brtToUtc(state.to)) : ''); }
     return get(API.onu + q).then(function (d) { state.sheet = d; renderSheet(); }).catch(function (e) {
       $('rf-p-title').textContent = 'ONU'; clear($('rf-p-body')); $('rf-p-body').appendChild(el('p', 'rf-note', e.message));
     });
@@ -226,7 +240,7 @@
       c.appendChild(el('span', '', 'de')); c.appendChild(a); c.appendChild(el('span', '', 'até')); c.appendChild(b2); c.appendChild(go); pr.appendChild(c);
     }
     var tot = d.quedas_total;
-    pr.appendChild(el('p', 'rf-legend', 'Período: ' + fmtDT(d.periodo.from) + ' a ' + fmtDT(d.periodo.to) + ' · ' + tot.quedas + ' queda(s)' + (tot.em_aberto ? ' (' + tot.em_aberto + ' em aberto)' : '')));
+    pr.appendChild(el('p', 'rf-legend', 'Período (horário de Brasília): ' + fmtDT(d.periodo.from) + ' a ' + fmtDT(d.periodo.to) + ' · ' + tot.quedas + ' queda(s)' + (tot.em_aberto ? ' (' + tot.em_aberto + ' em aberto)' : '')));
     if (d.estavel) { pr.appendChild(el('p', 'rf-note', d.estavel_texto)); } else { pr.appendChild(outageRows(d.quedas, 8)); }
     body.appendChild(pr);
     var last = el('div'); last.appendChild(el('h3', '', 'Últimas quedas (30 dias)'));
@@ -251,9 +265,9 @@
       s.appendChild(svg('line', { x1: ml, x2: W - mr, y1: Y(v), y2: Y(v), stroke: '#c9d3dc', 'stroke-width': 1 }));
       var tx = svg('text', { x: ml - 5, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#617587' }); tx.textContent = String(v); s.appendChild(tx);
     });
-    for (var day = Math.ceil(t0 / 86400000) * 86400000; day <= t1; day += 86400000) {
-      var dd = new Date(day), tx2 = svg('text', { x: X(day), y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: '#617587' });
-      tx2.textContent = pad(dd.getDate()) + '/' + pad(dd.getMonth() + 1); s.appendChild(tx2);
+    for (var h = Math.ceil(t0 / 3600000) * 3600000; h <= t1; h += 3600000) {
+      var hp = parts(fmtParts, h); if (hp.hour !== '00') { continue; }
+      var tx2 = svg('text', { x: X(h), y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: '#617587' }); tx2.textContent = fmtDay(h); s.appendChild(tx2);
     }
     var outs = d.quedas_serie.map(function (q) { return { a: parse(q.started_at), b: q.ended_at ? parse(q.ended_at) : t1, q: q }; });
     outs.forEach(function (o) {
@@ -279,7 +293,7 @@
       var t = t0 + (vx - ml) / (W - ml - mr) * (t1 - t0), val = null, i2;
       for (i2 = 0; i2 < pts.length; i2++) { if (pts[i2].t <= t) { val = pts[i2]; } }
       var inQ = outs.filter(function (o) { return t >= o.a && t <= o.b; })[0];
-      var dt = new Date(t), label = pad(dt.getDate()) + '/' + pad(dt.getMonth() + 1) + ' ' + pad(dt.getHours()) + ':' + pad(dt.getMinutes());
+      var label = fmtMs(t);
       tip.textContent = label + ' · ' + (val ? val.v.toFixed(2) + ' dBm' : 'sem leitura') + (inQ ? ' · em queda (' + inQ.q.reason + ')' : '');
       tip.hidden = false; tip.style.left = (vx / W * 100) + '%'; tip.style.top = (val ? Y(val.v) / H * 100 : 20) + '%';
       cur.setAttribute('x1', vx); cur.setAttribute('x2', vx); cur.setAttribute('visibility', 'visible');

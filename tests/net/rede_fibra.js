@@ -97,6 +97,11 @@ async function boot(opts) {
   t.q('.rf-row--pon .rf-toggle').click(); ok(t.qa('.rf-row--onu').length === 1, 'recolher PON esconde as ONUs');
   t.q('.rf-row--pon .rf-toggle').click(); t.q('.rf-row--olt .rf-toggle').click(); ok(t.qa('.rf-row--pon').length === 0, 'recolher OLT esconde as PONs'); t.q('.rf-row--olt .rf-toggle').click();
 
+  // Horarios: a API vem em UTC e a tela mostra America/Sao_Paulo (UTC-3).
+  ok(t.q('.rf-row--olt').textContent.indexOf('última leitura ok: 13/11 09:00') !== -1, 'arvore: ultima leitura 12:00 UTC = 09:00 em Brasilia');
+  ok(t.q('#rf-summary').textContent.indexOf('gerado em 13/11 09:00') !== -1, 'resumo: gerado em horario de Brasilia');
+  ok(t.qa('.rf-row--onu')[0].textContent.indexOf('13/11 07:00') !== -1, 'coluna Quedas 24 h: 10:00 UTC = 07:00');
+
   // Ficha
   t.q('.rf-row--onu').click(); await wait(30);
   ok(t.calls.some(u => /\/api\/rede-fibra\/onu\?id=1&periodo=24h$/.test(u)), 'abrir ficha chama a API com periodo 24h');
@@ -107,15 +112,21 @@ async function boot(opts) {
   const zs = t.qa('.rf-ruler__z').map(z => parseFloat(z.style.width)); ok(Math.abs(zs[0] - 16.67) < 0.1 && Math.abs(zs[1] - 11.11) < 0.1 && Math.abs(zs[0] + zs[1] + zs[2] - 100) < 0.01, 'larguras das faixas seguem -27 e -25');
   const mk = t.q('.rf-ruler__mark:not(.rf-ruler__mark--ref):not(.rf-ruler__mark--med)'); ok(Math.abs(parseFloat(mk.style.left) - 55.56) < 0.1, 'marca do sinal atual em -20 dBm');
   ok(t.qa('#rf-p-chart svg').length === 1 && t.qa('#rf-p-chart .rf-outage').length === 2 && t.qa('#rf-p-chart path.rf-line').length === 1, 'grafico com linha e as quedas como faixas verticais');
-  ok(/Queda de energia \(Dying Gasp\)/.test(t.q('#rf-p-body .rf-outages').textContent) && t.q('#rf-p-body .rf-outages').textContent.indexOf('10/11') === -1 && t.q('#rf-p-body .rf-outages').textContent.indexOf('13/11 10:00') !== -1 && t.q('#rf-p-body .rf-outages').textContent.indexOf('10 min') !== -1, 'lista: inicio, retorno, duracao e motivo');
+  ok(/Queda de energia \(Dying Gasp\)/.test(t.q('#rf-p-body .rf-outages').textContent) && t.q('#rf-p-body .rf-outages').textContent.indexOf('13/11 07:00') !== -1 && t.q('#rf-p-body .rf-outages').textContent.indexOf('13/11 07:10') !== -1 && t.q('#rf-p-body .rf-outages').textContent.indexOf('10:00') === -1 && t.q('#rf-p-body .rf-outages').textContent.indexOf('10 min') !== -1, 'lista: inicio, retorno, duracao e motivo');
   ok(!/fibra/i.test(t.q('#rf-p-body').textContent), 'ficha nunca afirma fibra');
   ok(t.qa('#rf-p-body .rf-outages').length === 2, 'lista do periodo e lista das ultimas quedas');
 
+  ok(t.q('#rf-p-sub').textContent.indexOf('desde 13/11 05:00') !== -1, 'ficha: status desde 08:00 UTC = 05:00 em Brasilia');
+  ok(t.q('#rf-p-body').textContent.indexOf('Última leitura13/11 09:00') !== -1, 'ficha: ultima leitura em horario de Brasilia');
+  ok([...t.qa('#rf-p-body .rf-legend')].some(x => x.textContent.indexOf('Período (horário de Brasília): 12/11 09:00 a 13/11 09:00') === 0), 'periodo mostrado em horario de Brasilia');
+  const dayLabels = t.qa('#rf-p-chart svg text').map(x => x.textContent).filter(x => /^\d\d\/\d\d$/.test(x));
+  ok(dayLabels[0] === '07/11' && dayLabels[dayLabels.length - 1] === '13/11' && dayLabels.length === 7, 'eixo: dias em Brasilia (meia-noite de Brasilia = 03:00 UTC): ' + dayLabels.join(','));
+  ok(t.q('#rf-p-chart .rf-outage title').textContent.indexOf('Queda 13/11 07:00') === 0, 'faixa da queda com dica em horario de Brasilia');
   // Cursor do grafico
   const ov = t.q('#rf-p-chart .rf-overlay'), svg = t.q('#rf-p-chart svg'); svg.getBoundingClientRect = () => ({left: 0, width: 720, top: 0, height: 210});
   const move = x => ov.dispatchEvent(new t.w.MouseEvent('pointermove', {clientX: x, bubbles: true}));
   move(44 + (666 * (parse('2026-11-10 20:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
-  const tip = t.q('#rf-p-chart .rf-tip'); ok(!tip.hidden && /10\/11 20:00 · -22\.50 dBm$/.test(tip.textContent), 'cursor: data/hora e valor (' + tip.textContent + ')');
+  const tip = t.q('#rf-p-chart .rf-tip'); ok(!tip.hidden && /10\/11 17:00 · -22\.50 dBm$/.test(tip.textContent), 'cursor em horario de Brasilia (UTC 20:00 = 17:00): ' + tip.textContent);
   move(44 + (666 * (parse('2026-11-12 10:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00')))); 
   ok(/em queda \(Sem aviso de energia\)/.test(tip.textContent), 'cursor dentro de uma queda em aberto mostra o motivo (' + tip.textContent + ')');
   move(44); ok(/sem leitura/.test(tip.textContent), 'cursor antes da primeira leitura: sem leitura'); ov.dispatchEvent(new t.w.MouseEvent('pointerleave', {bubbles: true})); ok(tip.hidden, 'cursor some ao sair');
@@ -131,8 +142,11 @@ async function boot(opts) {
   btn('1 semana').click(); await wait(30); ok(/periodo=7d$/.test(t.calls[t.calls.length - 1]), 'periodo 1 semana');
   btn('Personalizado').click(); await wait(10); ok(!!t.q('#rf-c-from') && !!t.q('#rf-c-to'), 'personalizado mostra os campos de data');
   t.q('#rf-c-from').value = '2026-11-12T08:00'; t.q('#rf-c-to').value = '2026-11-13T09:30'; [...t.qa('.rf-custom button')][0].click(); await wait(30);
-  ok(/periodo=custom&de=2026-11-12T08%3A00&ate=2026-11-13T09%3A30$/.test(t.calls[t.calls.length - 1]), 'personalizado envia de/ate (' + t.calls[t.calls.length - 1] + ')');
-  function parse(s) { return new Date(s.replace(' ', 'T')).getTime(); }
+  ok(/periodo=custom&de=2026-11-12T11%3A00&ate=2026-11-13T12%3A30$/.test(t.calls[t.calls.length - 1]), 'personalizado: 08:00 e 09:30 de Brasilia enviados como 11:00 e 12:30 UTC (' + t.calls[t.calls.length - 1] + ')');
+  t.q('#rf-c-from').value = '2026-11-12T23:30'; t.q('#rf-c-to').value = ''; [...t.qa('.rf-custom button')][0].click(); await wait(30);
+  ok(/periodo=custom&de=2026-11-13T02%3A30$/.test(t.calls[t.calls.length - 1]), 'personalizado: 23:30 de Brasilia vira 02:30 UTC do dia seguinte, sem fim (' + t.calls[t.calls.length - 1] + ')');
+  ok(t.q('#rf-c-from').value === '2026-11-12T23:30', 'campo mostra o que o usuario digitou (Brasilia)');
+  function parse(s) { return new Date(s.replace(' ', 'T') + 'Z').getTime(); }
 
   // Estavel e em aberto
   let e = await boot({sheet: () => sheet({quedas: [], quedas_serie: [], ultimas_quedas: [], estavel: true, estavel_texto: 'Sem queda registrada no período (estável).', quedas_total: {quedas: 0, em_aberto: 0, downtime_no_periodo_s: 0, por_motivo: {}, do_log: 0, do_poll: 0, log_sem_onu_cadastrada: 0}, serie_7d: {pontos: [], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'}})});
