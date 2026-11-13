@@ -37,7 +37,7 @@ final class NetFiberReader
         $reader = $this->outageReader($logAvailable);
         $period = $reader->period('24h');
 
-        $sql = 'SELECT d.id, d.map_node_id, d.enabled, d.status_interval_s, n.name, n.node_type, n.parent_node_id,
+        $sql = 'SELECT d.id, d.map_node_id, d.enabled, d.status_interval_s, n.name, n.node_type, n.parent_node_id, n.attrs_json, d.mgmt_host,
                        st.name AS site_name, st.node_type AS site_type, pr.technology, ps.last_attempt_at, ps.last_success_at, ps.last_result
                   FROM net_devices d JOIN map_nodes n ON n.id = d.map_node_id
                   LEFT JOIN map_nodes st ON st.id = n.parent_node_id AND st.node_type IN (\'pop\', \'tower\')
@@ -92,6 +92,7 @@ final class NetFiberReader
                 'saude' => $this->health((int) $d['status_interval_s'], $d['last_success_at'], $d['last_result'], $now),
                 'tecnologia' => $d['technology'] === null ? null : (string) $d['technology'],
                 'tipo_no' => (string) $d['node_type'],
+                'modelo' => array_intersect_key(json_decode((string) $d['attrs_json'], true) ?: [], array_flip(['fabricante','modelo'])), 'ip' => (string) $d['mgmt_host'],
                 'site' => $d['site_name'] === null ? null : ['id' => (int) $d['parent_node_id'], 'nome' => (string) $d['site_name'], 'tipo' => (string) $d['site_type']],
             ];
         }

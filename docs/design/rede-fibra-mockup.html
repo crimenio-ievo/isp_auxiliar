@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rede de fibra — protótipo funcional (ISP_Auxiliar)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#F6F7F5; --surface:#FFFFFF; --surface-2:#F2F5F3; --line:#E1E6E3; --line-soft:#ECEFED;
+  --ink:#17211E; --muted:#5B6864; --accent:#0F766E; --accent-ink:#FFFFFF; --accent-soft:#E2F2EF;
+  --online:#15803D; --online-bg:#E7F6EC;
+  --s-crit:#E5484D; --s-warn:#F2A33A; --s-ok:#3B82F6; --t-crit:#B42318; --t-warn:#9A4D00; --t-ok:#1D4ED8;
+  --warn-bg:#FFF3DC; --crit-bg:#FDE8E6; --info-bg:#E8EFFD; --mark:#17211E;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#121816; --surface:#19211F; --surface-2:#1F2926; --line:#2D3935; --line-soft:#25302C;
+    --ink:#E4EBE8; --muted:#9AA8A3; --accent:#3CC2B2; --accent-ink:#0B1513; --accent-soft:#173430;
+    --online:#5DD48A; --online-bg:#16301F;
+    --s-crit:#E5484D; --s-warn:#F2A33A; --s-ok:#4F8FF7; --t-crit:#FF8A80; --t-warn:#F5B547; --t-ok:#8DB4FF;
+    --warn-bg:#3A2D14; --crit-bg:#3D1D1B; --info-bg:#1E2C48; --mark:#F4F7F6;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#121816; --surface:#19211F; --surface-2:#1F2926; --line:#2D3935; --line-soft:#25302C;
+  --ink:#E4EBE8; --muted:#9AA8A3; --accent:#3CC2B2; --accent-ink:#0B1513; --accent-soft:#173430;
+  --online:#5DD48A; --online-bg:#16301F;
+  --s-crit:#E5484D; --s-warn:#F2A33A; --s-ok:#4F8FF7; --t-crit:#FF8A80; --t-warn:#F5B547; --t-ok:#8DB4FF;
+  --warn-bg:#3A2D14; --crit-bg:#3D1D1B; --info-bg:#1E2C48; --mark:#F4F7F6;
+  color-scheme: dark;
+}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:Manrope,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.num{font-variant-numeric:tabular-nums}
+
+.app{display:flex;min-height:100vh}
+.rail{position:sticky;top:env(safe-area-inset-top,0px);height:calc(100vh - env(safe-area-inset-top,0px));flex:0 0 64px;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;z-index:25}
+.rail .ia{width:36px;height:36px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.rail a{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.rail a[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+.rail .sp{flex:1}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--ground);padding:14px 24px 10px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--ground)}
+.top-in{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.search{position:relative;flex:1 1 420px;max-width:620px}
+.search label{display:flex;align-items:center;gap:10px;height:44px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.search label:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.search input{flex:1;border:0;outline:none;background:transparent;font-size:15px;min-width:0}
+.kbd{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px;background:var(--surface-2)}
+.results{position:absolute;left:0;right:0;top:50px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 36px rgba(0,0,0,.16);padding:6px 0;max-height:min(420px,70vh);overflow-y:auto;z-index:35}
+.results[hidden]{display:none}
+.res-group{padding:8px 16px 4px;font-size:12px;font-weight:700;color:var(--muted)}
+.res-item{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;width:100%;text-align:left;border:0;background:transparent;padding:9px 16px;cursor:pointer}
+.res-item:hover,.res-item[aria-selected="true"]{background:var(--accent-soft)}
+.res-item .t{font-weight:700}.res-item .s{font-size:13px;color:var(--muted)}
+.res-empty{padding:10px 16px;color:var(--muted);font-size:14px}
+.theme-btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;height:36px;padding:0 12px;cursor:pointer;font-size:13px;color:var(--muted)}
+
+.wrap{padding:6px 24px 48px}
+.note{font-size:13px;color:var(--muted);margin:0 0 12px}
+.head{margin-bottom:12px}
+.head h1{margin:0;font-size:26px;line-height:1.15;font-weight:800}
+.head .sub{font-size:14px;color:var(--muted);margin-top:4px}
+.sums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.sum{text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:10px 14px;cursor:pointer;display:flex;flex-direction:column;gap:1px}
+.sum[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.sum .l{font-size:13px;color:var(--muted);font-weight:600}.sum .v{font-size:24px;font-weight:800;line-height:1.1}.sum .h{font-size:12px;color:var(--muted)}
+.c-warn{color:var(--t-warn)} .c-on{color:var(--online)} .c-acc{color:var(--accent)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.bar{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line-soft);position:relative}
+.bar .f{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.bar select{height:34px;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:0 8px;font-size:14px;color:var(--ink);max-width:190px}
+.bar .sp{flex:1}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;height:34px;padding:0 12px;cursor:pointer;font-size:14px;font-weight:700;color:var(--ink)}
+.btn.sm{height:28px;font-size:12px;padding:0 10px;border-radius:8px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.out{color:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.icon-btn{width:28px;height:28px;border:1px solid var(--line);background:var(--surface);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
+.icon-btn:disabled{opacity:.35}
+
+/* opções de exibição (colunas) */
+.pop{position:absolute;right:12px;top:52px;z-index:30;width:300px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 16px 40px rgba(0,0,0,.18);padding:12px}
+.pop[hidden]{display:none}
+.pop h3{margin:0 0 8px;font-size:14px;font-weight:800}
+.pop .colrow{display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--line-soft)}
+.pop .colrow:last-of-type{border-bottom:0}
+.pop .colrow label{flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px}
+.pop input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+.pop .foot{display:flex;justify-content:space-between;margin-top:10px}
+.linkbtn{border:0;background:transparent;padding:0;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-weight:600;font-size:13px}
+
+/* tabela em árvore */
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th{font-size:13px;font-weight:700;color:var(--muted);text-align:left;padding:0;background:var(--surface-2);border-bottom:1px solid var(--line);white-space:nowrap}
+th .sorter{display:flex;align-items:center;gap:6px;width:100%;border:0;background:transparent;padding:10px 14px;cursor:pointer;font-weight:700;color:var(--muted);text-align:left}
+th .sorter:hover{color:var(--ink)}
+th .sorter[aria-sort="ascending"],th .sorter[aria-sort="descending"]{color:var(--ink)}
+th .arr{font-size:11px;width:10px}
+th .plain{display:block;padding:10px 14px}
+td{padding:7px 14px;border-bottom:1px solid var(--line-soft);vertical-align:middle;white-space:nowrap}
+tr.leaf{cursor:pointer}
+tr.leaf:hover{background:var(--surface-2)}
+tr.sel{background:var(--accent-soft)!important;box-shadow:inset 3px 0 0 var(--accent)}
+tr.grp td{padding-top:7px;padding-bottom:7px}
+tr.lv0 td{background-color:var(--surface)}
+tr.lv1 td{background-color:var(--surface-2)}
+tr.lv2 td{background-color:color-mix(in srgb,var(--surface-2) 45%,var(--surface))}
+tr.lv0 .gname{font-size:16px;font-weight:800}
+tr.lv1 .gname{font-size:15px;font-weight:800}
+tr.lv2 .gname{font-size:14px;font-weight:700}
+tr.leaf td{font-size:14px}
+tr.leaf .leafname{font-size:13.5px;font-weight:600}
+/* recuo e linhas-guia: OLT > PON > CTO > ONU */
+td.l0{padding-left:14px!important}
+td.l1{padding-left:40px!important;background-image:linear-gradient(var(--line),var(--line));background-size:2px 100%;background-repeat:no-repeat;background-position:24px 0}
+td.l2{padding-left:68px!important;background-image:linear-gradient(var(--line),var(--line)),linear-gradient(var(--line),var(--line));background-size:2px 100%,2px 100%;background-repeat:no-repeat;background-position:24px 0,52px 0}
+td.l3{padding-left:98px!important;background-image:linear-gradient(var(--line),var(--line)),linear-gradient(var(--line),var(--line)),linear-gradient(var(--line),var(--line));background-size:2px 100%,2px 100%,2px 100%;background-repeat:no-repeat;background-position:24px 0,52px 0,82px 0}
+tr.ghost td{color:var(--muted)}
+.tg{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;margin:-6px 2px -6px -9px;padding:0;border:0;background:transparent;border-radius:8px;cursor:pointer;vertical-align:middle}
+.tg:hover{background:var(--line-soft)}
+.caret{display:inline-block;font-size:17px;line-height:1;color:var(--muted);transition:transform .15s}
+tr.grp{cursor:pointer}
+tr.grp:hover .gname{text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line)}
+tr.grp.sel td{background-color:var(--accent-soft)}
+tr.grp.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.tg[aria-expanded="true"] .caret{transform:rotate(90deg)}
+.gname{font-weight:800}
+.gmeta{font-size:13px;color:var(--muted);margin-left:6px}
+.gpills{display:inline-flex;gap:6px;margin-left:10px;vertical-align:middle}
+.gact{float:right;display:inline-flex;gap:6px}
+.leafname{font-weight:700}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.p-on{background:var(--online-bg);color:var(--online)} .p-warn{background:var(--warn-bg);color:var(--t-warn)} .p-crit{background:var(--crit-bg);color:var(--t-crit)} .p-muted{background:var(--line-soft);color:var(--muted)}
+.cl-none{color:var(--t-warn);font-weight:700} .cl-sug{color:var(--accent);font-weight:700} .cl-ok{font-weight:700}
+.empty{padding:22px 16px;color:var(--muted)}
+
+/* medidor: 3 estágios iguais; o traço fica dentro do estágio, mais para a esquerda quanto pior */
+.gauge{display:inline-flex;align-items:center;gap:8px}
+.g3{position:relative;width:108px;height:10px;border-radius:5px;background:var(--line-soft);overflow:hidden}
+.g3 .fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.g-ok .fill{background:var(--s-ok)} .g-warn .fill{background:var(--s-warn)} .g-crit .fill{background:var(--s-crit)}
+.g3 .tick{position:absolute;top:0;bottom:0;width:2px;background:var(--surface)}
+.g-val{width:54px;text-align:right;font-weight:800}
+.g-crit .g-val{color:var(--t-crit)} .g-warn .g-val{color:var(--t-warn)}
+.gauge.big{display:flex;flex:1;min-width:0}.gauge.big .g3{flex:1;width:auto;height:14px;border-radius:7px}
+.dir{display:flex;align-items:center;gap:10px;margin-bottom:8px}.dir .lbl{width:150px;font-size:13px;color:var(--muted);flex:none;line-height:1.3}
+.gscale{display:flex;font-size:11px;color:var(--muted);margin-top:4px}.gscale span{flex:1;text-align:center}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+/* painel direito: aparece ao clicar e encaixa ao lado (a tabela se ajusta), some ao desclicar */
+.layout{display:flex;align-items:flex-start}
+.layout>.wrap{flex:1 1 auto;min-width:0}
+.drawer{display:none;flex:0 0 420px;width:420px;position:sticky;top:var(--top-h,70px);height:calc(100vh - var(--top-h,70px));background:var(--surface);border-left:1px solid var(--line);flex-direction:column}
+.drawer.on{display:flex}
+.chart{width:100%;height:auto;display:block;border:1px solid var(--line-soft);border-radius:10px}
+.tl{list-style:none;margin:0;padding:0;border-left:2px solid var(--line);margin-left:6px}
+.tl li{position:relative;padding:0 0 12px 16px;font-size:14px}
+.tl li::before{content:"";position:absolute;left:-6px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--muted)}
+.tl li.w::before{border-color:var(--s-warn)} .tl li.c::before{border-color:var(--s-crit)} .tl li.a::before{border-color:var(--accent)}
+.tl .when{display:block;font-size:12px;color:var(--muted)}
+/* filtros com busca */
+.combo{position:relative}
+.combo input{height:34px;width:200px;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:0 28px 0 10px;font-size:14px}
+.combo input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
+.combo .clr{position:absolute;right:4px;top:5px;width:24px;height:24px;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:6px}
+.cb-list{position:absolute;left:0;top:38px;min-width:240px;max-height:280px;overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.16);z-index:32;padding:4px 0}
+.cb-list[hidden]{display:none}
+.cb-opt{display:flex;justify-content:space-between;gap:12px;width:100%;border:0;background:transparent;text-align:left;padding:7px 12px;cursor:pointer;font-size:14px}
+.cb-opt:hover,.cb-opt[aria-selected="true"]{background:var(--accent-soft)}
+.cb-opt small{color:var(--muted)}
+.dr-h{padding:14px 18px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:10px}
+.dr-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.dr-h h2{margin:0;font-size:21px;font-weight:800}
+.dr-b{padding:14px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;flex:1;min-height:0}
+.dr-b h3{margin:0 0 8px;font-size:14px;font-weight:800}
+.crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:14px}.crumbs .sep{color:var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fact{border:1px solid var(--line-soft);border-radius:10px;padding:8px 10px}
+.fact .k{font-size:12px;color:var(--muted)}.fact .v{font-size:16px;font-weight:800}.fact .h{font-size:12px;color:var(--muted)}
+.callout{border-radius:10px;padding:10px 12px;font-size:14px;background:var(--surface-2)}.callout.w{background:var(--warn-bg)}
+.rows{border:1px solid var(--line-soft);border-radius:10px}
+.rows div{display:flex;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid var(--line-soft);font-size:14px}
+.rows div:last-child{border-bottom:0}.rows span:first-child{color:var(--muted)}
+.inline-form{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.inline-form input,.inline-form select{height:34px;border:1px solid var(--line);border-radius:10px;padding:0 10px;background:var(--surface);min-width:0;flex:1 1 160px}
+.close{width:34px;height:34px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none}
+/* painéis de grupo e ficha visual */
+a.btn{display:inline-flex;align-items:center;text-decoration:none}
+.ttl{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.acts{display:flex;flex-wrap:wrap;gap:8px}
+.upd{font-size:13px;color:var(--muted)}
+.fact .v.sm{font-size:13px;font-weight:700;color:var(--muted)}
+.ex{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:6px;background:var(--warn-bg);color:var(--t-warn);vertical-align:middle}
+.stk{flex:1;display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line-soft);min-width:60px}
+.stk span{display:block;height:100%}
+.stk-row{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;padding:6px 4px;border-radius:8px;cursor:pointer;text-align:left}
+.stk-row:hover{background:var(--surface-2)}
+.stk-row:disabled{cursor:default;background:transparent}
+.stk-l{width:54px;font-size:13px;font-weight:700;flex:none}
+.stk-n{width:74px;text-align:right;font-size:12px;flex:none}
+.stk-n b{font-weight:800}
+.stk-cap{font-size:12px;color:var(--muted);margin-top:4px}
+.worst{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface);padding:9px 12px;cursor:pointer;text-align:left;font-size:14px}
+.worst:hover{border-color:var(--accent)}
+.worst .k{font-size:12px;color:var(--muted);display:block}
+.ports{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+.port{height:46px;border-radius:8px;border:1px dashed var(--line);background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;color:var(--muted);padding:0;line-height:1.15}
+.port b{font-size:13px}
+.port.on{border:1px solid var(--line);background:var(--accent-soft);color:var(--ink);cursor:pointer;border-bottom:3px solid var(--s-ok)}
+.port.on.warn{border-bottom-color:var(--s-warn)} .port.on.crit{border-bottom-color:var(--s-crit)}
+.port.on:hover{border-color:var(--accent)}
+.mapbox{height:130px;border:1px dashed var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;color:var(--muted);padding:12px;background:var(--surface-2)}
+.hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:4px 12px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.kind{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.rul{padding-top:8px}
+.rul-track{position:relative;height:12px}
+.rul-z{position:absolute;inset:0;display:flex;border-radius:6px;overflow:hidden}
+.rul-z span{display:block;height:100%}
+.mk{position:absolute;top:50%;transform:translate(-50%,-50%)}
+.mk-onu{width:5px;height:28px;border-radius:3px;background:var(--mark);box-shadow:0 0 0 2px var(--surface)}
+.mk-ref{width:13px;height:13px;background:var(--surface);border:3px solid var(--mark);transform:translate(-50%,-50%) rotate(45deg)}
+.mk-ideal{width:0;height:28px;border-left:3px dotted var(--accent)}
+.rul-scale{position:relative;height:16px;margin-top:8px;font-size:11px;color:var(--muted)}
+.rul-scale span{position:absolute;transform:translateX(-50%)}
+.rul-leg{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;margin-top:6px}
+.rul-leg span{display:inline-flex;align-items:center;gap:6px}
+.lg-onu{width:4px;height:14px;border-radius:2px;background:var(--mark)}
+.lg-ref{width:9px;height:9px;border:2.5px solid var(--mark);transform:rotate(45deg)}
+.lg-ideal{width:0;height:14px;border-left:3px dotted var(--accent)}
+.rul-msg{font-size:13px;margin-top:6px;color:var(--t-warn);font-weight:700}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.tile{display:flex;align-items:center;gap:10px;border:1px solid var(--line-soft);border-radius:10px;padding:8px 10px;min-width:0}
+.tile svg{flex:none;color:var(--accent)}
+.tile .v{font-size:18px;font-weight:800;line-height:1.15}
+.tile .v.sm{font-size:13px;font-weight:700;color:var(--muted)}
+.tile .k{font-size:12px;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:10px;font-size:14px;z-index:60;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}
+.toast.on{opacity:1}
+
+@media (max-width:900px){
+  .drawer{position:fixed;top:auto;left:0;right:0;bottom:0;width:100%;height:72vh;border-left:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:0 -12px 32px rgba(0,0,0,.2);z-index:41;padding-bottom:env(safe-area-inset-bottom,0px)}
+}
+@media (max-width:760px){
+  .rail{display:none}.sums{grid-template-columns:repeat(2,minmax(0,1fr))}.facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .top{padding:10px 14px}.wrap{padding:6px 14px 40px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Menu do ISP_Auxiliar">
+    <div class="ia" aria-hidden="true">IA</div>
+    <a href="#" aria-label="Início"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path></svg></a>
+    <a href="#" aria-label="Clientes"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"></circle><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"></path><circle cx="17" cy="9" r="2.5"></circle><path d="M17 14.5c2.4 0 4 1.5 4.5 4"></path></svg></a>
+    <a href="#" aria-label="Contratos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"></path><path d="M14 3v5h5"></path><path d="M10 13h6M10 17h6"></path></svg></a>
+    <a href="#" aria-label="Rede" aria-current="page"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="5" r="2.5"></circle><circle cx="5" cy="19" r="2.5"></circle><circle cx="19" cy="19" r="2.5"></circle><path d="M12 7.5v4M12 11.5l-6 5M12 11.5l6 5"></path></svg></a>
+    <a href="#" aria-label="Mapa"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"></path><path d="M9 4v14M15 6v14"></path></svg></a>
+    <a href="#" aria-label="Documentos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 8h6M9 12h6M9 16h4"></path></svg></a>
+    <span class="sp"></span>
+    <a href="#" aria-label="Configurações"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></a>
+  </nav>
+  <div class="col">
+    <header class="top">
+      <div class="top-in">
+        <div class="search">
+          <label>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+            <input id="q" type="search" autocomplete="off" placeholder="Buscar cliente, login, ONU, MAC, PON, CTO ou OLT…" aria-label="Buscar no ISP_Auxiliar" aria-controls="results" aria-expanded="false" role="combobox" aria-autocomplete="list">
+            <span class="kbd" aria-hidden="true">Ctrl K</span>
+          </label>
+          <div id="results" class="results" role="listbox" aria-label="Resultados da busca" hidden></div>
+        </div>
+        <button class="theme-btn" id="theme" type="button">Tema</button>
+      </div>
+    </header>
+    <div class="layout">
+    <main class="wrap">
+      <p class="note">Protótipo com os dados reais da OLT-001 em 11/11. Atualizar, vincular e definir CTO funcionam só nesta página, sem tocar na OLT nem no banco.</p>
+      <div class="head">
+        <h1>Rede de fibra</h1>
+        <div class="sub">OLT-001, Hioso HA7004S, 33 ONUs. Status lido há 3 min, potência há 12 min.</div>
+      </div>
+      <div class="sums" id="sums"></div>
+      <div class="panel">
+        <div class="bar">
+          <div class="f combo" data-combo="pon"><label class="f" for="cb-pon">OLT ou PON</label> <input id="cb-pon" autocomplete="off" placeholder="Todas, digite para buscar" role="combobox" aria-expanded="false" aria-controls="cbl-pon"><button type="button" class="clr" data-clr="pon" aria-label="Limpar OLT ou PON">×</button><div class="cb-list" id="cbl-pon" role="listbox" hidden></div></div>
+          <div class="f combo" data-combo="cto"><label class="f" for="cb-cto">CTO</label> <input id="cb-cto" autocomplete="off" placeholder="Todas, digite para buscar" role="combobox" aria-expanded="false" aria-controls="cbl-cto"><button type="button" class="clr" data-clr="cto" aria-label="Limpar CTO">×</button><div class="cb-list" id="cbl-cto" role="listbox" hidden></div></div>
+          <label class="f">Status <select id="f-status" aria-label="Filtrar por status">
+            <option value="all">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="atencao">Em atenção</option><option value="critico">Crítico</option><option value="semvinculo">Sem vínculo</option><option value="quedas">Caíram em 24 h</option>
+          </select></label>
+          <span class="sp"></span>
+          <button type="button" class="btn sm" data-all="1">Abrir tudo</button>
+          <button type="button" class="btn sm" data-all="0">Recolher tudo</button>
+          <button type="button" class="btn sm out" id="cols-btn" aria-expanded="false" aria-controls="cols">Colunas</button>
+          <div class="pop" id="cols" hidden></div>
+        </div>
+        <div id="view"></div>
+      </div>
+    </main>
+    <aside class="drawer" id="drawer" aria-label="Ficha da ONU"></aside>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  // ---------- dados reais (tela da OLT e coleta de 11/11) ----------
+  const RAW = {
+    1: [
+      ['00:6D:61:ED:11:70',-23.19,2.48,21,22638,true],['C4:70:0B:B3:2D:A0',-20.81,2.41,22,21159,true],['C4:B8:B4:CA:BC:99',-22.68,2.08,49,22598,false],
+      ['78:30:3B:14:A2:DA',-18.83,2.42,36,22210,false],['00:6D:61:BE:C4:D0',-21.61,2.53,23,21133,true],['A0:08:6F:51:C5:ED',-14.65,1.96,42,20584,true],
+      ['58:F9:87:69:50:21',-20.41,2.29,36,21030,true],['F4:4C:1D:8A:4A:52',-18.83,2.43,39,21271,false],['F4:4C:7F:86:BB:95',-17.96,2.18,38,21362,false],
+      ['48:8E:EF:21:54:E6',-15.77,1.89,40,20672,false],['A0:A3:3B:A3:01:E0',-21.43,2.14,39,21894,false],['F0:2F:A7:9C:9C:65',-21.87,1.95,39,22444,false],
+      ['C0:BF:C0:76:9B:20',-15.85,2.22,39,20661,false],['F4:4C:7F:45:8A:EC',-22.92,2.23,39,22558,false],['48:8E:EF:72:B0:CF',-23.19,2.16,41,22495,false],
+      ['F0:2F:A7:32:6B:4B',-21.94,2.18,38,21362,false],['00:2E:C7:0D:27:42',-22.22,2.03,39,21043,false],['A0:F4:84:16:A5:F8',-20.97,2.32,39,21140,false],
+      ['F4:4C:1D:35:8E:BA',-21.94,2.14,37,21358,false],['00:2E:C7:94:1A:0A',-20.60,2.17,43,21043,false],['58:F9:87:18:2F:B6',-21.94,1.97,40,21013,true],
+      ['00:2E:C7:77:A0:39',-18.39,2.05,50,22464,false],['24:16:6D:DE:AC:AB',-20.86,2.27,39,21031,false]
+    ],
+    2: [
+      ['C4:B8:B4:85:9D:DA',-23.67,2.39,43,17186,true],['58:F9:87:B3:18:A8',-14.62,2.12,43,18074,false],['28:A6:DB:91:0B:D4',-25.53,1.96,37,17327,false],
+      ['A0:A3:3B:6B:93:A9',-23.98,2.14,45,17718,false],['00:6D:61:ED:3D:00',-24.95,2.48,24,17787,true],['70:B6:4F:18:EF:B2',-19.67,1.99,28,17194,true],
+      ['C4:70:0B:CE:81:24',-19.91,2.50,20,17176,false],['00:6D:61:EC:DB:70',-21.74,2.41,26,17736,true]
+    ],
+    3: [['20:57:AF:79:41:80',-23.37,2.47,41,512,false],['00:6D:61:BF:0C:00',-16.60,2.46,24,707,false]]
+  };
+  const GHOSTS = [['0/4:1','0/3:1'],['0/4:2','0/3:2'],['0/4:3','0/2:3'],['0/4:4','0/2:1'],['0/4:5','0/2:4'],['0/4:6','0/2:2'],['0/4:7','0/2:5'],['0/4:8','0/2:8'],['0/4:9','0/2:6'],['0/4:10','0/2:7']];
+  const CTOS = ['CTO-001', 'CTO'];
+  const WARN = -25, CRIT = -27;
+
+  const onus = [];
+  Object.keys(RAW).forEach(p => RAW[p].forEach((r, i) => onus.push({
+    id: '0/' + p + ':' + (i + 1), pon: +p, n: i + 1, mac: r[0], rx: r[1], tx: r[2], temp: r[3], dist: r[4],
+    sug: r[5], client: null, cto: null, updated: 'há 12 min', state: 'online', drops24: 0
+  })));
+  const byId = Object.fromEntries(onus.map(o => [o.id, o]));
+  // EXEMPLO: vínculo fictício para demonstrar o painel da CTO (porta = posição na CTO)
+  ['0/2:1', '0/2:2', '0/2:3', '0/2:4'].forEach((id, i) => { const o = byId[id]; o.cto = 'CTO-001'; o.ctoPort = i + 1; o.ctoEx = true; });
+  const CTO_PORTS = 16;
+  const CTO_PROJ = {}; // potência ideal pelo projeto do ISP Map, por CTO (nenhuma tem projeto ainda)
+  const median = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const ponMedian = {}; [1, 2, 3].forEach(p => ponMedian[p] = median(onus.filter(o => o.pon === p).map(o => o.rx)));
+
+  // ---------- utilidades ----------
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const dbm = v => (v < 0 ? '−' : '') + Math.abs(v).toFixed(2).replace('.', ',');
+  const db1 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1).replace('.', ',');
+  const km = m => (m / 1000).toFixed(1).replace('.', ',') + ' km';
+  const band = rx => rx < CRIT ? 'crit' : (rx < WARN ? 'warn' : 'ok');
+  const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  let toastT;
+  const toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2600); };
+
+  function markPos(rx) {
+    const seg = (v, lo, hi, base) => base + Math.max(0, Math.min(1, (v - lo) / (hi - lo))) * 33.333;
+    if (rx < CRIT) return seg(rx, -32, CRIT, 0);
+    if (rx < WARN) return seg(rx, CRIT, WARN, 33.333);
+    return seg(rx, WARN, -8, 66.667);
+  }
+  function gauge(rx, big) {
+    const b = band(rx), name = b === 'ok' ? 'bom' : (b === 'warn' ? 'atenção' : 'crítico');
+    return '<span class="gauge g-' + b + (big ? ' big' : '') + '"><span class="g3" role="img" aria-label="Sinal ' + dbm(rx) + ' dBm, ' + name + '"><span class="fill" style="width:' + Math.max(4, markPos(rx)).toFixed(1) + '%"></span><span class="tick" style="left:33.333%"></span><span class="tick" style="left:66.667%"></span></span><span class="g-val num">' + dbm(rx) + '</span></span>';
+  }
+  const legend = '<div class="legend"><span><i style="background:var(--s-crit)"></i>Crítico, abaixo de −27</span><span><i style="background:var(--s-warn)"></i>Atenção, de −27 a −25</span><span><i style="background:var(--s-ok)"></i>Bom, acima de −25</span><span>Quanto mais cheia a barra, melhor o sinal.</span></div>';
+
+  // ---------- colunas e agrupamento (opções de exibição, guardadas no navegador) ----------
+  const COLS = {
+    estado: { label: 'Estado', on: true, sort: o => o.state !== 'online' ? 0 : ({ crit: 0, warn: 1, ok: 2 })[band(o.rx)] },
+    cliente: { label: 'Cliente', on: true, sort: o => (o.client || (o.sug ? '~sugestão' : '~~sem')).toLowerCase() },
+    mac: { label: 'MAC', on: true, sort: o => o.mac },
+    sinal: { label: 'Sinal na ONU', on: true, sort: o => o.rx },
+    sinalolt: { label: 'Sinal na OLT', on: false, sort: null },
+    dist: { label: 'Distância', on: true, sort: o => o.dist },
+    tx: { label: 'Tx da ONU', on: false, sort: o => o.tx },
+    temp: { label: 'Temperatura', on: false, sort: o => o.temp },
+    local: { label: 'PON e CTO', on: false, sort: o => o.pon * 1000 + o.n }
+  };
+  const DEFAULT_ORDER = ['estado', 'cliente', 'mac', 'sinal', 'sinalolt', 'dist', 'tx', 'temp', 'local'];
+  const DEFAULT_ON = ['estado', 'cliente', 'mac', 'sinal', 'dist'];
+  let colOrder = DEFAULT_ORDER.slice(), grouped = true;
+  try {
+    const saved = JSON.parse(localStorage.getItem('telemetria-colunas') || 'null');
+    if (saved && Array.isArray(saved.order)) {
+      colOrder = saved.order.filter(k => COLS[k]).concat(DEFAULT_ORDER.filter(k => !saved.order.includes(k)));
+      DEFAULT_ORDER.forEach(k => COLS[k].on = saved.on.includes(k));
+      if (typeof saved.grouped === 'boolean') grouped = saved.grouped;
+    }
+  } catch (e) {}
+  const saveCols = () => { try { localStorage.setItem('telemetria-colunas', JSON.stringify({ order: colOrder, on: colOrder.filter(k => COLS[k].on), grouped })); } catch (e) {} };
+  const visibleCols = () => colOrder.filter(k => COLS[k].on);
+
+  function cell(k, o) {
+    switch (k) {
+      case 'estado': return o.state !== 'online' ? '<span class="pill p-crit">Offline</span>' : ({ ok: '<span class="pill p-on">Online</span>', warn: '<span class="pill p-warn">Atenção</span>', crit: '<span class="pill p-crit">Crítico</span>' })[band(o.rx)];
+      case 'cliente': return o.client ? '<span class="cl-ok">' + esc(o.client) + '</span>' : (o.sug ? '<span class="cl-sug">Sugestão a confirmar</span>' : '<span class="cl-none">Sem vínculo</span>');
+      case 'mac': return '<span class="mono">' + o.mac + '</span>';
+      case 'sinal': return gauge(o.rx);
+      case 'sinalolt': return '<span style="color:var(--muted)" title="Esta OLT não informa a potência recebida de cada ONU">não informado</span>';
+      case 'dist': return '<span class="num">' + km(o.dist) + '</span>';
+      case 'tx': return '<span class="num">' + o.tx.toFixed(2).replace('.', ',') + ' dBm</span>';
+      case 'temp': return '<span class="num">' + o.temp + ' °C</span>';
+      case 'local': return 'PON ' + o.pon + ', ' + (o.cto ? esc(o.cto) : 'sem CTO');
+    }
+    return '';
+  }
+
+  // ---------- estado ----------
+  const state = { pon: 'all', cto: 'all', status: 'all', sortKey: null, sortDir: 0, selected: null, open: { olt: true, p1: true, p2: true, p3: true, 'p1:—': true, 'p2:—': true, 'p3:—': true, 'p2:CTO-001': true } };
+  function matchStatus(o) {
+    switch (state.status) {
+      case 'online': return o.state === 'online';
+      case 'offline': return o.state !== 'online';
+      case 'atencao': return o.state === 'online' && band(o.rx) === 'warn';
+      case 'critico': return o.state !== 'online' || band(o.rx) === 'crit';
+      case 'semvinculo': return !o.client;
+      case 'quedas': return o.drops24 > 0;
+    }
+    return true;
+  }
+  const matchPon = o => state.pon === 'all' || state.pon === 'olt' || o.pon === +state.pon.slice(4);
+  const matchCto = o => state.cto === 'all' || (o.cto || '—') === state.cto;
+  const filtered = () => onus.filter(o => matchPon(o) && matchCto(o) && matchStatus(o));
+  function sortList(list) {
+    const c = state.sortKey && COLS[state.sortKey];
+    if (!c || !c.sort || !state.sortDir) return list.slice().sort((a, b) => a.pon - b.pon || a.n - b.n);
+    return list.slice().sort((a, b) => { const x = c.sort(a), y = c.sort(b); return (x < y ? -1 : x > y ? 1 : (a.pon - b.pon || a.n - b.n)) * state.sortDir; });
+  }
+
+  // ---------- filtros com busca (OLT ou PON, depois CTO) ----------
+  function ponOptions() {
+    return [['all', 'Todas as OLTs e PONs', '']].concat([['olt', 'OLT-001', onus.length + ' ONUs']], [1, 2, 3, 4].map(p => ['pon:' + p, 'OLT-001 › PON ' + p, p === 4 ? 'só registros antigos' : onus.filter(o => o.pon === p).length + ' ONUs']));
+  }
+  function ctoOptions() {
+    const base = onus.filter(matchPon);
+    const names = [...new Set(CTOS.concat(base.map(o => o.cto).filter(Boolean)))];
+    return [['all', 'Todas as CTOs', '']].concat([['—', 'Sem CTO definida', base.filter(o => !o.cto).length + ' ONUs']], names.map(c => [c, c, base.filter(o => o.cto === c).length + ' ONUs']));
+  }
+  const comboOpts = { pon: ponOptions, cto: ctoOptions };
+  let comboSel = { pon: 0, cto: 0 };
+  function labelOf(kind) { const v = state[kind]; if (v === 'all') return ''; const o = comboOpts[kind]().find(x => x[0] === v); return o ? o[1] : ''; }
+  function syncCombos() { ['pon', 'cto'].forEach(k => { const i = $('#cb-' + k); if (document.activeElement !== i) i.value = labelOf(k); }); }
+  function drawCombo(kind) {
+    const i = $('#cb-' + kind), l = $('#cbl-' + kind), t = norm(i.value === labelOf(kind) ? '' : i.value);
+    const opts = comboOpts[kind]().filter(o => !t || norm(o[1]).includes(t) || norm(o[0]).includes(t));
+    l.innerHTML = opts.length ? opts.map((o, n) => '<button type="button" class="cb-opt" role="option" data-cbk="' + kind + '" data-cbv="' + esc(o[0]) + '" aria-selected="' + (n === comboSel[kind]) + '"><span>' + esc(o[1]) + '</span><small>' + esc(o[2]) + '</small></button>').join('') : '<div class="res-empty">Nada com “' + esc(i.value) + '”.</div>';
+    l.hidden = false; i.setAttribute('aria-expanded', 'true');
+  }
+  function closeCombo(kind) { $('#cbl-' + kind).hidden = true; $('#cb-' + kind).setAttribute('aria-expanded', 'false'); syncCombos(); }
+  function setCombo(kind, v) {
+    state[kind] = v;
+    if (kind === 'pon' && state.cto !== 'all' && !ctoOptions().some(o => o[0] === state.cto)) state.cto = 'all';
+    if (kind === 'pon' && v === 'pon:4') state.open.p4 = true;
+    closeCombo(kind); renderView();
+  }
+  ['pon', 'cto'].forEach(kind => {
+    const i = $('#cb-' + kind);
+    i.addEventListener('focus', () => { i.select(); comboSel[kind] = 0; drawCombo(kind); });
+    i.addEventListener('input', () => { comboSel[kind] = 0; drawCombo(kind); });
+    i.addEventListener('keydown', e => {
+      const btns = [...document.querySelectorAll('#cbl-' + kind + ' .cb-opt')];
+      if (e.key === 'ArrowDown') { e.preventDefault(); comboSel[kind] = Math.min(comboSel[kind] + 1, btns.length - 1); drawCombo(kind); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); comboSel[kind] = Math.max(comboSel[kind] - 1, 0); drawCombo(kind); }
+      else if (e.key === 'Enter') { e.preventDefault(); const b = btns[comboSel[kind]]; if (b) setCombo(kind, b.dataset.cbv); }
+      else if (e.key === 'Escape') { closeCombo(kind); i.blur(); }
+    });
+  });
+
+  // ---------- cartões (atalhos de status) ----------
+  function renderSums() {
+    const att = onus.filter(o => o.state !== 'online' || band(o.rx) !== 'ok').length;
+    const off = onus.filter(o => o.state !== 'online').length;
+    const sums = [
+      ['atencao', 'Precisa de atenção', att, 'sinal em atenção ou crítico', 'c-warn'],
+      ['offline', 'Offline agora', off, onus.length - off + ' de ' + onus.length + ' online', 'c-on'],
+      ['quedas', 'Caíram em 24 h', onus.filter(o => o.drops24 > 0).length, 'nenhuma queda registrada', ''],
+      ['semvinculo', 'Sem vínculo', onus.filter(o => !o.client).length, onus.filter(o => o.sug && !o.client).length + ' sugestões para confirmar', 'c-acc']
+    ];
+    $('#sums').innerHTML = sums.map(s => '<button type="button" class="sum" data-sum="' + s[0] + '" aria-pressed="' + (state.status === s[0]) + '"><span class="l">' + s[1] + '</span><span class="v ' + s[4] + '">' + s[2] + '</span><span class="h">' + s[3] + '</span></button>').join('');
+  }
+
+  // ---------- tabela em árvore ----------
+  function header(cols) {
+    return '<thead><tr><th><span class="plain">' + (grouped ? 'Rede' : 'ONU') + '</span></th>' + cols.map(k => {
+      const c = COLS[k];
+      if (!c.sort) return '<th><span class="plain">' + c.label + '</span></th>';
+      const on = state.sortKey === k && state.sortDir;
+      return '<th><button type="button" class="sorter" data-sortcol="' + k + '" aria-sort="' + (on ? (state.sortDir > 0 ? 'ascending' : 'descending') : 'none') + '">' + c.label + '<span class="arr" aria-hidden="true">' + (on ? (state.sortDir > 0 ? '▲' : '▼') : '') + '</span></button></th>';
+    }).join('') + '</tr></thead>';
+  }
+  const leafRow = (o, cols, lvl) => '<tr class="leaf" data-onu="' + o.id + '" tabindex="0"><td class="' + lvl + '"><span class="leafname">' + o.id + '</span></td>' + cols.map(k => '<td>' + cell(k, o) + '</td>').join('') + '</tr>';
+  function grpPills(list) {
+    const a = list.filter(x => x.state === 'online' && band(x.rx) === 'warn').length, c = list.filter(x => x.state !== 'online' || band(x.rx) === 'crit').length;
+    let h = '<span class="pill p-on">' + list.filter(x => x.state === 'online').length + ' online</span>';
+    if (a) h += '<span class="pill p-warn">' + a + ' em atenção</span>';
+    if (c) h += '<span class="pill p-crit">' + c + ' crítico/offline</span>';
+    return h;
+  }
+  const grpRow = (id, lvl, lv, name, meta, pills, actions, span) => '<tr class="grp lv' + lv + '" data-grp="' + esc(id) + '" tabindex="0"><td colspan="' + span + '" class="' + lvl + '">' + (actions ? '<span class="gact">' + actions + '</span>' : '')
+    + '<button type="button" class="tg" data-tg="' + esc(id) + '" aria-expanded="' + !!state.open[id] + '" aria-label="' + (state.open[id] ? 'Recolher' : 'Expandir') + '"><span class="caret" aria-hidden="true">▸</span></button><span class="gname">' + name + '</span>'
+    + '<span class="gmeta">' + meta + '</span><span class="gpills">' + pills + '</span></td></tr>';
+  function renderView() {
+    syncCombos();
+    const cols = visibleCols(), span = cols.length + 1, list = filtered();
+    const filtering = state.pon !== 'all' || state.cto !== 'all' || state.status !== 'all';
+    let body = '';
+    if (!grouped) body = sortList(list).map(o => leafRow(o, cols, '')).join('');
+    else {
+      body += grpRow('olt', 'l0', 0, 'OLT-001, HA7004S', '192.168.0.89, 4 PONs', grpPills(list), '', span);
+      if (state.open.olt || filtering) {
+        [1, 2, 3].forEach(p => {
+          const all = list.filter(o => o.pon === p); if (!all.length) return;
+          const g = {}; all.forEach(o => { const k = o.cto || '—'; (g[k] = g[k] || []).push(o); });
+          const keys = Object.keys(g).sort((a, b) => a === '—' ? 1 : b === '—' ? -1 : a.localeCompare(b));
+          const pid = 'p' + p;
+          body += grpRow(pid, 'l1', 1, 'PON ' + p, all.length + ' ONUs, mediana ' + dbm(ponMedian[p]) + ' dBm', grpPills(all), '<button type="button" class="btn sm out" data-refresh="pon" data-p="' + p + '">Atualizar PON</button>', span);
+          if (!(filtering || state.open[pid])) return;
+          keys.forEach(k => {
+            const gid = pid + ':' + k, med = median(g[k].map(o => o.rx));
+            body += grpRow(gid, 'l2', 2, k === '—' ? 'Sem CTO definida' : esc(k) + (g[k].some(o => o.ctoEx) ? ' <span class="ex">EXEMPLO</span>' : ''), g[k].length + ' ONUs' + (k !== '—' && med !== null ? ', mediana ' + dbm(med) + ' dBm' : ''), grpPills(g[k]), '', span);
+            if (filtering || state.open[gid]) body += sortList(g[k]).map(o => leafRow(o, cols, 'l3')).join('');
+          });
+        });
+        if ((state.pon === 'all' || state.pon === 'olt' || state.pon === 'pon:4') && state.cto === 'all' && state.status === 'all') {
+          body += grpRow('p4', 'l1', 1, 'PON 4', 'nenhuma ONU viva', '<span class="pill p-muted">10 registros antigos, ignorados</span>', '', span);
+          if (state.open.p4) body += GHOSTS.map(g => '<tr class="leaf ghost" data-onu="' + g[1] + '" tabindex="0"><td class="l2">' + g[0] + '</td><td colspan="' + cols.length + '">registro antigo, a ONU está viva em ' + g[1] + '</td></tr>').join('');
+        }
+      }
+    }
+    const empty = { offline: 'Todas as ONUs estão online.', quedas: 'Nenhuma queda registrada nas últimas 24 h.', critico: 'Nenhuma ONU em estado crítico.', atencao: 'Nenhuma ONU em atenção.', semvinculo: 'Todas as ONUs têm cliente vinculado.' };
+    $('#view').innerHTML = !list.length ? '<div class="empty">' + (empty[state.status] || 'Nenhuma ONU com estes filtros.') + '</div>'
+      : '<div class="scroll"><table>' + header(cols) + '<tbody>' + body + '</tbody></table></div>' + legend;
+    markSelected();
+  }
+  function render() { renderSums(); $('#f-status').value = state.status; renderView(); }
+
+  function renderCols() {
+    $('#cols').innerHTML = '<h3>Exibição</h3><div class="colrow"><label><input type="checkbox" data-grouped' + (grouped ? ' checked' : '') + '>Agrupar em árvore (OLT, PON, CTO)</label></div><h3 style="margin-top:10px">Colunas</h3>' + colOrder.map((k, i) => '<div class="colrow"><label><input type="checkbox" data-colon="' + k + '"' + (COLS[k].on ? ' checked' : '') + '>' + COLS[k].label + '</label>'
+      + '<button type="button" class="icon-btn" data-colmove="' + k + '" data-dir="-1" aria-label="Subir ' + COLS[k].label + '"' + (i === 0 ? ' disabled' : '') + '>▲</button><button type="button" class="icon-btn" data-colmove="' + k + '" data-dir="1" aria-label="Descer ' + COLS[k].label + '"' + (i === colOrder.length - 1 ? ' disabled' : '') + '>▼</button></div>').join('')
+      + '<div class="foot"><button type="button" class="linkbtn" data-colreset>Restaurar padrão</button><button type="button" class="btn sm" data-colclose>Fechar</button></div>';
+  }
+  function markSelected() {
+    document.querySelectorAll('tr.sel').forEach(e => e.classList.remove('sel'));
+    if (state.selected) document.querySelectorAll('tr.leaf:not(.ghost)[data-onu="' + state.selected + '"]').forEach(e => e.classList.add('sel'));
+    if (currentGrp) document.querySelectorAll('tr.grp').forEach(e => { if (e.dataset.grp === currentGrp) e.classList.add('sel'); });
+  }
+
+  // ---------- ficha: só o que a tabela não mostra ----------
+  function seeded(seed) { let x = 0; for (const ch of seed) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; }
+  function history(o) {
+    const rnd = seeded(o.mac), pts = [];
+    const start = o.rx > -25 ? o.rx + 0.15 : o.rx + 1.0;
+    for (let i = 0; i < 28; i++) pts.push(start + (o.rx - start) * (i / 27) + (rnd() - .5) * 0.35);
+    pts[27] = o.rx; return pts;
+  }
+  function chart(o) {
+    const pts = history(o), W = 380, H = 130, top = -12, bot = -30;
+    const y = v => ((top - Math.max(bot, Math.min(top, v))) / (top - bot)) * H;
+    const zone = (a, b, color) => '<rect x="0" y="' + y(a).toFixed(1) + '" width="' + W + '" height="' + (y(b) - y(a)).toFixed(1) + '" fill="' + color + '" opacity=".14"></rect>';
+    const line = pts.map((v, i) => (i * (W / 27)).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
+    return '<svg class="chart" viewBox="0 0 ' + W + ' ' + (H + 18) + '" role="img" aria-label="Sinal recebido na ONU nos últimos 7 dias">'
+      + zone(top, WARN, 'var(--s-ok)') + zone(WARN, CRIT, 'var(--s-warn)') + zone(CRIT, bot, 'var(--s-crit)')
+      + '<line x1="0" x2="' + W + '" y1="' + y(ponMedian[o.pon]).toFixed(1) + '" y2="' + y(ponMedian[o.pon]).toFixed(1) + '" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"></line>'
+      + '<polyline points="' + line + '" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"></polyline>'
+      + '<circle cx="' + W + '" cy="' + y(o.rx).toFixed(1) + '" r="4" fill="var(--ink)"></circle>'
+      + '<text x="2" y="' + (H + 14) + '" font-size="11" fill="var(--muted)">7 dias atrás</text><text x="' + (W - 2) + '" y="' + (H + 14) + '" font-size="11" fill="var(--muted)" text-anchor="end">agora</text></svg>';
+  }
+  function timeline(o) {
+    const items = [];
+    items.push(['', '12/11 14:12', 'Status lido pelo agendamento: online']);
+    items.push([band(o.rx) === 'ok' ? '' : (band(o.rx) === 'warn' ? 'w' : 'c'), '12/11 14:03', 'Potência lida: ' + dbm(o.rx) + ' dBm' + (band(o.rx) === 'ok' ? '' : ' (' + (band(o.rx) === 'warn' ? 'atenção' : 'crítico') + ')')]);
+    items.push(['a', '11/11 20:33', 'Entrou no inventário do sistema; referência de sinal começou a se formar']);
+    const g = GHOSTS.find(x => x[1] === o.id);
+    if (g) items.push(['w', '09/11 20:26', 'Mudou de porta: estava na PON 4 (' + g[0] + ', agora registro antigo) e voltou na PON ' + o.pon]);
+    return '<ul class="tl">' + items.map(i => '<li class="' + i[0] + '"><span class="when">' + i[1] + '</span>' + esc(i[2]) + '</li>').join('') + '</ul>';
+  }
+  let current = null, currentGrp = null;
+  const SVG = p => '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>';
+  const IC = {
+    drop: SVG('<path d="M3 6l6 6 4-4 8 8"></path><path d="M21 11v5h-5"></path>'),
+    ppp: SVG('<path d="M9 15l6-6"></path><path d="M11 6l1.5-1.5a4 4 0 015.7 5.7L16.7 11.7"></path><path d="M13 18l-1.5 1.5a4 4 0 01-5.7-5.7L7.3 12.3"></path>'),
+    olt: SVG('<path d="M12 20V9"></path><path d="M8 13l4-4 4 4"></path><rect x="4" y="3" width="16" height="4" rx="1"></rect>'),
+    ref: SVG('<circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="1"></circle>')
+  };
+  const closeBtn = '<button type="button" class="close" data-close aria-label="Fechar o painel"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>';
+  const fact = (k, v, h, small) => '<div class="fact"><div class="k">' + k + '</div><div class="v' + (small ? ' sm' : '') + '">' + v + '</div>' + (h ? '<div class="h">' + h + '</div>' : '') + '</div>';
+  const tile = (icon, v, k, small) => '<div class="tile">' + icon + '<div style="min-width:0"><div class="v num' + (small ? ' sm' : '') + '">' + v + '</div><div class="k">' + k + '</div></div></div>';
+  const bands = l => ({ ok: l.filter(o => o.state === 'online' && band(o.rx) === 'ok').length, warn: l.filter(o => o.state === 'online' && band(o.rx) === 'warn').length, crit: l.filter(o => o.state !== 'online' || band(o.rx) === 'crit').length });
+  function stack(l) {
+    const c = bands(l);
+    return '<span class="stk" role="img" aria-label="' + c.ok + ' bom, ' + c.warn + ' atenção, ' + c.crit + ' crítico">' + [['ok', 's-ok'], ['warn', 's-warn'], ['crit', 's-crit']].filter(x => c[x[0]]).map(x => '<span style="flex:' + c[x[0]] + ';background:var(--' + x[1] + ')"></span>').join('') + '</span>';
+  }
+  const stackNums = l => { const c = bands(l); return l.length ? '<span class="stk-n num"><b style="color:var(--t-ok)">' + c.ok + '</b> · <b style="color:var(--t-warn)">' + c.warn + '</b> · <b style="color:var(--t-crit)">' + c.crit + '</b></span>' : '<span class="stk-n" style="color:var(--muted)">sem ONUs</span>'; };
+  const stackCap = '<div class="stk-cap">bom · atenção · crítico (offline conta como crítico)</div>';
+  function groupList(id) {
+    if (id === 'olt') return onus.slice();
+    const m = id.match(/^p(\d)(?::(.*))?$/); if (!m) return [];
+    let l = onus.filter(o => o.pon === +m[1]);
+    if (m[2] !== undefined) l = l.filter(o => (o.cto || '—') === m[2]);
+    return l;
+  }
+  function showPanel(html, label) {
+    const dr = $('#drawer'); dr.innerHTML = html; dr.setAttribute('aria-label', label); dr.classList.add('on');
+    markSelected(); const t = $('#dr-title'); if (t) t.focus({ preventScroll: true });
+  }
+  const crumbLink = (grp, txt) => '<button type="button" class="linkbtn" data-opengrp="' + esc(grp) + '">' + txt + '</button>';
+  const sep = '<span class="sep">›</span>';
+  const head = (crumbs, title, extra, acts) => '<div class="dr-h"><div class="dr-top"><nav class="crumbs" aria-label="Caminho">' + crumbs + '</nav>' + closeBtn + '</div><div class="ttl"><h2 id="dr-title" tabindex="-1">' + title + '</h2>' + (extra || '') + '</div>' + (acts ? '<div class="acts">' + acts + '</div>' : '') + '</div>';
+
+  // ---------- painéis de grupo (OLT, PON, CTO) ----------
+  function openGroup(id, toggle) {
+    if (toggle && currentGrp === id) return closeDrawer();
+    current = null; state.selected = null; currentGrp = id;
+    const l = groupList(id), on = l.filter(o => o.state === 'online').length;
+    let html;
+    if (id === 'olt') {
+      html = head('<span>Rede de fibra</span>', 'OLT-001', '', '<a class="btn out" href="http://192.168.0.89/" target="_blank" rel="noopener">Abrir web da OLT</a>')
+        + '<div class="dr-b"><section><div class="facts">'
+        + fact('Modelo', 'HA7004S', 'Hioso') + fact('IP', '<span class="mono">192.168.0.89</span>') + fact('PONs', '4', '3 com ONUs')
+        + fact('ONUs online', on + '/' + l.length) + fact('Última coleta', 'há 3 min', 'potência há 12 min') + fact('CPU', 'ainda não lido', '', true)
+        + '</div></section><section><h3>ONUs por PON</h3>'
+        + [1, 2, 3, 4].map(p => { const pl = groupList('p' + p); return '<button type="button" class="stk-row" data-opengrp="p' + p + '"><span class="stk-l">PON ' + p + '</span>' + stack(pl) + stackNums(pl) + '</button>'; }).join('')
+        + stackCap + '</section></div>';
+    } else if (id === 'p4') {
+      html = head(crumbLink('olt', 'OLT-001'), 'PON 4', '<span class="pill p-muted">nenhuma ONU viva</span>')
+        + '<div class="dr-b"><section><div class="facts">' + fact('Módulo/GBIC', 'a coletar', '', true) + fact('Potência de saída', 'a coletar', '', true) + fact('Registros antigos', String(GHOSTS.length), 'ignorados') + '</div>'
+        + '<p class="hint">Os 10 registros são de ONUs que hoje estão vivas nas PONs 2 e 3.</p></section></div>';
+    } else if (/^p\d$/.test(id)) {
+      const p = +id.slice(1), worst = l.slice().sort((a, b) => a.rx - b.rx)[0], linked = l.filter(o => o.client).length;
+      html = head(crumbLink('olt', 'OLT-001'), 'PON ' + p, '', '<button type="button" class="btn pri" data-refresh="pon" data-p="' + p + '">Atualizar PON</button>')
+        + '<div class="dr-b"><section><div class="facts">'
+        + fact('Módulo/GBIC', 'a coletar', '', true) + fact('Potência de saída', 'a coletar', '', true) + fact('Clientes online', on + '/' + l.length, linked + ' com cadastro')
+        + '</div></section><section><h3>Faixas de sinal</h3><div style="display:flex;align-items:center;gap:10px">' + stack(l) + stackNums(l) + '</div>' + stackCap
+        + '<div class="facts" style="margin-top:10px">' + fact('Mediana', dbm(ponMedian[p]) + ' <span style="font-size:12px;font-weight:600">dBm</span>') + '</div></section>'
+        + (worst ? '<section><h3>Pior ONU</h3><button type="button" class="worst" data-openonu="' + worst.id + '"><span><span class="k">abre a ficha</span><strong>ONU ' + worst.id + '</strong></span><span class="num" style="font-weight:800;color:var(--t-' + band(worst.rx) + ')">' + dbm(worst.rx) + ' dBm</span><span class="num" style="font-size:13px;color:var(--muted)">' + db1(worst.rx - ponMedian[p]) + ' dB</span><span aria-hidden="true">›</span></button></section>' : '')
+        + '</div>';
+    } else {
+      const p = +id.slice(1, id.indexOf(':')), name = id.slice(id.indexOf(':') + 1);
+      if (name === '—') {
+        html = head(crumbLink('olt', 'OLT-001') + sep + crumbLink('p' + p, 'PON ' + p), 'Sem CTO definida')
+          + '<div class="dr-b"><section><div class="facts">' + fact('ONUs', String(l.length)) + fact('Online', on + '/' + l.length) + '</div></section>'
+          + '<section><h3>Faixas de sinal</h3><div style="display:flex;align-items:center;gap:10px">' + stack(l) + stackNums(l) + '</div>' + stackCap + '</section>'
+          + '<section><div class="callout">Abra a ONU e clique em “CTO não definida” no caminho para escolher a CTO.</div></section></div>';
+      } else {
+        const ex = l.some(o => o.ctoEx), med = median(l.map(o => o.rx)), ideal = CTO_PROJ[name];
+        const portOf = {}; l.forEach(o => { if (o.ctoPort) portOf[o.ctoPort] = o; });
+        const ports = []; for (let i = 1; i <= CTO_PORTS; i++) { const o = portOf[i]; ports.push(o ? '<button type="button" class="port on ' + (o.state !== 'online' ? 'crit' : band(o.rx)) + '" data-openonu="' + o.id + '" title="Porta ' + i + ': ONU ' + o.id + '"><b>' + i + '</b>' + o.id.split(':')[1] + '</button>' : '<span class="port" title="Porta ' + i + ' livre"><b>' + i + '</b>livre</span>'); }
+        html = head(crumbLink('olt', 'OLT-001') + sep + crumbLink('p' + p, 'PON ' + p), esc(name), ex ? '<span class="ex">EXEMPLO</span>' : '')
+          + '<div class="dr-b">' + (ex ? '<p class="hint" style="margin:0">Vínculo fictício (0/2:1 a 0/2:4) só para demonstrar o painel.</p>' : '')
+          + '<section><h3>Portas (' + l.length + ' de ' + CTO_PORTS + ' ocupadas)</h3><div class="ports">' + ports.join('') + '</div><p class="hint">Número embaixo = ONU na PON ' + p + '. A cor da borda é a faixa de sinal.</p></section>'
+          + '<section><div class="facts">' + fact('Clientes conectados', String(on), l.filter(o => o.client).length + ' com cadastro') + fact('Mediana', med !== null ? dbm(med) + ' <span style="font-size:12px;font-weight:600">dBm</span>' : '—')
+          + (ideal != null ? fact('Ideal pelo projeto', dbm(ideal) + ' dBm') : fact('Ideal pelo projeto', 'sem projeto no ISP Map', '', true)) + '</div></section>'
+          + '<section><h3>Localização</h3><div class="mapbox">Sem coordenada.<br>Aparece aqui quando a CTO for cadastrada no ISP Map.</div><div class="acts" style="margin-top:8px"><button type="button" class="btn" disabled>Abrir no ISP Map</button><button type="button" class="btn" disabled>Como chegar</button></div></section>'
+          + '</div>';
+      }
+    }
+    showPanel(html, 'Detalhes do grupo');
+  }
+
+  // ---------- ficha da ONU: só o que a tabela não mostra ----------
+  function ruler(o) {
+    const ctoN = o.cto ? onus.filter(x => x.cto === o.cto && x !== o) : [];
+    const useCto = ctoN.length >= 2, refL = useCto ? ctoN : onus.filter(x => x.pon === o.pon && x !== o);
+    const ref = median(refL.map(x => x.rx)), ideal = o.cto ? CTO_PROJ[o.cto] : undefined;
+    const lo = -30, hi = -12, pos = v => (Math.max(0, Math.min(1, (v - lo) / (hi - lo))) * 100).toFixed(2);
+    const zr = (CRIT - lo) / (hi - lo) * 100, zy = (WARN - CRIT) / (hi - lo) * 100;
+    const d = ref !== null ? o.rx - ref : 0;
+    let h = '<div class="rul"><div class="rul-track"><div class="rul-z"><span style="width:' + zr + '%;background:var(--s-crit)"></span><span style="width:' + zy + '%;background:var(--s-warn)"></span><span style="flex:1;background:var(--s-ok)"></span></div>';
+    if (ideal != null) h += '<i class="mk mk-ideal" style="left:' + pos(ideal) + '%"></i>';
+    if (ref !== null) h += '<i class="mk mk-ref" style="left:' + pos(ref) + '%"></i>';
+    h += '<i class="mk mk-onu" style="left:' + pos(o.rx) + '%"></i></div><div class="rul-scale">'
+      + [-30, -27, -25, -20, -15, -12].map(v => '<span style="left:' + pos(v) + '%;' + (v === lo ? 'transform:none' : v === hi ? 'transform:translateX(-100%)' : '') + '">' + dbm(v).replace(',00', '') + '</span>').join('') + '</div>';
+    h += '<div class="rul-leg"><span><i class="lg-onu"></i>esta ONU' + (COLS.sinal.on ? '' : ' ' + dbm(o.rx)) + '</span>'
+      + (ref !== null ? '<span><i class="lg-ref"></i>mediana ' + (useCto ? esc(o.cto) : 'PON ' + o.pon) + ' ' + dbm(ref) + ' <span class="num" style="color:var(--muted)">(' + db1(d) + ' dB)</span></span>' : '')
+      + (ideal != null ? '<span><i class="lg-ideal"></i>ideal do projeto ' + dbm(ideal) + '</span>' : '') + '</div>';
+    if (ref !== null && d <= -2) h += '<div class="rul-msg">' + Math.abs(d).toFixed(1).replace('.', ',') + ' dB abaixo dos vizinhos: suspeita no drop ou conector deste cliente.</div>';
+    return h + '</div>';
+  }
+  function openOnu(id, toggle) {
+    const o = byId[id]; if (!o) return;
+    if (toggle && current && current.id === id) return closeDrawer();
+    current = o; currentGrp = null; state.selected = o.id;
+    const hiddenRows = [['mac', 'MAC', '<span class="mono">' + o.mac + '</span>'], ['sinal', 'Sinal na ONU', dbm(o.rx) + ' dBm'], ['dist', 'Distância', km(o.dist) + ' (pelo RTT)'], ['tx', 'Tx da ONU', o.tx.toFixed(2).replace('.', ',') + ' dBm'], ['temp', 'Temperatura', o.temp + ' °C']].filter(r => !COLS[r[0]].on);
+    const kindTxt = o.kind ? 'Tipo: ' + o.kind.toUpperCase() + ' (marcado à mão, exemplo)' : 'ONU ou ONT: a identificar';
+    const crumbs = '<button type="button" class="linkbtn" data-goPon="olt">OLT-001</button>' + sep + '<button type="button" class="linkbtn" data-goPon="pon:' + o.pon + '">PON ' + o.pon + '</button>' + sep
+      + (o.cto ? '<button type="button" class="linkbtn" data-goCto="' + esc(o.cto) + '" data-p="' + o.pon + '">' + esc(o.cto) + (o.ctoPort ? ', porta ' + o.ctoPort : '') + '</button>' + (o.ctoEx ? ' <span class="ex">EXEMPLO</span>' : '') : '<button type="button" class="linkbtn" data-act="cto" style="color:var(--t-warn)">CTO não definida</button>');
+    const tiles = [tile(IC.drop, String(o.drops24), 'quedas em 24 h'), tile(IC.ppp, '—', o.client ? 'sessão PPPoE: após a leitura' : 'sessão PPPoE: depende do vínculo', true)];
+    if (!COLS.sinalolt.on) tiles.push(tile(IC.olt, 'não informado', 'sinal recebido na OLT', true));
+    tiles.push(tile(IC.ref, '1 de 5', 'leituras para a referência'));
+    const html = head(crumbs, 'ONU ' + o.id, COLS.estado.on ? '' : cell('estado', o),
+      '<button type="button" class="btn pri" data-refresh="onu">Atualizar esta ONU</button><button type="button" class="btn out" data-goPon="pon:' + o.pon + '" data-keep="1">Ver vizinhos</button><button type="button" class="btn" data-act="interv">Registrar intervenção</button>')
+      .replace('</div></div>', '</div><div class="kind"><span>' + kindTxt + '</span><span class="seg" role="group" aria-label="Tipo do equipamento (simulado)"><button type="button" data-kind="onu" aria-pressed="' + (o.kind === 'onu') + '">ONU</button><button type="button" data-kind="ont" aria-pressed="' + (o.kind === 'ont') + '">ONT</button></span></div><div class="upd" id="dr-upd">Última leitura ' + o.updated + '</div></div>')
+      + '<div class="dr-b">'
+      + '<section id="cto-box" hidden><h3>Definir CTO</h3><div class="inline-form"><select id="f-cto" aria-label="CTO">' + CTOS.map(c => '<option>' + c + '</option>').join('') + '</select><button type="button" class="btn pri" data-act="savecto">Salvar CTO</button></div></section>'
+      + '<section><h3>Sinal comparado</h3>' + ruler(o) + '</section>'
+      + '<section><h3>Últimos 7 dias <span class="ex">EXEMPLO</span></h3>' + chart(o) + '<p class="hint">Tracejado = mediana da PON. O real virá das amostras gravadas desde 11/11.</p></section>'
+      + '<section><div class="tiles">' + tiles.join('') + '</div></section>'
+      + '<section><h3>Cliente</h3><div class="callout ' + (o.client ? '' : 'w') + '">' + (o.client ? (COLS.cliente.on ? 'Vínculo confirmado.' : 'Vinculada a <strong>' + esc(o.client) + '</strong>.') : (o.sug ? 'Há um login do PPPoE com MAC parecido para confirmar.' : 'Nenhum login do PPPoE com MAC parecido.'))
+      + '<div class="inline-form">' + (o.client ? '<button type="button" class="btn" data-act="openclient">Abrir cliente no ISP_Auxiliar</button>' : '<input id="f-login" placeholder="Login do cliente" aria-label="Login do cliente"><button type="button" class="btn pri" data-act="link">Vincular cliente</button>') + '</div></div></section>'
+      + (hiddenRows.length ? '<section><h3>Dados fora da tabela</h3><div class="rows">' + hiddenRows.map(r => '<div><span>' + r[1] + '</span><span>' + r[2] + '</span></div>').join('') + '</div></section>' : '')
+      + '<section><h3>Log</h3>' + timeline(o) + '</section>'
+      + '</div>';
+    showPanel(html, 'Ficha da ONU');
+  }
+  function closeDrawer() { $('#drawer').classList.remove('on'); current = null; currentGrp = null; state.selected = null; markSelected(); }
+
+  // ---------- busca global ----------
+  const q = $('#q'), res = $('#results');
+  let hits = [], sel = 0;
+  function search(text) {
+    const t = text.trim().toLowerCase(); hits = [];
+    if (!t) return;
+    const hex = t.replace(/[^0-9a-f]/g, '');
+    const m = t.match(/^(?:pon\s*)?([1-4])$/) || t.match(/pon\s*([1-4])/);
+    if (m) hits.push({ type: 'pon', v: 'pon:' + m[1], t: 'PON ' + m[1], s: m[1] === '4' ? 'nenhuma ONU viva, 10 registros antigos' : onus.filter(o => o.pon === +m[1]).length + ' ONUs na OLT-001' });
+    if ('olt-001 olt hioso ha7004s 192.168.0.89'.includes(t)) hits.push({ type: 'pon', v: 'olt', t: 'OLT-001, Hioso HA7004S', s: '192.168.0.89, 33 ONUs' });
+    if (t.includes('cto')) CTOS.forEach(c => { if (norm(c).includes(norm(t)) || norm(t) === 'cto') { const n = onus.filter(o => o.cto === c).length; hits.push({ type: 'cto', v: c, t: c, s: n ? n + ' ONUs vinculadas' : 'nenhuma ONU vinculada ainda' }); } });
+    onus.forEach(o => {
+      const macHex = o.mac.replace(/:/g, '').toLowerCase();
+      if (o.id.includes(t) || ('onu ' + o.id).includes(t) || (hex.length >= 3 && macHex.includes(hex)) || (o.client && o.client.toLowerCase().includes(t)))
+        hits.push({ type: 'onu', id: o.id, t: 'ONU ' + o.id, s: o.mac + ', PON ' + o.pon + (o.client ? ', ' + o.client : ''), mark: band(o.rx) !== 'ok' ? dbm(o.rx) + ' dBm' : '' });
+    });
+    GHOSTS.forEach(g => { const gh = byId[g[1]].mac.replace(/:/g, '').toLowerCase(); if (g[0].includes(t) || (hex.length >= 3 && gh.includes(hex))) hits.push({ type: 'onu', id: g[1], t: 'Registro antigo ' + g[0], s: 'mesmo MAC da ONU ' + g[1] + ', ignorado', grp: 'Registros antigos na OLT' }); });
+    hits = hits.slice(0, 12);
+  }
+  function drawResults() {
+    if (!q.value.trim()) { res.hidden = true; q.setAttribute('aria-expanded', 'false'); return; }
+    if (!hits.length) res.innerHTML = '<div class="res-empty">Nada encontrado para “' + esc(q.value.trim()) + '”. Tente parte do MAC, “0/2:3”, “PON 2” ou o login.</div>';
+    else {
+      let last = '', html = '';
+      hits.forEach((h, i) => {
+        const g = h.grp || (h.type === 'onu' ? 'ONUs' : (h.type === 'cto' ? 'CTOs' : 'Rede'));
+        if (g !== last) { last = g; html += '<div class="res-group">' + g + '</div>'; }
+        html += '<button type="button" class="res-item" role="option" data-hit="' + i + '" aria-selected="' + (i === sel) + '"><span class="t">' + esc(h.t) + '</span><span class="s">' + esc(h.s) + '</span>' + (h.mark ? '<span class="pill p-warn">' + h.mark + '</span>' : '') + '</button>';
+      });
+      res.innerHTML = html;
+    }
+    res.hidden = false; q.setAttribute('aria-expanded', 'true');
+  }
+  function focusArea(pon, cto) {
+    state.pon = pon; state.cto = cto || 'all'; state.status = 'all';
+    if (!grouped) { grouped = true; saveCols(); }
+    render(); $('.panel').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  function pick(i) {
+    const h = hits[i]; if (!h) return;
+    res.hidden = true; q.setAttribute('aria-expanded', 'false');
+    if (h.type === 'onu') { openOnu(h.id); const r = document.querySelector('tr.leaf[data-onu="' + h.id + '"]'); if (r) r.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    else if (h.type === 'pon') focusArea(h.v);
+    else if (h.type === 'cto') focusArea('all', h.v);
+  }
+  q.addEventListener('input', () => { sel = 0; search(q.value); drawResults(); });
+  q.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, hits.length - 1); drawResults(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); drawResults(); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(sel); }
+    else if (e.key === 'Escape') { res.hidden = true; }
+  });
+  q.addEventListener('focus', () => { if (q.value.trim()) drawResults(); });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search')) res.hidden = true;
+    if (!e.target.closest('#cols') && !e.target.closest('#cols-btn')) { $('#cols').hidden = true; $('#cols-btn').setAttribute('aria-expanded', 'false'); }
+    ['pon', 'cto'].forEach(k => { if (!e.target.closest('[data-combo="' + k + '"]') && !$('#cbl-' + k).hidden) closeCombo(k); });
+  });
+  res.addEventListener('click', e => { const b = e.target.closest('[data-hit]'); if (b) pick(+b.dataset.hit); });
+
+  // ---------- filtros ----------
+  $('#f-status').addEventListener('change', e => { state.status = e.target.value; renderSums(); renderView(); });
+  $('#cols-btn').addEventListener('click', () => { const p = $('#cols'); p.hidden = !p.hidden; $('#cols-btn').setAttribute('aria-expanded', String(!p.hidden)); if (!p.hidden) renderCols(); });
+  $('#cols').addEventListener('change', e => {
+    if (e.target.dataset.grouped !== undefined) { grouped = e.target.checked; saveCols(); return renderView(); }
+    const k = e.target.dataset.colon; if (k) { COLS[k].on = e.target.checked; saveCols(); renderView(); if (current) openOnu(current.id); }
+  });
+
+  // ---------- cliques ----------
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); q.focus(); q.select(); }
+    if (e.key === 'Escape' && (current || currentGrp) && !e.target.closest('.search') && !e.target.closest('.combo')) closeDrawer();
+    if (e.key === 'Enter' && e.target.matches('tr.leaf')) openOnu(e.target.dataset.onu, true);
+    if (e.key === 'Enter' && e.target.matches('tr.grp')) openGroup(e.target.dataset.grp, true);
+  });
+  document.body.addEventListener('click', e => {
+    const el = e.target.closest('button, a, tr.leaf, tr.grp'); if (!el) return;
+    const ds = el.dataset;
+    if (ds.cbk) return setCombo(ds.cbk, ds.cbv);
+    if (ds.clr) { state[ds.clr] = 'all'; if (ds.clr === 'pon') state.cto = state.cto; return renderView(); }
+    if (ds.close !== undefined) return closeDrawer();
+    if (ds.sum) { state.status = state.status === ds.sum ? 'all' : ds.sum; renderSums(); $('#f-status').value = state.status; return renderView(); }
+    if (ds.sortcol) {
+      if (state.sortKey !== ds.sortcol) { state.sortKey = ds.sortcol; state.sortDir = 1; }
+      else if (state.sortDir === 1) state.sortDir = -1; else { state.sortKey = null; state.sortDir = 0; }
+      return renderView();
+    }
+    if (ds.tg) { state.open[ds.tg] = !state.open[ds.tg]; return renderView(); }
+    if (ds.all !== undefined) {
+      if (ds.all === '1') { state.open = { olt: true, p4: true }; [1, 2, 3].forEach(p => { state.open['p' + p] = true; onus.filter(x => x.pon === p).forEach(x => state.open['p' + p + ':' + (x.cto || '—')] = true); }); }
+      else state.open = { olt: true };
+      return renderView();
+    }
+    if (ds.colmove) { const i = colOrder.indexOf(ds.colmove), j = i + +ds.dir; if (j >= 0 && j < colOrder.length) { [colOrder[i], colOrder[j]] = [colOrder[j], colOrder[i]]; saveCols(); renderCols(); renderView(); } return; }
+    if (ds.colreset !== undefined) { colOrder = DEFAULT_ORDER.slice(); Object.keys(COLS).forEach(k => COLS[k].on = DEFAULT_ON.includes(k)); grouped = true; saveCols(); renderCols(); return renderView(); }
+    if (ds.colclose !== undefined) { $('#cols').hidden = true; $('#cols-btn').setAttribute('aria-expanded', 'false'); return; }
+    if (ds.gopon) return focusArea(ds.gopon);
+    if (ds.gocto) return focusArea('pon:' + ds.p, ds.gocto);
+    if (el.tagName === 'TR' && ds.onu) return openOnu(ds.onu, true);
+    if (el.tagName === 'TR' && ds.grp) return openGroup(ds.grp, true);
+    if (ds.opengrp) return openGroup(ds.opengrp);
+    if (ds.openonu) return openOnu(ds.openonu);
+    if (ds.kind && current) { current.kind = ds.kind; toast('Tipo marcado como ' + ds.kind.toUpperCase() + ' (simulação)'); return openOnu(current.id); }
+    if (ds.refresh) {
+      const label = el.textContent; el.disabled = true; el.textContent = 'Atualizando…';
+      setTimeout(() => {
+        el.disabled = false; el.textContent = label;
+        if (ds.refresh === 'onu' && current) { current.updated = 'agora'; const u = $('#dr-upd'); if (u) u.textContent = 'Última leitura agora (simulada)'; toast('ONU ' + current.id + ' atualizada (simulação)'); }
+        else toast('PON ' + (ds.p || '') + ' atualizada (simulação)');
+      }, ds.refresh === 'onu' ? 1200 : 2000);
+      return;
+    }
+    if (ds.act === 'link' && current) {
+      const v = ($('#f-login').value || '').trim();
+      if (!v) { $('#f-login').focus(); return toast('Digite o login do cliente'); }
+      current.client = v; toast('Cliente ' + v + ' vinculado à ONU ' + current.id + ' (simulação)'); render(); return openOnu(current.id);
+    }
+    if (ds.act === 'cto') { const b = $('#cto-box'); if (b) { b.hidden = false; $('#f-cto').focus(); } return; }
+    if (ds.act === 'savecto' && current) {
+      const v = $('#f-cto').value;
+      if (current.cto !== v) { const used = onus.filter(x => x.cto === v && x !== current).map(x => x.ctoPort); let p = 1; while (used.includes(p)) p++; current.ctoPort = p <= CTO_PORTS ? p : null; current.ctoEx = false; }
+      current.cto = v; state.open['p' + current.pon + ':' + current.cto] = true; toast('CTO ' + current.cto + ' definida para a ONU ' + current.id + ' (simulação)'); render(); return openOnu(current.id); }
+    if (ds.act === 'interv' && current) return toast('Intervenção registrada na ONU ' + current.id + ': alertas silenciados por 24 h (simulação)');
+    if (ds.act === 'openclient') return toast('Abriria o cadastro do cliente no ISP_Auxiliar');
+  });
+
+  // ---------- tema e altura do topo ----------
+  const themeBtn = $('#theme');
+  function setThemeLabel() { const t = document.documentElement.dataset.theme; themeBtn.textContent = t === 'dark' ? 'Tema escuro' : (t === 'light' ? 'Tema claro' : 'Tema do sistema'); }
+  themeBtn.addEventListener('click', () => {
+    const r = document.documentElement, t = r.dataset.theme;
+    if (!t) r.dataset.theme = 'dark'; else if (t === 'dark') r.dataset.theme = 'light'; else delete r.dataset.theme;
+    try { r.dataset.theme ? localStorage.setItem('tema', r.dataset.theme) : localStorage.removeItem('tema'); } catch (e) {}
+    setThemeLabel();
+  });
+  try { const s = localStorage.getItem('tema'); if (s === 'dark' || s === 'light') document.documentElement.dataset.theme = s; } catch (e) {}
+  setThemeLabel();
+  const setTop = () => document.documentElement.style.setProperty('--top-h', document.querySelector('.top').offsetHeight + 'px');
+  setTop(); window.addEventListener('resize', setTop);
+
+  render();
+})();
+</script>
+</body>
+</html>

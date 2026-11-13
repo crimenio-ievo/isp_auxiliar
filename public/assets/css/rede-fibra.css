@@ -97,3 +97,14 @@
 
 /* Mantém hidden acima dos layouts grid/flex da tela. */
 .rf [hidden] { display: none !important; }
+.rf-signal { display:inline-block; position:relative; width:78px; height:12px; margin-right:8px; background:linear-gradient(to right,#edf0f2 32%,#fff 32%,#fff 34%,#edf0f2 34%,#edf0f2 65%,#fff 65%,#fff 67%,#edf0f2 67%); border-radius:4px; overflow:hidden; vertical-align:middle; }
+.rf-signal__fill { display:block;height:100%; }
+.rf-signal::after { content:'';position:absolute;inset:0;background:linear-gradient(to right,transparent 32%,#fff 32%,#fff 34%,transparent 34%,transparent 65%,#fff 65%,#fff 67%,transparent 67%); }
+.rf-group-counts { float:right; display:inline-flex;gap:6px; }
+.rf-row--site,.rf-row--eqp,.rf-row--pon { cursor:pointer; }
+.rf-toggle::before { display:inline-grid;place-items:center;min-width:32px;min-height:32px; }
+.rf-stacked { display:flex; width:100%;height:14px;border-radius:6px;overflow:hidden;background:var(--surface-muted); }
+.rf-stacked span { height:100%; }
+.rf-group-counts { float:none; margin-left:12px; vertical-align:middle; }
+.rf-row--site td { border-top:2px solid var(--border); }
+.rf-row--eqp td { border-top:1px solid var(--border); }

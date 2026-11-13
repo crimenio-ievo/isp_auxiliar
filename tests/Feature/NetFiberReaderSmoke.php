@@ -110,7 +110,9 @@ try {
     $pdo->exec("INSERT INTO net_onu_events (onu_id,event_type,occurred_at) VALUES (6,'down','{$ago(10800)}'),(6,'up','{$ago(9900)}')");
 
     $reader = new NetFiberReader($pdo);
+    $pdo->exec("UPDATE map_nodes SET attrs_json='{\"fabricante\":\"Marca teste\",\"modelo\":\"Modelo teste\",\"credential_ref\":\"NAO_EXIBIR\"}' WHERE id=42");
     $t = $reader->tree($providerId);
+    $check($t['dispositivos'][0]['modelo'] === ['fabricante'=>'Marca teste','modelo'=>'Modelo teste'] && !str_contains(json_encode($t), 'NAO_EXIBIR'), 'API usa fabricante/modelo do mapa e nunca expoe credential_ref');
     $check(count($t['dispositivos']) === 2 && $t['dispositivos'][0]['nome'] === 'OLT-TESTE' && $t['dispositivos'][0]['ultimo_resultado'] === 'ok', 'arvore: so os equipamentos do provedor (OLT com site primeiro, sem site depois)');
     $d0 = $t['dispositivos'][0]; $d1 = $t['dispositivos'][1];
     $check($d0['tecnologia'] === 'epon' && $d0['tipo_no'] === 'olt' && $d0['site'] === ['id' => 41, 'nome' => 'SITE-TESTE', 'tipo' => 'pop'], 'equipamento: tecnologia do perfil, tipo do no e site (pop pai)');
@@ -138,7 +140,7 @@ try {
     $sortKeys = static function (string $csv): string { $x = explode(',', $csv); sort($x); return implode(',', $x); };
     $keys = static function (array $a): string { $x = array_keys($a); sort($x); return implode(',', $x); };
     $check($keys($t) === $sortKeys('gerado_em,dispositivos,resumo,limiares,fontes'), 'chaves da arvore');
-    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site,saude'), 'chaves do equipamento (as atuais + tecnologia, tipo_no, site e saude)');
+    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,modelo,ip,site,saude'), 'chaves do equipamento (as atuais + tecnologia, tipo_no, site e saude)');
     $check($keys($pons[0]) === $sortKeys('pon_index,label,onus,total,online'), 'chaves da PON');
     $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
     $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo,sem_resposta'), 'chaves do resumo');

@@ -16,11 +16,11 @@ const onu = (id, idx, pon, status, rx, band, extra) => Object.assign({id, pon_in
   distancia_origem: status === 'online' ? 'estimada pelo RTT' : null, cliente: null, cto: null, quedas_24h: 0, ultima_queda_em: null}, extra || {});
 const tree = {
   gerado_em: '2026-11-13 12:00:00',
-  dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: 'epon', tipo_no: 'olt', site: {id: 8, nome: 'Site-A', tipo: 'pop'}, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: [
+  dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: 'epon', modelo: {}, ip: '198.51.100.1', tipo_no: 'olt', site: {id: 8, nome: 'Site-A', tipo: 'pop'}, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: [
     {pon_index: 1, label: 'PON 1', total: 3, online: 2, onus: [onu(1, 1, 1, 'online', -20.0, 'ok', {quedas_24h: 1, ultima_queda_em: '2026-11-13 10:00:00'}), onu(2, 2, 1, 'online', -26.0, 'atencao'), onu(3, 3, 1, 'offline', -21.0, 'ok')]},
     {pon_index: 2, label: 'PON 2', total: 1, online: 1, onus: [onu(4, 1, 2, 'online', null, 'unknown')]},
     {pon_index: 3, label: 'PON 3', total: 0, online: 0, onus: []}]},
-    {id: 2, nome: 'SW-1', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: null, tipo_no: 'switch', site: null, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: []}],
+    {id: 2, nome: 'SW-1', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: null, modelo: {}, ip: '198.51.100.2', tipo_no: 'switch', site: null, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: []}],
   resumo: {onus: 4, online: 3, offline: 1, desconhecido: 0, atencao: 1, critico: 0, saturado: 0, sem_sinal: 1, quedas_24h: 1, sem_vinculo: 4, sem_resposta: 0},
   limiares: {saturado_dbm: -8, atencao_dbm: -25, critico_dbm: -27, desvio_db: 3},
   fontes: {quedas_poll: true, quedas_log: false, vinculo_cliente: false, cto: false, sinal_na_olt: false}
@@ -38,7 +38,7 @@ const sheet = (over) => Object.assign({
 
 // Mesmas listas de chaves de tests/Feature/NetFiberReaderSmoke.php: se a API mudar, os dois testes devem mudar juntos.
 const K = {
-  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site,saude',
+  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,modelo,ip,site,saude',
   pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em',
   sheet: 'onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
   sheetOnu: 'baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto',
@@ -128,10 +128,18 @@ async function boot(opts) {
   ok(t.q('#rf-summary').textContent.indexOf('gerado em 13/11 09:00') !== -1, 'resumo: gerado em horario de Brasilia');
   ok(t.qa('.rf-row--onu')[0].textContent.indexOf('13/11 07:00') !== -1, 'coluna Quedas 24 h: 10:00 UTC = 07:00');
 
+  const groupRow=t.q('.rf-row--eqp');
+  groupRow.querySelector('.rf-group-label').click();
+  ok(!t.q('#rf-panel').hidden && t.q('#rf-p-body').textContent.includes('CPU: ainda não lido') && t.q('#rf-p-body a').target==='_blank', 'painel equipamento usa dados e link externo');
+  groupRow.querySelector('.rf-group-label').click(); ok(t.q('#rf-panel').hidden, 'segundo clique fecha grupo');
+  t.q('.rf-row--pon .rf-group-label').click();
+  ok(t.q('#rf-p-body button[disabled]').title==='leitura sob demanda ainda não disponível' && t.q('#rf-p-body').textContent.includes('Mediana'), 'painel PON mediana e atualização desativada');
+  t.q('#rf-p-close').click();
+  ok(t.qa('.rf-signal').length===4 && t.qa('.rf-group-counts').length>0, 'barras e contagens na árvore');
   // Ficha
   t.q('.rf-row--onu').click(); await wait(30);
   ok(t.calls.some(u => /\/api\/rede-fibra\/onu\?id=1&periodo=7d$/.test(u)), 'abrir ficha chama a API com periodo 7d');
-  ok(!t.q('#rf-panel').hidden && t.q('#rf-p-title').textContent === 'ONU 1 · PON 1' && t.q('#rf-p-sub').textContent.indexOf('00:2E:C7:00:00:01') === 0, 'painel lateral com a ONU');
+  ok(!t.q('#rf-panel').hidden && t.q('#rf-p-title').textContent === 'ONU 1 · PON 1 · ONU ou ONT: a identificar' && t.q('#rf-p-sub').textContent.indexOf('00:2E:C7:00:00:01') === 0, 'painel lateral com a ONU');
   const body = t.q('#rf-p-body').textContent;
   ok(body.indexOf('ainda não lido') !== -1 && body.indexOf('sem vínculo') !== -1 && body.indexOf('≈ 22,64 km (estimada pelo RTT)') !== -1 && body.indexOf('-26,00 dBm (3 ONUs, diferença +6,00 dB)') !== -1, 'ficha: sinal na OLT/CTO "ainda nao lido", cliente "sem vinculo", mediana dos vizinhos');
   ok(t.qa('.rf-ruler__z').length === 3 && t.qa('.rf-ruler__mark').length === 3 && t.q('.rf-ruler__scale').textContent.indexOf('-30') !== -1 && t.q('.rf-ruler__scale').textContent.indexOf('-12') !== -1, 'regua de -30 a -12 com 3 faixas e 3 marcas');
