@@ -59,6 +59,7 @@ async function boot(opts) {
   const calls = [];
   const dom = new JSDOM(html, {runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc, url: 'http://localhost/rede-fibra'});
   const w = dom.window;
+  const style = w.document.createElement('style'); style.textContent = fs.readFileSync(path.join(root, 'public/assets/css/rede-fibra.css'), 'utf8'); w.document.head.appendChild(style);
   const treeData = opts.tree ? opts.tree(JSON.parse(JSON.stringify(tree))) : tree;
   w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/eventos') !== -1 ? (opts.events ? opts.events(u) : events([evGroup()])) : u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
     return Promise.resolve({ok: !status, status: status || 200, json: () => Promise.resolve(body)}); };
@@ -163,13 +164,20 @@ async function boot(opts) {
   const btn = txt => t.qa('#rf-p-body .rf-periods button').filter(b => b.textContent === txt)[0];
   btn('1 h').click(); await wait(30); ok(/periodo=1h$/.test(t.calls[t.calls.length - 1]), 'periodo 1 h');
   btn('1 semana').click(); await wait(30); ok(/periodo=7d$/.test(t.calls[t.calls.length - 1]), 'periodo 1 semana');
-  btn('Personalizado').click(); await wait(10); ok(!!t.q('#rf-c-from') && !!t.q('#rf-c-to'), 'personalizado mostra os campos de data');
+  const beforeCustom = t.calls.length;
+  btn('Personalizado').click(); await wait(10); ok(!!t.q('#rf-c-from') && !!t.q('#rf-c-to') && t.calls.length === beforeCustom, 'personalizado só mostra campos, sem consulta');
   t.q('#rf-c-from').value = '2026-11-12T08:00'; t.q('#rf-c-to').value = '2026-11-13T09:30'; [...t.qa('.rf-custom button')][0].click(); await wait(30);
   ok(/periodo=custom&de=2026-11-12T11%3A00&ate=2026-11-13T12%3A30$/.test(t.calls[t.calls.length - 1]), 'personalizado: 08:00 e 09:30 de Brasilia enviados como 11:00 e 12:30 UTC (' + t.calls[t.calls.length - 1] + ')');
   t.q('#rf-c-from').value = '2026-11-12T23:30'; t.q('#rf-c-to').value = ''; [...t.qa('.rf-custom button')][0].click(); await wait(30);
   ok(/periodo=custom&de=2026-11-13T02%3A30$/.test(t.calls[t.calls.length - 1]), 'personalizado: 23:30 de Brasilia vira 02:30 UTC do dia seguinte, sem fim (' + t.calls[t.calls.length - 1] + ')');
   ok(t.q('#rf-c-from').value === '2026-11-12T23:30', 'campo mostra o que o usuario digitou (Brasilia)');
   function parse(s) { return new Date(s.replace(' ', 'T') + 'Z').getTime(); }
+  let blankCustom = await boot(); blankCustom.q('.rf-row--onu').click(); await wait(30);
+  blankCustom.qa('#rf-p-body .rf-periods button').find(b => b.textContent === 'Personalizado').click();
+  blankCustom.qa('.rf-row--onu')[1].click(); await wait(30);
+  ok(/id=2&periodo=7d$/.test(blankCustom.calls.at(-1)), 'nova ONU com custom vazio volta a semana');
+  blankCustom.q('#rf-p-close').click();
+  ok(blankCustom.w.getComputedStyle(blankCustom.q('#rf-panel')).display === 'none' && !blankCustom.q('.rf-layout').classList.contains('has-panel'), 'fechar remove painel do layout por estilo computado');
 
   // Estavel e em aberto
   let e = await boot({sheet: () => sheet({quedas: [], quedas_serie: [], ultimas_quedas: [], estavel: true, estavel_texto: 'Sem queda registrada no período (estável).', quedas_total: {quedas: 0, em_aberto: 0, downtime_no_periodo_s: 0, por_motivo: {}, do_log: 0, do_poll: 0, log_sem_onu_cadastrada: 0}, serie: {pontos: [], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00'}})});

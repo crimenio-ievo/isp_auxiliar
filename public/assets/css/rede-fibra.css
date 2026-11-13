@@ -94,3 +94,6 @@
 .rf-ev__meta { grid-column: 2; color: var(--muted); font-size: 0.8rem; }
 .rf-ev__onus { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
 .rf-ev__onus button { padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer; font: inherit; font-size: 0.78rem; color: var(--text); }
+
+/* Mantém hidden acima dos layouts grid/flex da tela. */
+.rf [hidden] { display: none !important; }

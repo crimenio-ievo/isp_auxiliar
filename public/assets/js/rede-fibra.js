@@ -209,11 +209,13 @@
 
   /* ---------- ficha ---------- */
   function openSheet(id) {
+    if (state.period === 'custom' && !state.from) { state.period = '7d'; }
     state.selected = id; renderTree(); $('rf-panel').hidden = false; document.querySelector('.rf-layout').classList.add('has-panel');
     $('rf-p-title').textContent = 'Carregando…'; $('rf-p-sub').textContent = ''; clear($('rf-p-body'));
     loadSheet();
   }
   function loadSheet() {
+    if (state.period === 'custom' && !state.from) { return Promise.resolve(); }
     var q = '?id=' + encodeURIComponent(state.selected) + '&periodo=' + encodeURIComponent(state.period);
     if (state.period === 'custom') { q += '&de=' + encodeURIComponent(brtToUtc(state.from)) + (state.to ? '&ate=' + encodeURIComponent(brtToUtc(state.to)) : ''); }
     return get(API.onu + q).then(function (d) { state.sheet = d; renderSheet(); }).catch(function (e) {

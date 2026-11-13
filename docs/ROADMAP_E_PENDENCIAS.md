@@ -96,3 +96,4 @@ Blocos da Home com estado de rede (depende de telemetria): vermelho = desconecta
 - **Etapa 7, continuidade:** linha de base isolada Feature 48/48, mapa 25/25 e net verde; cron sem lacunas >1800 s no período disponível. Mockup exigido ausente; CP-B será pulado. Evidências no handoff 7.
 - **Etapa 7 import concluído:** eventos do poll usam início do ciclo; resíduos passam na faixa autorizada baseada no cycle_ms. Dump fora do Git, 92 ocorrências importadas; repetição com 0 novas/divergentes. Oito pares do poll cobertos, sem dupla contagem. Evidências no handoff 7.
 - **Etapa 7, caminho até site:** auditoria SELECT e proposta de grafo/API em `docs/rede-caminho-ate-site.md`; sem mudança de topologia ou implementação da API.
+- **Etapa 7 CP-A:** painel hidden corrigido e custom sem datas protegido; suíte net verde, incluindo regressões dos dois casos.

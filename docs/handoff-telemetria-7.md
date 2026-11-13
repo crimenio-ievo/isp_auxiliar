@@ -17,3 +17,6 @@ Comparação em mesmo instante congelado: `resumo.quedas_24h` da árvore 6 → 1
 
 ## Passo 3
 Auditoria SELECT registrada em `docs/rede-caminho-ate-site.md`: 1 POP, 1 OLT, 2 CTOs, 3 ligações de fibra; sem rádio/splitter/DIO. Grafo entre nós existe, continuidade óptica completa não é comprovável; duas ligações sem portas. Proposta de API somente leitura com ambiguidades explícitas, sem código de caminho implementado.
+
+## CP-A
+Fato: `[hidden]` vence os layouts grid/flex da tela; personalizado vazio não consulta e abrir outra ONU nesse estado volta para 7 dias. Suíte net: 42/90/102 verificações, zero falhas; jsdom confere estilo computado do painel fechado. Zoom/navegador real ainda não conferidos.
