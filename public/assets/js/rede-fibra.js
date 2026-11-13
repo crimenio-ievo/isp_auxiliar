@@ -18,7 +18,7 @@
   var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
   var SITE_LABEL = { pop: 'POP', tower: 'Torre' };
   var STATUS = { online: 'Online', offline: 'Offline', unknown: 'Desconhecido' };
-  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '24h', from: '', to: '', sheet: null, evPeriod: '24h' };
+  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '7d', from: '', to: '', sheet: null, evPeriod: '24h' };
 
   function loadCols() {
     try { var v = JSON.parse(window.localStorage.getItem('rf.cols') || 'null'); if (Array.isArray(v)) { return v; } } catch (e) { /* sem storage */ }
@@ -263,10 +263,6 @@
     row('Última leitura', fmtDT(o.rx_medido_em));
     body.appendChild(g);
 
-    var cb = el('div', 'rf-chartbar'); cb.appendChild(el('h3', '', 'Sinal e quedas, 7 dias'));
-    var big = el('button', '', 'Ampliar'); big.type = 'button'; big.addEventListener('click', function () { openModal(); }); cb.appendChild(big); body.appendChild(cb);
-    var ch = el('div', 'rf-chart'); ch.id = 'rf-p-chart'; body.appendChild(ch); drawChart(ch, d, false);
-
     var pr = el('div'); pr.appendChild(el('h3', '', 'Quedas'));
     var per = el('div', 'rf-periods');
     [['1h', '1 h'], ['24h', '24 h'], ['7d', '1 semana'], ['custom', 'Personalizado']].forEach(function (p) {
@@ -281,6 +277,12 @@
       go.addEventListener('click', function () { state.from = a.value; state.to = b2.value; if (!state.from) { return; } loadSheet(); });
       c.appendChild(el('span', '', 'de')); c.appendChild(a); c.appendChild(el('span', '', 'até')); c.appendChild(b2); c.appendChild(go); pr.appendChild(c);
     }
+    body.appendChild(pr);
+    var cb = el('div', 'rf-chartbar'); cb.appendChild(el('h3', '', 'Sinal e quedas'));
+    var big = el('button', '', 'Ampliar'); big.type = 'button'; big.addEventListener('click', function () { openModal(); }); cb.appendChild(big); body.appendChild(cb);
+    var ch = el('div', 'rf-chart'); ch.id = 'rf-p-chart'; body.appendChild(ch); drawChart(ch, d, false);
+    body.appendChild(el('p', 'rf-legend', 'O sinal é gravado quando muda mais de 1 dB e uma vez por dia.'));
+    pr = el('div'); pr.appendChild(el('h3', '', 'Quedas'));
     var tot = d.quedas_total;
     pr.appendChild(el('p', 'rf-legend', 'Período (horário de Brasília): ' + fmtDT(d.periodo.from) + ' a ' + fmtDT(d.periodo.to) + ' · ' + tot.quedas + ' queda(s)' + (tot.em_aberto ? ' (' + tot.em_aberto + ' em aberto)' : '')));
     if (d.estavel) { pr.appendChild(el('p', 'rf-note', d.estavel_texto)); } else { pr.appendChild(outageRows(d.quedas, 8)); }
@@ -294,11 +296,11 @@
   /* ---------- gráfico ---------- */
   function drawChart(box, d, big) {
     clear(box);
-    var W = 720, H = big ? 400 : 210, ml = 44, mr = 10, mt = 10, mb = 24, S = d.serie_7d;
+    var W = 720, H = big ? 400 : 210, ml = 44, mr = 10, mt = 10, mb = 24, S = d.serie;
     var t0 = parse(S.de), t1 = parse(S.ate), pts = S.pontos.map(function (p) { return { t: parse(p.t), s: p.t, v: p.rx }; });
     function X(t) { return ml + (Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0) * (W - ml - mr); }
     function Y(v) { return mt + (YMAX - Math.max(YMIN, Math.min(YMAX, v))) / (YMAX - YMIN) * (H - mt - mb); }
-    var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Sinal da ONU nos últimos 7 dias, com as quedas como faixas verticais' });
+    var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Sinal da ONU no período selecionado, com as quedas como faixas verticais' });
     var L = d.limiares;
     [[YMIN, L.critico_dbm, '#f6d8d5'], [L.critico_dbm, L.atencao_dbm, '#fbefc7'], [L.atencao_dbm, YMAX, '#e6f4ea']].forEach(function (z) {
       s.appendChild(svg('rect', { x: ml, y: Y(z[1]), width: W - ml - mr, height: Y(z[0]) - Y(z[1]), fill: z[2] }));
@@ -307,9 +309,10 @@
       s.appendChild(svg('line', { x1: ml, x2: W - mr, y1: Y(v), y2: Y(v), stroke: '#c9d3dc', 'stroke-width': 1 }));
       var tx = svg('text', { x: ml - 5, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#617587' }); tx.textContent = String(v); s.appendChild(tx);
     });
-    for (var h = Math.ceil(t0 / 3600000) * 3600000; h <= t1; h += 3600000) {
-      var hp = parts(fmtParts, h); if (hp.hour !== '00') { continue; }
-      var tx2 = svg('text', { x: X(h), y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: '#617587' }); tx2.textContent = fmtDay(h); s.appendChild(tx2);
+    var span = t1 - t0, step = state.period === '1h' ? 600000 : state.period === '24h' ? 14400000 : state.period === '7d' ? 86400000 : span <= 7200000 ? 600000 : span <= 172800000 ? 14400000 : span <= 1209600000 ? 86400000 : Math.ceil(span / 6 / 86400000) * 86400000;
+    for (var h = Math.ceil((t0 - 10800000) / step) * step + 10800000; h <= t1; h += step) {
+      var tx2 = svg('text', { x: X(h), y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: '#617587' });
+      tx2.textContent = step < 86400000 ? fmtMs(h).slice(-5) : fmtDay(h); s.appendChild(tx2);
     }
     var outs = d.quedas_serie.map(function (q) { return { a: parse(q.started_at), b: q.ended_at ? parse(q.ended_at) : t1, q: q }; });
     outs.forEach(function (o) {
@@ -317,7 +320,7 @@
       var tt = svg('title'); tt.textContent = 'Queda ' + fmtDT(o.q.started_at) + ' · ' + o.q.reason; r.appendChild(tt); s.appendChild(r);
     });
     if (!pts.length) {
-      var nt = svg('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', 'font-size': 13, fill: '#617587' }); nt.textContent = 'Sem leituras de sinal nos últimos 7 dias'; s.appendChild(nt);
+      var nt = svg('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', 'font-size': 13, fill: '#617587' }); nt.textContent = 'Sem leituras no período'; s.appendChild(nt);
     } else {
       var path = 'M' + X(pts[0].t) + ' ' + Y(pts[0].v);
       for (var i = 1; i < pts.length; i++) { path += ' H' + X(pts[i].t) + ' V' + Y(pts[i].v); }

@@ -143,29 +143,31 @@ try {
     $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
     $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo,sem_resposta'), 'chaves do resumo');
     $fk = $reader->sheet($providerId, 1);
-    $check($keys($fk) === $sortKeys('onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto'), 'chaves da ficha');
+    $check($keys($fk) === $sortKeys('onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto'), 'chaves da ficha');
     $check($keys($fk['onu']) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto'), 'chaves da ONU na ficha');
     $check($keys($fk['quedas'][0]) === $sortKeys('onu_id,onu_identifier_mascarado,source,precisao,category,maintenance_reason,started_at,ended_at,open,duration_s,downtime_in_period_s,cause,reason'), 'chaves da queda');
 
     // Ficha.
-    $f = $reader->sheet($providerId, 1);
+    $f = $reader->sheet($providerId, 1, '7d');
     $check($f['onu']['rx_dbm'] === -20.0 && $f['onu']['baseline_dbm'] === -20.5 && $f['onu']['olt_rx_dbm'] === null && $f['onu']['olt_rx_texto'] === 'ainda não lido', 'ficha: sinal atual, referencia e sinal na OLT ainda nao lido');
     $check($f['vizinhos'] === ['mediana_dbm' => -26.0, 'quantidade' => 3, 'diferenca_db' => 6.0], 'mediana dos vizinhos da PON (sem a propria ONU, so online com leitura)');
-    $pts = $f['serie_7d']['pontos'];
-    $check(count($pts) === 4 && $pts[0]['rx'] === -20.0 && $pts[3]['t'] === $pts[3]['t'] && end($pts)['rx'] === -20.0 && $pts === array_values($pts) && array_column($pts, 't') === (function ($c) { sort($c); return $c; })(array_column($pts, 't')), 'serie de 7 dias ordenada, sem a amostra de 8 dias, com a leitura atual');
+    $pts = $f['serie']['pontos'];
+    $check(count($pts) === 5 && $pts[0]['rx'] === -19.0 && $pts[0]['anterior'] === true && $pts[0]['t'] === $f['periodo']['from'] && end($pts)['rx'] === -20.0 && array_column($pts, 't') === (function ($c) { sort($c); return $c; })(array_column($pts, 't')), 'serie inclui anterior na borda e amostras do periodo');
     $check(count($f['quedas']) === 1 && $f['quedas'][0]['reason'] === 'Queda de energia (Dying Gasp)' && $f['quedas'][0]['duration_s'] === 600 && $f['estavel'] === false && $f['estavel_texto'] === null, 'ficha: queda do periodo com motivo e duracao');
     $check($f['cliente'] === null && $f['cliente_texto'] === 'sem vínculo' && $f['cto'] === null && $f['cto_texto'] === 'ainda não lido', 'ficha: cliente e CTO');
     $check(!str_contains(strtolower((string) json_encode($f)), 'fibra'), 'nunca afirma fibra');
     $f1 = $reader->sheet($providerId, 1, '1h');
+    $check($f1['serie']['de'] === $f1['periodo']['from'] && $f1['serie']['ate'] === $f1['periodo']['to'] && ($f1['serie']['pontos'][0]['anterior'] ?? false) === true && $f1['serie']['pontos'][0]['t'] === $f1['periodo']['from'], 'serie de 1h inclui anterior na borda');
     $check($f1['quedas'] === [] && $f1['estavel'] === true && $f1['estavel_texto'] === 'Sem queda registrada no período (estável).' && count($f1['ultimas_quedas']) === 1, 'sem registro no periodo = estavel; ultimas quedas (30 d) continuam');
     $f7 = $reader->sheet($providerId, 6, '7d');
     $check(count($f7['quedas']) === 1 && $f7['quedas'][0]['source'] === 'poll' && $f7['quedas'][0]['reason'] === 'Detectada pelo poll, motivo não informado', 'ficha: queda so do poll, motivo nao informado');
     $fc = $reader->sheet($providerId, 1, 'custom', $ago(7800), $ago(6000));
+    $check($fc['serie']['de'] === $ago(7800) && $fc['serie']['ate'] === $ago(6000) && count($fc['serie']['pontos']) === 1 && ($fc['serie']['pontos'][0]['anterior'] ?? false), 'periodo historico nao inclui leitura atual posterior');
     $check(count($fc['quedas']) === 1 && $fc['periodo']['kind'] === 'custom', 'periodo personalizado');
     try { $reader->sheet($providerId, 1, 'custom', $now, $ago(100)); $check(false, 'periodo invertido aceito'); } catch (InvalidArgumentException $e) { $check(true, 'periodo personalizado invertido rejeitado'); }
     $check($reader->sheet($providerId, 999) === null && $reader->sheet($providerId, 8) === null && $reader->sheet($providerId, 7) === null, 'ONU inexistente, de outro provedor ou removida = null');
     $f5 = $reader->sheet($providerId, 5);
-    $check($f5['vizinhos']['mediana_dbm'] === null && $f5['onu']['rx_dbm'] === null && $f5['serie_7d']['pontos'] === [], 'ONU sem leitura: sem mediana e sem serie');
+    $check($f5['vizinhos']['mediana_dbm'] === null && $f5['onu']['rx_dbm'] === null && $f5['serie']['pontos'] === [], 'ONU sem leitura: sem mediana e sem serie');
 
     // Saude da coleta (CP2): ok / atrasada / falha / sem_leitura, sem afirmar a causa.
     $check($d0['saude'] === ['estado' => 'ok', 'minutos' => 0, 'limite_s' => 1200] && $d1['saude']['estado'] === 'sem_leitura' && $d1['saude']['minutos'] === null, 'saude: ok com leitura recente; sem_leitura quando nunca houve');

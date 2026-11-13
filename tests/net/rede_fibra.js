@@ -30,7 +30,7 @@ const sheetOnu = () => { const o = onu(1, 1, 1, 'online', -20.0, 'ok'); delete o
 const sheet = (over) => Object.assign({
   onu: Object.assign(sheetOnu(), {baseline_dbm: -20.5, baseline_desde: '2026-11-12 00:00:00', baseline_amostras: 5, olt_rx_dbm: null, olt_rx_texto: 'ainda não lido'}),
   vizinhos: {mediana_dbm: -26.0, quantidade: 3, diferenca_db: 6.0},
-  serie_7d: {pontos: [{t: '2026-11-07 12:00:00', rx: -20.0}, {t: '2026-11-10 12:00:00', rx: -22.5}, {t: '2026-11-13 11:00:00', rx: -20.0}], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'},
+  serie: {pontos: [{t: '2026-11-07 12:00:00', rx: -20.0}, {t: '2026-11-10 12:00:00', rx: -22.5}, {t: '2026-11-13 11:00:00', rx: -20.0}], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'},
   periodo: {kind: '24h', from: '2026-11-12 12:00:00', to: '2026-11-13 12:00:00'}, quedas: [outage], quedas_total: {quedas: 1, em_aberto: 0, downtime_no_periodo_s: 600, por_motivo: {energia: 1}, do_log: 1, do_poll: 0, log_sem_onu_cadastrada: 0},
   quedas_serie: [outage, Object.assign({}, outage, {started_at: '2026-11-11 08:00:00', ended_at: null, open: true, duration_s: null, reason: 'Sem aviso de energia', cause: 'sem_aviso_energia'})],
   ultimas_quedas: [outage], estavel: false, estavel_texto: null, limiares: tree.limiares, fontes: {quedas_poll: true, quedas_log: true},
@@ -40,7 +40,7 @@ const sheet = (over) => Object.assign({
 const K = {
   tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site,saude',
   pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em',
-  sheet: 'onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
+  sheet: 'onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
   sheetOnu: 'baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto',
   outage: 'onu_id,onu_identifier_mascarado,source,precisao,category,maintenance_reason,started_at,ended_at,open,duration_s,downtime_in_period_s,cause,reason'
 };
@@ -124,7 +124,7 @@ async function boot(opts) {
 
   // Ficha
   t.q('.rf-row--onu').click(); await wait(30);
-  ok(t.calls.some(u => /\/api\/rede-fibra\/onu\?id=1&periodo=24h$/.test(u)), 'abrir ficha chama a API com periodo 24h');
+  ok(t.calls.some(u => /\/api\/rede-fibra\/onu\?id=1&periodo=7d$/.test(u)), 'abrir ficha chama a API com periodo 7d');
   ok(!t.q('#rf-panel').hidden && t.q('#rf-p-title').textContent === 'ONU 1 · PON 1' && t.q('#rf-p-sub').textContent.indexOf('00:2E:C7:00:00:01') === 0, 'painel lateral com a ONU');
   const body = t.q('#rf-p-body').textContent;
   ok(body.indexOf('ainda não lido') !== -1 && body.indexOf('sem vínculo') !== -1 && body.indexOf('≈ 22.64 km (estimada pelo RTT)') !== -1 && body.indexOf('-26.00 dBm (3 ONUs, diferença +6.00 dB)') !== -1, 'ficha: sinal na OLT/CTO "ainda nao lido", cliente "sem vinculo", mediana dos vizinhos');
@@ -169,9 +169,9 @@ async function boot(opts) {
   function parse(s) { return new Date(s.replace(' ', 'T') + 'Z').getTime(); }
 
   // Estavel e em aberto
-  let e = await boot({sheet: () => sheet({quedas: [], quedas_serie: [], ultimas_quedas: [], estavel: true, estavel_texto: 'Sem queda registrada no período (estável).', quedas_total: {quedas: 0, em_aberto: 0, downtime_no_periodo_s: 0, por_motivo: {}, do_log: 0, do_poll: 0, log_sem_onu_cadastrada: 0}, serie_7d: {pontos: [], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'}})});
+  let e = await boot({sheet: () => sheet({quedas: [], quedas_serie: [], ultimas_quedas: [], estavel: true, estavel_texto: 'Sem queda registrada no período (estável).', quedas_total: {quedas: 0, em_aberto: 0, downtime_no_periodo_s: 0, por_motivo: {}, do_log: 0, do_poll: 0, log_sem_onu_cadastrada: 0}, serie: {pontos: [], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'}})});
   e.q('.rf-row--onu').click(); await wait(30);
-  ok(e.q('#rf-p-body').textContent.indexOf('Sem queda registrada no período (estável).') !== -1 && e.qa('#rf-p-body .rf-outages').length === 0 && e.q('#rf-p-chart').textContent.indexOf('Sem leituras de sinal') !== -1, 'sem registro no periodo = estavel; grafico sem leituras avisa');
+  ok(e.q('#rf-p-body').textContent.indexOf('Sem queda registrada no período (estável).') !== -1 && e.qa('#rf-p-body .rf-outages').length === 0 && e.q('#rf-p-chart').textContent.indexOf('Sem leituras no período') !== -1, 'sem registro no periodo = estavel; grafico sem leituras avisa');
   let a = await boot({sheet: () => sheet({quedas: [Object.assign({}, outage, {open: true, ended_at: null, duration_s: null})]})});
   a.q('.rf-row--onu').click(); await wait(30); ok(a.q('#rf-p-body .rf-outages').textContent.indexOf('em aberto') !== -1, 'queda em aberto na lista');
 

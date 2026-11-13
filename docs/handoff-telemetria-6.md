@@ -12,3 +12,6 @@
 
 ## CP-A — layout
 Fato: eventos após árvore/ficha, cinco inicialmente e botão até 20; árvore com altura útil e rolagem, breakpoint 1100 px. `tests/net/run_all.sh`: 0 falhas, 42/88/97 verificações. Aparência real não verificada.
+
+## CP-B — período único
+Fato: seletor padrão 7 dias antes do gráfico; API `serie` limitada ao período com amostra anterior marcada e posicionada no início, gráfico e quedas do mesmo período, eixo no horário de Brasília; últimas quedas preservadas. Suíte net: 42/90/97, zero falhas. Aparência real não verificada.

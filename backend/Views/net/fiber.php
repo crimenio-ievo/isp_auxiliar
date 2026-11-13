@@ -70,7 +70,7 @@ ob_start();
 
     <div class="rf-modal" id="rf-modal" hidden role="dialog" aria-modal="true" aria-label="Gráfico de sinal ampliado">
         <div class="rf-modal__box">
-            <div class="rf-panel__head"><h2>Sinal da ONU, 7 dias</h2><button type="button" class="rf-x" id="rf-m-close" aria-label="Fechar">×</button></div>
+            <div class="rf-panel__head"><h2>Sinal da ONU no período</h2><button type="button" class="rf-x" id="rf-m-close" aria-label="Fechar">×</button></div>
             <div id="rf-m-chart" class="rf-chart rf-chart--big"></div>
         </div>
     </div>

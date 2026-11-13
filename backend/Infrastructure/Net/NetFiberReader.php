@@ -198,20 +198,20 @@ final class NetFiberReader
         $c = count($neigh);
         $median = $c === 0 ? null : ($c % 2 === 1 ? $neigh[intdiv($c, 2)] : ($neigh[$c / 2 - 1] + $neigh[$c / 2]) / 2);
 
-        // Série de 7 dias (amostras por mudança relevante e 1 por dia) + leitura atual.
-        $since = gmdate('Y-m-d H:i:s', strtotime($now . ' UTC') - self::SERIES_DAYS * 86400);
-        $st = $this->pdo->prepare('SELECT sampled_at, onu_rx_dbm FROM net_onu_power_samples WHERE onu_id = ? AND sampled_at >= ? AND onu_rx_dbm IS NOT NULL ORDER BY sampled_at, id');
-        $st->execute([$onuId, $since]);
-        $series = array_map(static fn (array $s): array => ['t' => $s['sampled_at'], 'rx' => (float) $s['onu_rx_dbm']], $st->fetchAll(PDO::FETCH_ASSOC));
-        if ($onu['rx_dbm'] !== null && $onu['rx_medido_em'] !== null && ($series === [] || $series[count($series) - 1]['t'] < $onu['rx_medido_em'])) {
-            $series[] = ['t' => $onu['rx_medido_em'], 'rx' => $onu['rx_dbm']];
-        }
-
         $reader = $this->outageReader($logAvailable);
         $period = $reader->period($kind, $from, $to);
         $rep = $reader->forOnu($deviceId, $onuId, $period);
         $recent = $reader->forOnu($deviceId, $onuId, $reader->period('custom', gmdate('Y-m-d H:i:s', strtotime($now . ' UTC') - 30 * 86400), $now));
-        $chart = $reader->forOnu($deviceId, $onuId, $reader->period('custom', $since, $now));
+        $st = $this->pdo->prepare('SELECT sampled_at, onu_rx_dbm FROM net_onu_power_samples WHERE onu_id = ? AND sampled_at < ? AND onu_rx_dbm IS NOT NULL ORDER BY sampled_at DESC, id DESC LIMIT 1');
+        $st->execute([$onuId, $period['from']]);
+        $prior = $st->fetch(\PDO::FETCH_ASSOC);
+        $series = $prior ? [['t' => $period['from'], 'rx' => (float) $prior['onu_rx_dbm'], 'anterior' => true]] : [];
+        $st = $this->pdo->prepare('SELECT sampled_at, onu_rx_dbm FROM net_onu_power_samples WHERE onu_id = ? AND sampled_at >= ? AND sampled_at <= ? AND onu_rx_dbm IS NOT NULL ORDER BY sampled_at, id');
+        $st->execute([$onuId, $period['from'], $period['to']]);
+        foreach ($st->fetchAll(\PDO::FETCH_ASSOC) as $sample) { $series[] = ['t' => $sample['sampled_at'], 'rx' => (float) $sample['onu_rx_dbm']]; }
+        if ($onu['rx_dbm'] !== null && $onu['rx_medido_em'] !== null && $onu['rx_medido_em'] >= $period['from'] && $onu['rx_medido_em'] <= $period['to'] && ($series === [] || $series[count($series)-1]['t'] < $onu['rx_medido_em'])) {
+            $series[] = ['t' => $onu['rx_medido_em'], 'rx' => $onu['rx_dbm']];
+        }
         $last = array_slice(array_reverse($recent['outages']), 0, 5);
 
         return [
@@ -222,11 +222,11 @@ final class NetFiberReader
                 'olt_rx_dbm' => null, 'olt_rx_texto' => 'ainda não lido',
             ],
             'vizinhos' => ['mediana_dbm' => $median === null ? null : round($median, 2), 'quantidade' => $c, 'diferenca_db' => ($median === null || $onu['rx_dbm'] === null) ? null : round($onu['rx_dbm'] - $median, 2)],
-            'serie_7d' => ['pontos' => $series, 'de' => $since, 'ate' => $now, 'amostragem' => 'por mudança acima de 1 dB e 1 leitura por dia'],
+            'serie' => ['pontos' => $series, 'de' => $period['from'], 'ate' => $period['to']],
             'periodo' => $rep['period'],
             'quedas' => $rep['outages'],
             'quedas_total' => $rep['totals'],
-            'quedas_serie' => $chart['outages'],
+            'quedas_serie' => $rep['outages'],
             'ultimas_quedas' => $last,
             'estavel' => $rep['totals']['quedas'] === 0,
             'estavel_texto' => $rep['totals']['quedas'] === 0 ? 'Sem queda registrada no período (estável).' : null,
