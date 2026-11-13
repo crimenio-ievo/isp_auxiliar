@@ -15,13 +15,18 @@ declare(strict_types=1);
 
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Net\NetCliOptions;
+use App\Infrastructure\Net\NetClockSegments;
 use App\Infrastructure\Net\OltLogParser;
 use App\Infrastructure\Net\ValueDecoder;
 
 require dirname(__DIR__) . '/backend/bootstrap/app.php';
 
 try {
-    $o = NetCliOptions::parse(array_slice($argv, 1), ['device', 'file', 'expect', 'tolerance'], []);
+    $args = array_slice($argv, 1);
+    $segments = NetClockSegments::parse(NetCliOptions::extractRepeatable($args, 'clock-segment'));
+    $o = NetCliOptions::parse($args, ['device', 'file', 'expect', 'tolerance', 'olt-tz'], []);
+    $tz = $o['olt-tz'] ?? 'UTC';
+    if (!in_array($tz, DateTimeZone::listIdentifiers(), true)) { throw new InvalidArgumentException('Fuso inválido.'); }
     $deviceId = NetCliOptions::positive($o, 'device', true);
     $file = (string) ($o['file'] ?? '');
     if (!is_file($file) || !is_readable($file)) {
@@ -58,16 +63,18 @@ foreach ($events as $id => $list) {
         $best = null;
         foreach ($outages as $q) {
             if (str_replace(':', '', $q['mac']) !== ($mac[$id] ?? '')) { continue; }
-            $d = $pd - $ts($q['started_at']);
+            $d = $pd - $ts(NetClockSegments::convert($q['started_at'], $tz, 'UTC', $segments));
             if (abs($d - $expect) < $tol && ($best === null || abs($d - $expect) < abs($best['d'] - $expect))) { $best = ['q' => $q, 'd' => $d]; }
         }
         if ($best === null) { continue; }
         $q = $best['q'];
         $deltas[] = $best['d'];
-        printf("%s coleta %s -> %s (%d min) | log %s -> %s (%d min) | deslocamento %s\n", ValueDecoder::maskMac((string) $mac[$id]), $downAt, substr($e['occurred_at'], 11), intdiv($pu - $pd, 60), $q['started_at'], substr($q['ended_at'], 11), intdiv($ts($q['ended_at']) - $ts($q['started_at']), 60), $fmt($best['d']));
+        printf("%s coleta %s -> %s (%d min) | log %s -> %s (%d min) | residual %d s\n", ValueDecoder::maskMac((string) $mac[$id]), $downAt, substr($e['occurred_at'], 11), intdiv($pu - $pd, 60), $q['started_at'], substr($q['ended_at'], 11), intdiv($ts($q['ended_at']) - $ts($q['started_at']), 60), $best['d']);
     }
 }
 if ($deltas === []) { echo "Nenhum par casado: sem conclusão.\n"; exit(0); }
 sort($deltas);
-printf("pares: %d | mínimo %s | mediana %s | máximo %s (deslocamento = coleta UTC - log lido como UTC)\n", count($deltas), $fmt($deltas[0]), $fmt($deltas[intdiv(count($deltas), 2)]), $fmt($deltas[count($deltas) - 1]));
+ $count = count($deltas);
+ $median = $count % 2 ? $deltas[intdiv($count, 2)] : ($deltas[$count / 2 - 1] + $deltas[$count / 2]) / 2;
+printf("pares: %d | mínimo %d s | mediana %g s | máximo %d s (residual = coleta UTC - log corrigido UTC)\n", $count, $deltas[0], $median, $deltas[$count - 1]);
 echo "Precisão da coleta: um ciclo de status. Poucos pares ou valores espalhados: não concluir.\n";

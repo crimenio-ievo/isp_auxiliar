@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Net\NetCliOptions;
+use App\Infrastructure\Net\NetClockSegments;
 use App\Infrastructure\Net\NetLogImporter;
 use App\Infrastructure\Net\OltLogParser;
 use App\Infrastructure\Net\Store\PdoNetOutageStore;
@@ -30,6 +31,7 @@ $usage = "Uso: php scripts/net_log_import.php --device=ID --file=ARQUIVO [--olt-
 try {
     $args = array_slice($argv, 1);
     $windowSpecs = NetCliOptions::extractRepeatable($args, 'maintenance-window');
+    $segments = NetClockSegments::parse(NetCliOptions::extractRepeatable($args, 'clock-segment'));
     $opts = NetCliOptions::parse($args, ['device', 'file', 'olt-tz'], ['apply', 'no-default-window']);
     $windows = isset($opts['no-default-window']) ? [] : OltLogParser::DEFAULT_WINDOWS;
     if (count($windowSpecs) > OltLogParser::MAX_WINDOWS) {
@@ -60,8 +62,9 @@ try {
     $app = bootstrapApplication();
     $pdo = (new Database($app->config()))->pdo();
     $importer = new NetLogImporter(new PdoNetStore($pdo), new PdoNetOutageStore($pdo), new OltLogParser($windows));
-    $summary = $importer->run($deviceId, (string) file_get_contents($file), $tz, date_default_timezone_get(), $apply);
+    $summary = $importer->run($deviceId, (string) file_get_contents($file), $tz, date_default_timezone_get(), $apply, $segments);
     echo json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . "\n";
+    if (!empty($summary['recusado'])) { fwrite(STDERR, "Importação recusada: datas convertidas divergentes.\n"); exit(2); }
     if (!$apply) {
         echo "Simulação: nada gravado. Rode com --apply --olt-tz=... para gravar.\n";
     }

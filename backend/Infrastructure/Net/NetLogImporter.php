@@ -24,7 +24,7 @@ final class NetLogImporter
     }
 
     /** @return array<string,mixed> */
-    public function run(int $deviceId, string $content, string $oltTz, string $appTz, bool $apply): array
+    public function run(int $deviceId, string $content, string $oltTz, string $appTz, bool $apply, array $segments = []): array
     {
         $device = $this->net->findDevice($deviceId);
         if ($device === null) {
@@ -33,13 +33,11 @@ final class NetLogImporter
         $providerId = (int) $device['provider_id'];
         $from = new DateTimeZone($oltTz);
         $to = new DateTimeZone($appTz);
-        $conv = static function (?string $s) use ($from, $to): ?string {
+        $conv = static function (?string $s) use ($from, $to, $segments): ?string {
             if ($s === null) {
                 return null;
             }
-            $d = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $s, $from);
-
-            return $d === false ? null : $d->setTimezone($to)->format('Y-m-d H:i:s');
+            return NetClockSegments::convert($s, $from->getName(), $to->getName(), $segments);
         };
 
         $parsed = $this->parser->parse($content);
@@ -53,6 +51,7 @@ final class NetLogImporter
         $updates = [];
         $unchanged = 0;
         $kept = 0;
+        $divergent = 0;
         $unmatched = [];
         $byCategory = ['queda' => 0, 'manutencao' => 0, 'aberta' => 0];
         $examples = [];
@@ -74,7 +73,9 @@ final class NetLogImporter
                 $byCategory['aberta']++;
             }
             $old = $existing[$o['event_key']] ?? null;
-            if ($old === null) {
+            if ($old !== null && $old['started_at'] !== $row['started_at']) {
+                $divergent++;
+            } elseif ($old === null) {
                 $inserts[] = $row;
                 if (count($examples) < 5 && $o['counts_as_outage']) {
                     $examples[] = ['mac' => ValueDecoder::maskMac($mac12), 'inicio' => $row['started_at'], 'fim' => $row['ended_at'], 'duracao_s' => $row['duration_s'], 'motivo' => $row['cause']];
@@ -95,6 +96,7 @@ final class NetLogImporter
             'modo' => $apply ? 'apply' : 'simulacao',
             'device_id' => $deviceId,
             'fuso_olt' => $oltTz, 'fuso_destino' => $appTz,
+            'clock_segments' => $segments, 'divergentes' => $divergent,
             'janelas_manutencao' => $this->parser->windows(),
             'arquivo' => $parsed['summary'],
             'eventos_linkdown' => count($outages),
@@ -103,10 +105,11 @@ final class NetLogImporter
             'macs_sem_onu_cadastrada' => count($unmatched),
             'exemplos' => $examples,
         ];
+        if ($apply && $divergent > 0) { $summary['recusado'] = true; return $summary; }
         if ($apply && ($inserts !== [] || $updates !== [])) {
             $this->outages->save($inserts, $updates, [
                 'provider_id' => $providerId, 'device_id' => $deviceId, 'created_at' => $now,
-                'context' => ['novas' => count($inserts), 'atualizadas' => count($updates), 'primeiro_evento' => $parsed['summary']['primeiro_evento'], 'ultimo_evento' => $parsed['summary']['ultimo_evento'], 'fuso_olt' => $oltTz, 'conteudo_sha256' => hash('sha256', $content)],
+                'context' => ['novas' => count($inserts), 'atualizadas' => count($updates), 'primeiro_evento' => $parsed['summary']['primeiro_evento'], 'ultimo_evento' => $parsed['summary']['ultimo_evento'], 'fuso_olt' => $oltTz, 'clock_segments' => $segments, 'conteudo_sha256' => hash('sha256', $content)],
             ]);
         }
 
