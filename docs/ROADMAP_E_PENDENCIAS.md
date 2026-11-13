@@ -92,3 +92,4 @@ Blocos da Home com estado de rede (depende de telemetria): vermelho = desconecta
 - **Etapa 6 CP-A:** ordem da tela e eventos compactos, árvore com rolagem e breakpoint 1100 px. Suíte `tests/net/run_all.sh` verde. Detalhes no handoff 6.
 - **Etapa 6 CP-B:** período único para gráfico e quedas; `serie` por período com amostra anterior; padrão da ficha uma semana. Suíte net verde; contrato da API atualizado em ambos os testes.
 - **Etapa 6 CP-C:** régua e gráfico da ficha com rótulos, formas, anticolisão, faixas e decimais brasileiros; suíte net verde. Validação visual real pendente.
+- **Etapa 6 encerrada parcialmente (2026-11-13):** CP-A/B/C da tela implementados; validação isolada Feature 48/48, mapa 25/25 e net sem falhas. Import do syslog permanece bloqueado: 3 dos 8 resíduos são negativos e violam a condição exigida. Cinco exemplos, contagens e limites no `docs/handoff-telemetria-6.md`; sem import nem acesso à OLT.
