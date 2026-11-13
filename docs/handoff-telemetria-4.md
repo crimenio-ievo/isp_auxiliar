@@ -52,3 +52,11 @@ Worktree `_isp_auxiliar_telemetria_fibra`, branch `feature/telemetria-fibra`, s�
 
 ### 2. `net_register_device.php` com intervalo de status 600 s
 - O INSERT passa a gravar `status_interval_s = 600` (antes 300), alinhado ao que a migration 033 definiu para os equipamentos existentes. A migration 030 não foi tocada: o DEFAULT da coluna continua 300, só o script de registro explicita 600. Teste estático: `php tests/Feature/NetRegisterDeviceSmoke.php` (3 verificações). Nenhum equipamento foi registrado nem alterado.
+
+### 3. Janelas de manutenção configuráveis no import do syslog
+- `OltLogParser` já aceitava janelas no construtor; agora `net_log_import.php` expõe `--maintenance-window="INICIO,FIM[,motivo]"`, **repetível** (também `--maintenance-window VALOR`). Horários no relógio da OLT, como no log (`AAAA-MM-DD hh:mm[:ss]`, aceita `T`); motivo opcional (padrão `manutencao`; só `a-z 0-9 _`, até 30 caracteres, cabe em `maintenance_reason`); máx. 20 janelas; início <= fim.
+- **Decisão minha:** as janelas informadas são ACRESCENTADAS à padrão (troca de PON de 2026-11-09 20:23:00–20:26:59, mantida quando não se passa nada). `--no-default-window` remove a padrão. O resumo da simulação/aplicação lista `janelas_manutencao`.
+- Valor inválido (formato, início depois do fim, motivo, excesso) para a CLI com código 1 antes de qualquer acesso ao banco.
+- A regra continua sendo pela hora do linkdown; boot (2 min após "EPON System Start") segue fixo.
+- Testes: `OltLogParserSmoke` 59 verificações (parsing das janelas, rejeições, convivência com a padrão, `NetCliOptions::extractRepeatable`, CLI) e `NetLogImportSmoke` 33 (resumo e reclassificação com janela extra / sem janelas).
+- Exemplo: `php scripts/net_log_import.php --device=1 --file=ARQ --olt-tz=<FUSO> --maintenance-window="2026-11-09 20:30:00,2026-11-09 20:40:00,obra"` (simulação; some `--apply` só com autorização).

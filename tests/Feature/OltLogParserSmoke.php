@@ -109,4 +109,37 @@ $check($q['cause'] === 'energia' && $q['duration_s'] === 161 && $q['dying_gasp_a
 $check($by('2026-11-10 01:20:31')['open'] === true, 'fixture: queda em aberto');
 $check($by('2026-11-10 08:59:05')['duration_s'] === 1825, 'fixture: queda longa por energia (1825 s)');
 
+// Janelas de manutencao configuraveis.
+$check((new OltLogParser())->windows() === OltLogParser::DEFAULT_WINDOWS && (new OltLogParser([]))->windows() === [], 'janela padrao mantida; lista vazia = sem janelas');
+$w = OltLogParser::windowFromString('2026-11-12 10:00:00,2026-11-12 10:30:59,obra_pon');
+$check($w === ['from' => '2026-11-12 10:00:00', 'to' => '2026-11-12 10:30:59', 'reason' => 'obra_pon'], 'janela valida');
+$check(OltLogParser::windowFromString(' 2026-11-12T10:00 , 2026-11-12 10:30 ') === ['from' => '2026-11-12 10:00:00', 'to' => '2026-11-12 10:30:00', 'reason' => 'manutencao'], 'janela com T, sem segundos e motivo padrao');
+foreach (['', 'so-um', '2026-11-12 10:00:00,2026-11-12 11:00:00,a,b', '2026-13-45 10:00:00,2026-11-12 11:00:00', '2026-11-12 11:00:00,2026-11-12 10:00:00', 'lixo,2026-11-12 10:00:00', '2026-11-12 10:00:00,2026-11-12 11:00:00,Ruim!', '2026-11-12 10:00:00,2026-11-12 11:00:00,' . str_repeat('a', 31), '2026-11-12 10:00:00,2026-11-12 11:00:00,'] as $bad) {
+    try { OltLogParser::windowFromString($bad); $check(false, 'janela invalida aceita: ' . $bad); } catch (InvalidArgumentException $e) { $check(true, 'janela invalida rejeitada'); }
+}
+$extra = [OltLogParser::DEFAULT_WINDOWS[0], OltLogParser::windowFromString('2026-11-12 10:00:00,2026-11-12 10:30:00,obra')];
+$rr = (new OltLogParser($extra))->parse($L('2026-11-12 10:05:00', $M1, 'linkdown') . $L('2026-11-12 10:06:00', $M1, 'linkup') . $L('2026-11-09 20:24:00', $M2, 'linkdown') . $L('2026-11-09 20:25:00', $M2, 'linkup') . $L('2026-11-12 10:31:00', $M3, 'linkdown') . $L('2026-11-12 10:32:00', $M3, 'linkup'));
+$byMac = []; foreach ($rr['outages'] as $o) { $byMac[$o['mac']] = $o; }
+$check($byMac[$M1]['maintenance'] === 'obra' && $byMac[$M2]['maintenance'] === 'troca_pon' && $byMac[$M3]['maintenance'] === null, 'janela acrescentada convive com a padrao; fora das janelas conta como queda');
+$check((new OltLogParser(OltLogParser::DEFAULT_WINDOWS))->parse($L('2026-11-12 10:05:00', $M1, 'linkdown') . $L('2026-11-12 10:06:00', $M1, 'linkup'))['outages'][0]['maintenance'] === null, 'sem a janela extra, a mesma queda conta');
+
+// Opcao repetivel da CLI.
+$args = ['--device=1', '--maintenance-window=a,b', '--file', 'x.log', '--maintenance-window', 'c,d', '--apply'];
+$got = App\Infrastructure\Net\NetCliOptions::extractRepeatable($args, 'maintenance-window');
+$check($got === ['a,b', 'c,d'] && $args === ['--device=1', '--file', 'x.log', '--apply'], 'extractRepeatable: varias ocorrencias, nas duas formas, sem tocar nas outras opcoes');
+$none = ['--device=1']; $check(App\Infrastructure\Net\NetCliOptions::extractRepeatable($none, 'maintenance-window') === [] && $none === ['--device=1'], 'extractRepeatable: sem ocorrencias');
+foreach ([['--maintenance-window'], ['--maintenance-window='], ['--maintenance-window', '--apply']] as $badArgs) {
+    try { App\Infrastructure\Net\NetCliOptions::extractRepeatable($badArgs, 'maintenance-window'); $check(false, 'opcao sem valor aceita'); } catch (InvalidArgumentException $e) { $check(true, 'extractRepeatable: opcao sem valor rejeitada'); }
+}
+// CLI: janela invalida/excesso falham na validacao de argumentos, antes de qualquer acesso a banco (codigo 1).
+$cli = static function (array $a): array { $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__, 2) . '/scripts/net_log_import.php') . ' ' . implode(' ', array_map('escapeshellarg', $a)) . ' 2>&1'; exec($cmd, $out, $code); return [$code, implode("\n", $out)]; };
+$fx = dirname(__DIR__) . '/fixtures/olt_syslog_reduced.log';
+[$code, $out] = $cli(['--device=1', '--file=' . $fx, '--maintenance-window=2026-11-12 11:00:00,2026-11-12 10:00:00']);
+$check($code === 1 && str_contains($out, 'o início é depois do fim'), 'CLI rejeita janela invertida');
+[$code, $out] = $cli(['--device=1', '--file=' . $fx, '--maintenance-window=lixo']);
+$check($code === 1 && str_contains($out, 'Janela inválida'), 'CLI rejeita janela mal formada');
+$many = []; for ($i = 0; $i <= OltLogParser::MAX_WINDOWS; $i++) { $many[] = '--maintenance-window=2026-11-12 10:00:00,2026-11-12 10:30:00'; }
+[$code, $out] = $cli(array_merge(['--device=1', '--file=' . $fx], $many));
+$check($code === 1 && str_contains($out, 'Janelas demais'), 'CLI limita o numero de janelas');
+
 echo "OltLogParserSmoke: {$n} verificacoes, 0 falhas\n";

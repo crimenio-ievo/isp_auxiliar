@@ -38,6 +38,45 @@ final class OltLogParser
     {
     }
 
+    public const MAX_WINDOWS = 20;
+
+    /** @return list<array{from:string,to:string,reason:string}> */
+    public function windows(): array
+    {
+        return $this->maintenanceWindows;
+    }
+
+    /**
+     * Interpreta "AAAA-MM-DD hh:mm:ss,AAAA-MM-DD hh:mm:ss[,motivo]" (horário do relógio da OLT, como o log).
+     * Motivo opcional (padrão "manutencao"): minúsculas, dígitos e "_", até 30 caracteres (cabe em maintenance_reason).
+     *
+     * @return array{from:string,to:string,reason:string}
+     */
+    public static function windowFromString(string $spec): array
+    {
+        $parts = array_map('trim', explode(',', $spec));
+        if (count($parts) < 2 || count($parts) > 3) {
+            throw new \InvalidArgumentException('Janela inválida: use "INICIO,FIM[,motivo]".');
+        }
+        $norm = static fn (string $v): string => preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/', $v) === 1 ? str_replace('T', ' ', strlen($v) === 16 ? $v . ':00' : $v) : '';
+        $from = $norm($parts[0]);
+        $to = $norm($parts[1]);
+        $a = $from === '' ? null : self::ts($from);
+        $b = $to === '' ? null : self::ts($to);
+        if ($a === null || $b === null) {
+            throw new \InvalidArgumentException('Janela inválida: data/hora no formato AAAA-MM-DD hh:mm[:ss].');
+        }
+        if ($a > $b) {
+            throw new \InvalidArgumentException('Janela inválida: o início é depois do fim.');
+        }
+        $reason = $parts[2] ?? 'manutencao';
+        if (preg_match('/^[a-z0-9_]{1,30}$/', $reason) !== 1) {
+            throw new \InvalidArgumentException('Janela inválida: motivo só com a-z, 0-9 e _ (até 30 caracteres).');
+        }
+
+        return ['from' => $from, 'to' => $to, 'reason' => $reason];
+    }
+
     /** @var list<array{from:string,to:string,reason:string}> */
     public const DEFAULT_WINDOWS = [
         ['from' => '2026-11-09 20:23:00', 'to' => '2026-11-09 20:26:59', 'reason' => 'troca_pon'],

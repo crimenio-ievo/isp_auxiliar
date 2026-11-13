@@ -95,6 +95,7 @@ final class NetLogImporter
             'modo' => $apply ? 'apply' : 'simulacao',
             'device_id' => $deviceId,
             'fuso_olt' => $oltTz, 'fuso_destino' => $appTz,
+            'janelas_manutencao' => $this->parser->windows(),
             'arquivo' => $parsed['summary'],
             'eventos_linkdown' => count($outages),
             'quedas' => $byCategory['queda'], 'manutencao_boot_ou_troca_pon' => $byCategory['manutencao'], 'quedas_em_aberto' => $byCategory['aberta'],

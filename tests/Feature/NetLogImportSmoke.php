@@ -65,6 +65,18 @@ $check($s['atualizadas_com_retorno'] === 1 && count($st3->rows) === 1 && $r['end
 $s = $i3->run(1, $open, 'UTC', 'UTC', true);
 $check($s['mantidas_fechadas'] === 1 && array_values($st3->rows)[0]['ended_at'] === '2026-11-12 10:03:00', 'arquivo antigo nao reabre queda fechada');
 
+// Janelas de manutencao: aparecem no resumo e mudam a classificacao (apenas o que cai dentro delas).
+$s0 = $imp->run(1, $fixture, 'UTC', 'UTC', false);
+$check($s0['janelas_manutencao'] === OltLogParser::DEFAULT_WINDOWS, 'resumo lista a janela padrao');
+$netW = new InMemoryNetStore(); $netW->devices = $net->devices; $stW = new InMemoryNetOutageStore();
+$custom = array_merge(OltLogParser::DEFAULT_WINDOWS, [OltLogParser::windowFromString('2026-11-09 20:30:00,2026-11-09 23:00:00,obra')]);
+$iW = new NetLogImporter($netW, $stW, new OltLogParser($custom), $clock);
+$sW = $iW->run(1, $fixture, 'UTC', 'UTC', true);
+$check(count($sW['janelas_manutencao']) === 2 && $sW['quedas'] === 3 && $sW['manutencao_boot_ou_troca_pon'] === 15, 'janela extra reclassifica 2 quedas (20:41 e 22:52) como manutencao');
+$check(count(array_filter($stW->rows, static fn ($r) => $r['maintenance_reason'] === 'obra')) === 2, 'motivo da janela gravado');
+$sN = (new NetLogImporter($netW, new InMemoryNetOutageStore(), new OltLogParser([]), $clock))->run(1, $fixture, 'UTC', 'UTC', false);
+$check($sN['janelas_manutencao'] === [] && $sN['manutencao_boot_ou_troca_pon'] === 5 && $sN['quedas'] === 13, 'sem janelas (--no-default-window): so o boot e manutencao');
+
 // ONU que passa a existir em net_onus depois: o proximo import preenche onu_id sem reabrir nem duplicar.
 $net5 = new InMemoryNetStore(); $net5->devices = $net->devices; $st5 = new InMemoryNetOutageStore();
 $i5 = new NetLogImporter($net5, $st5, new OltLogParser(), $clock);

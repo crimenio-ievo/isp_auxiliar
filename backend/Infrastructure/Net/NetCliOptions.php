@@ -20,6 +20,33 @@ final class NetCliOptions
         }
         return $out;
     }
+    /**
+     * Extrai (e remove de $args) todas as ocorrências de --nome=valor ou --nome valor, para opções repetíveis.
+     *
+     * @param list<string> $args
+     * @return list<string>
+     */
+    public static function extractRepeatable(array &$args, string $name): array
+    {
+        $out = [];
+        $rest = [];
+        for ($i = 0; $i < count($args); $i++) {
+            $pair = explode('=', $args[$i], 2);
+            if ($pair[0] !== '--' . $name) {
+                $rest[] = $args[$i];
+                continue;
+            }
+            $value = $pair[1] ?? ($args[++$i] ?? null);
+            if ($value === null || $value === '' || str_starts_with($value, '--')) {
+                throw new \InvalidArgumentException('Opcao sem valor: ' . $name);
+            }
+            $out[] = $value;
+        }
+        $args = $rest;
+
+        return $out;
+    }
+
     public static function positive(array $opts, string $key, bool $required = false): ?int
     {
         if (!isset($opts[$key]) && !$required) { return null; }
