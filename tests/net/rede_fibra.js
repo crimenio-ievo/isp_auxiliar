@@ -25,8 +25,9 @@ const tree = {
   fontes: {quedas_poll: true, quedas_log: false, vinculo_cliente: false, cto: false, sinal_na_olt: false}
 };
 const outage = {onu_id: 1, onu_identifier_mascarado: '00:2E:C7:xx:xx:xx', source: 'log', precisao: 'exata', category: 'queda', maintenance_reason: null, started_at: '2026-11-13 10:00:00', ended_at: '2026-11-13 10:10:00', open: false, duration_s: 600, downtime_in_period_s: 600, cause: 'energia', reason: 'Queda de energia (Dying Gasp)'};
+const sheetOnu = () => { const o = onu(1, 1, 1, 'online', -20.0, 'ok'); delete o.quedas_24h; delete o.ultima_queda_em; return o; };
 const sheet = (over) => Object.assign({
-  onu: Object.assign(onu(1, 1, 1, 'online', -20.0, 'ok'), {baseline_dbm: -20.5, baseline_desde: '2026-11-12 00:00:00', baseline_amostras: 5, olt_rx_dbm: null, olt_rx_texto: 'ainda não lido'}),
+  onu: Object.assign(sheetOnu(), {baseline_dbm: -20.5, baseline_desde: '2026-11-12 00:00:00', baseline_amostras: 5, olt_rx_dbm: null, olt_rx_texto: 'ainda não lido'}),
   vizinhos: {mediana_dbm: -26.0, quantidade: 3, diferenca_db: 6.0},
   serie_7d: {pontos: [{t: '2026-11-07 12:00:00', rx: -20.0}, {t: '2026-11-10 12:00:00', rx: -22.5}, {t: '2026-11-13 11:00:00', rx: -20.0}], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'},
   periodo: {kind: '24h', from: '2026-11-12 12:00:00', to: '2026-11-13 12:00:00'}, quedas: [outage], quedas_total: {quedas: 1, em_aberto: 0, downtime_no_periodo_s: 600, por_motivo: {energia: 1}, do_log: 1, do_poll: 0, log_sem_onu_cadastrada: 0},
@@ -34,6 +35,16 @@ const sheet = (over) => Object.assign({
   ultimas_quedas: [outage], estavel: false, estavel_texto: null, limiares: tree.limiares, fontes: {quedas_poll: true, quedas_log: true},
   cliente: null, cliente_texto: 'sem vínculo', cto: null, cto_texto: 'ainda não lido'}, over || {});
 
+// Mesmas listas de chaves de tests/Feature/NetFiberReaderSmoke.php: se a API mudar, os dois testes devem mudar juntos.
+const K = {
+  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons',
+  pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em',
+  sheet: 'onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
+  sheetOnu: 'baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto',
+  outage: 'onu_id,onu_identifier_mascarado,source,precisao,category,maintenance_reason,started_at,ended_at,open,duration_s,downtime_in_period_s,cause,reason'
+};
+const keys = o => Object.keys(o).sort().join(',');
+const K2 = s => s.split(',').sort().join(',');
 async function boot(opts) {
   opts = opts || {};
   const errs = [], vc = new VirtualConsole(); vc.on('jsdomError', e => errs.push(String(e.detail && e.detail.message || e.message))); vc.on('error', e => errs.push(String(e)));
@@ -48,6 +59,8 @@ async function boot(opts) {
 }
 
 (async () => {
+  ok(keys(tree) === K2(K.tree) && keys(tree.dispositivos[0]) === K2(K.device) && keys(tree.dispositivos[0].pons[0]) === K2(K.pon) && keys(tree.dispositivos[0].pons[0].onus[0]) === K2(K.onu), 'fixture da arvore com as mesmas chaves da API');
+  ok(keys(sheet()) === K2(K.sheet) && keys(sheet().onu) === K2(K.onu.replace(',quedas_24h,ultima_queda_em', '') + ',' + K.sheetOnu) && keys(outage) === K2(K.outage), 'fixture da ficha com as mesmas chaves da API');
   let t = await boot();
   ok(t.q('#rf-summary').textContent.indexOf('4 ONUs · 3 online · 1 offline') === 0, 'resumo no topo');
   ok(t.qa('.rf-row--olt').length === 1 && t.qa('.rf-row--pon').length === 3 && t.qa('.rf-row--onu').length === 4, 'arvore: 1 OLT, 3 PONs (inclusive vazia), 4 ONUs');

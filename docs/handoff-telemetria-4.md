@@ -26,3 +26,19 @@ Worktree `_isp_auxiliar_telemetria_fibra`, branch `feature/telemetria-fibra`, s�
 - Motivos exibidos: "Queda de energia (Dying Gasp)", "Sem aviso de energia", "Detectada pelo poll, motivo não informado". Nunca "fibra".
 - Teste jsdom: `node tests/net/rede_fibra.js` (usa `tests/net/render_page.php` para renderizar a página real; fixtures de teste com o formato da API) → 48 verificações, 0 falhas, sem erro de console.
 - **Limite honesto:** não há navegador neste servidor, então a aparência (CSS, tamanhos, responsividade) NÃO foi vista em tela real; só a estrutura/comportamento via jsdom. Conferir visualmente em /rede-fibra.
+
+## CP3 — testes e suíte completa (feito)
+
+- Novos testes: `tests/Feature/NetFiberReaderSmoke.php` (63 verificações: rotas só GET, anônimo → login, menu só gestor/admin, leitor com schema descartável 001–034, controller com `LocalRepository` real, validações 403/422/404, página 200 com shell, contrato de chaves da API, sem 034) e `tests/net/rede_fibra.js` (jsdom, 50 verificações: árvore, filtros, colunas, recolher, ficha, régua, gráfico/faixas/cursor/ampliar, períodos, estável, em aberto, erros, XSS por texto, sem erro de console). Atalho: `bash tests/net/run_all.sh`.
+- Os dois testes compartilham a lista de chaves da API: se a API mudar, ambos falham até serem atualizados juntos.
+- `MobileNavMoreSmoke` foi atualizado de propósito (o painel "Mais" do gestor agora tem 5 itens, com Rede de fibra).
+- **Suíte completa (este worktree):** `tests/Feature/*.php` + `AcceptanceResendRegression.php`: 45 passam, 1 falha; `bash tests/map/run_all.sh`: 25 cenários, 0 falhas; `bash tests/net/run_all.sh`: 0 falhas.
+- **A única falha é `ReleaseScriptsSmoke.php`:** "O cenário exige todas as migrations aplicadas com checksums corretos." Hipótese (não confirmada trocando de branch, o que é proibido neste worktree): é a migration 034 existir no repositório e NÃO estar aplicada no `isp_auxiliar` (esse teste confere o estado real das migrations); deve voltar a passar quando a 034 for aplicada com autorização. Não está relacionada ao código desta etapa.
+
+## O que falta
+
+- Aplicar a 034 (e importar o syslog) para as quedas terem hora exata e motivo na tela; hoje a tela avisa que só há quedas do poll.
+- Vínculo cliente↔ONU e CTO/porta (contrato de dados de rede): hoje "sem vínculo" / "ainda não lido".
+- Sinal recebido na OLT (`olt_rx_dbm`): não existe por SNMP identificado.
+- Conferência visual em navegador (não há navegador neste servidor).
+- Distância é estimativa pelo RTT; trocar quando houver fonte direta.

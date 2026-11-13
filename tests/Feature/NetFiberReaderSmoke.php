@@ -24,6 +24,30 @@ foreach (['/rede-fibra', '/api/rede-fibra', '/api/rede-fibra/onu'] as $path) {
     $check($router->match('POST', $path) === null, "rota POST {$path} nao existe (somente leitura)");
 }
 
+// Sem login: redireciona para /login (pagina e API), nunca entrega dados.
+$_SESSION = [];
+$app = new App\Core\Application(new Config([]), new App\Core\Container(), $router);
+$st0 = new ReflectionProperty(Response::class, 'status');
+$hd0 = new ReflectionProperty(Response::class, 'headers');
+foreach (['/rede-fibra', '/api/rede-fibra', '/api/rede-fibra/onu'] as $path) {
+    $resp = $app->handle(new Request('GET', $path));
+    $check($st0->getValue($resp) === 302 && ($hd0->getValue($resp)['Location'] ?? '') === '/login', "anonimo em {$path} vai para o login");
+}
+// Menu: "Rede de fibra" so para gestor/admin.
+$render = static function (array $access) use ($root): string {
+    $program = <<<'PHP'
+require $argv[1] . '/backend/bootstrap/autoload.php';
+App\Core\Url::setBasePath('/x');
+$user = ['name' => 'U', 'role' => 'x', 'access' => json_decode($argv[2], true)];
+$currentPath = '/rede-fibra';
+$appName = 'ISP';
+require $argv[1] . '/backend/Views/layouts/sidebar.php';
+PHP;
+    return (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($program) . ' ' . escapeshellarg($root) . ' ' . escapeshellarg(json_encode($access)) . ' 2>&1');
+};
+$check(substr_count($render(['is_manager' => true]), 'href="/x/rede-fibra"') === 2 && str_contains($render(['is_admin' => true]), 'href="/x/rede-fibra"'), 'gestor/admin veem Rede de fibra (trilha e Mais)');
+$check(!str_contains($render(['can_search_clients' => true]), 'rede-fibra'), 'tecnico nao ve Rede de fibra');
+
 $pdo = new PDO('mysql:unix_socket=/run/mysqld/mysqld.sock;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 $schema = 'isp_auxiliar_netfiber_sim';
 if ($pdo->query("SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$schema'")->fetchColumn()) { throw new RuntimeException('Schema descartavel ja existe: preservar e parar.'); }
@@ -100,6 +124,19 @@ try {
     $check(!str_contains((string) $json, '002EC7000008') && !str_contains((string) $json, 'OLT-OUTRO'), 'isolamento por provedor');
     $check($reader->tree($providerId, 2) ['dispositivos'] === [], 'filtro por equipamento de outro provedor vazio');
 
+    // Contrato de chaves da API (o fixture do jsdom em tests/net/rede_fibra.js usa as mesmas listas).
+    $sortKeys = static function (string $csv): string { $x = explode(',', $csv); sort($x); return implode(',', $x); };
+    $keys = static function (array $a): string { $x = array_keys($a); sort($x); return implode(',', $x); };
+    $check($keys($t) === $sortKeys('gerado_em,dispositivos,resumo,limiares,fontes'), 'chaves da arvore');
+    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons'), 'chaves do equipamento');
+    $check($keys($pons[0]) === $sortKeys('pon_index,label,onus,total,online'), 'chaves da PON');
+    $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
+    $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo'), 'chaves do resumo');
+    $fk = $reader->sheet($providerId, 1);
+    $check($keys($fk) === $sortKeys('onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto'), 'chaves da ficha');
+    $check($keys($fk['onu']) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto'), 'chaves da ONU na ficha');
+    $check($keys($fk['quedas'][0]) === $sortKeys('onu_id,onu_identifier_mascarado,source,precisao,category,maintenance_reason,started_at,ended_at,open,duration_s,downtime_in_period_s,cause,reason'), 'chaves da queda');
+
     // Ficha.
     $f = $reader->sheet($providerId, 1);
     $check($f['onu']['rx_dbm'] === -20.0 && $f['onu']['baseline_dbm'] === -20.5 && $f['onu']['olt_rx_dbm'] === null && $f['onu']['olt_rx_texto'] === 'ainda não lido', 'ficha: sinal atual, referencia e sinal na OLT ainda nao lido');
@@ -150,6 +187,12 @@ try {
     }
     $r = $call('onu', ['id' => '1', 'periodo' => 'custom', 'de' => date('Y-m-d\TH:i', time() - 86400), 'ate' => date('Y-m-d\TH:i')]);
     $check($status->getValue($r) === 200, 'periodo custom aceita datetime-local');
+
+    // Pagina HTML (shell completo) para gestor.
+    $r = $call('page');
+    $html = (string) $body->getValue($r);
+    $check($status->getValue($r) === 200 && str_contains($html, 'id="rf-app"') && str_contains($html, 'data-api-tree="/api/rede-fibra"') && str_contains($html, 'data-api-onu="/api/rede-fibra/onu"') && str_contains($html, 'class="app-nav"') && str_contains($html, 'rede-fibra.js') && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', 'pagina: 200, shell, APIs e scripts, sem cache');
+    $check(!preg_match('/simulad|fict[ií]c|lorem/i', $html), 'pagina sem dados simulados');
 
     // Sem a migration 034: so poll, avisa nas fontes.
     $pdo->exec('DROP TABLE net_onu_outages');
