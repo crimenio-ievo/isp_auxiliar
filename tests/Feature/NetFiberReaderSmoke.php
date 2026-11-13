@@ -172,7 +172,7 @@ try {
     $check($t['resumo']['sem_resposta'] === 0 && $o1['desatualizado'] === false, 'sem ONU desatualizada: sem_resposta = 0');
     $pdo->exec("UPDATE net_device_poll_state SET last_success_at = '{$ago(1190)}' WHERE device_id = 1");
     $h = $reader->tree($providerId)['dispositivos'][0]['saude'];
-    $check($h['estado'] === 'ok' && $h['minutos'] === 20, 'saude: logo abaixo de 2 intervalos ainda e ok');
+    $check($h['estado'] === 'ok' && $h['minutos'] === 19, 'saude: logo abaixo de 2 intervalos ainda e ok');
     $pdo->exec("UPDATE net_device_poll_state SET last_success_at = '{$ago(1500)}' WHERE device_id = 1");
     $h = $reader->tree($providerId)['dispositivos'][0]['saude'];
     $check($h['estado'] === 'atrasada' && $h['minutos'] === 25 && $h['limite_s'] === 1200, 'saude: leitura de 25 min com intervalo de 10 = atrasada');
