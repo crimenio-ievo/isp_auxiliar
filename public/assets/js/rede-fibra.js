@@ -15,6 +15,8 @@
   ];
   var DEFAULT_COLS = ['status', 'rx', 'band', 'dist', 'cliente', 'cto', 'quedas', 'mac'];
   var BAND = { ok: 'Normal', atencao: 'Atenção', critico: 'Crítico', saturado: 'Saturado', unknown: 'Sem leitura' };
+  var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
+  var SITE_LABEL = { pop: 'POP', tower: 'Torre' };
   var STATUS = { online: 'Online', offline: 'Offline', unknown: 'Desconhecido' };
   var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '24h', from: '', to: '', sheet: null };
 
@@ -61,7 +63,7 @@
 
   /* ---------- filtros e árvore ---------- */
   function filters() {
-    return { olt: $('rf-f-olt').value, pon: $('rf-f-pon').value, status: $('rf-f-status').value, down: $('rf-f-down24').checked,
+    return { site: $('rf-f-site').value, olt: $('rf-f-olt').value, pon: $('rf-f-pon').value, status: $('rf-f-status').value, down: $('rf-f-down24').checked,
       novinc: $('rf-f-novinc').checked, q: $('rf-f-q').value.replace(/[^0-9a-f]/gi, '').toLowerCase() };
   }
   function onuLevel(f) { return !!(f.status || f.down || f.novinc || f.q); }
@@ -72,9 +74,13 @@
     if (f.q && o.mac.replace(/:/g, '').toLowerCase().indexOf(f.q) === -1) { return false; }
     return true;
   }
+  function siteKey(d) { return d.site ? String(d.site.id) : '0'; }
   function fillSelectors() {
-    var olt = $('rf-f-olt'), cur = olt.value;
-    clear(olt); olt.appendChild(new Option('Todas', ''));
+    var site = $('rf-f-site'), sc = site.value, olt = $('rf-f-olt'), cur = olt.value, seen = {};
+    clear(site); site.appendChild(new Option('Todos', ''));
+    state.tree.dispositivos.forEach(function (d) { var k = siteKey(d); if (!seen[k]) { seen[k] = 1; site.appendChild(new Option(d.site ? d.site.nome : 'Sem site', k)); } });
+    site.value = sc;
+    clear(olt); olt.appendChild(new Option('Todos', ''));
     state.tree.dispositivos.forEach(function (d) { olt.appendChild(new Option(d.nome, String(d.id))); });
     olt.value = cur;
     fillPons();
@@ -84,6 +90,7 @@
     clear(pon); pon.appendChild(new Option('Todas', ''));
     state.tree.dispositivos.forEach(function (d) {
       if ($('rf-f-olt').value && String(d.id) !== $('rf-f-olt').value) { return; }
+      if ($('rf-f-site').value && siteKey(d) !== $('rf-f-site').value) { return; }
       d.pons.forEach(function (p) { if (!seen[p.pon_index]) { seen[p.pon_index] = 1; pon.appendChild(new Option(p.label, String(p.pon_index))); } });
     });
     pon.value = cur;
@@ -109,37 +116,56 @@
     cols.forEach(function (c) { hr.appendChild(el('th', '', c.l)); });
     head.appendChild(hr);
     var span = cols.length + 1, shown = 0;
+    var groups = [], gi = {};
     state.tree.dispositivos.forEach(function (d) {
+      if (f.site && siteKey(d) !== f.site) { return; }
       if (f.olt && String(d.id) !== f.olt) { return; }
-      var rows = [];
-      d.pons.forEach(function (p) {
-        if (f.pon && String(p.pon_index) !== f.pon) { return; }
-        var onus = p.onus.filter(function (o) { return keep(o, f); });
-        if (!onus.length && onuLevel(f)) { return; }
-        rows.push({ p: p, onus: onus });
+      var k = siteKey(d); if (gi[k] === undefined) { gi[k] = groups.length; groups.push({ key: k, site: d.site, devs: [] }); }
+      groups[gi[k]].devs.push(d);
+    });
+    groups.forEach(function (g) {
+      var skey = 's' + g.key, drows = [];
+      g.devs.forEach(function (d) {
+        var rows = [];
+        d.pons.forEach(function (p) {
+          if (f.pon && String(p.pon_index) !== f.pon) { return; }
+          var onus = p.onus.filter(function (o) { return keep(o, f); });
+          if (!onus.length && onuLevel(f)) { return; }
+          rows.push({ p: p, onus: onus });
+        });
+        if (!rows.length && onuLevel(f)) { return; }
+        drows.push({ d: d, rows: rows });
       });
-      if (!rows.length && onuLevel(f)) { return; }
-      var key = 'd' + d.id, tr = el('tr', 'rf-row rf-row--olt'), td = el('td'); td.colSpan = span;
-      var b = el('button', 'rf-toggle', d.nome); b.type = 'button'; b.setAttribute('aria-expanded', String(!state.collapsed[key]));
-      b.addEventListener('click', function () { state.collapsed[key] = !state.collapsed[key]; renderTree(); });
-      td.appendChild(b); td.appendChild(el('span', 'rf-muted', '  · última leitura ok: ' + fmtDT(d.ultima_leitura_ok) + (d.ultimo_resultado && d.ultimo_resultado !== 'ok' ? ' · resultado: ' + d.ultimo_resultado : '')));
-      tr.appendChild(td); body.appendChild(tr);
-      if (state.collapsed[key]) { return; }
-      rows.forEach(function (r) {
-        var pk = key + 'p' + r.p.pon_index, ptr = el('tr', 'rf-row rf-row--pon'), ptd = el('td'); ptd.colSpan = span;
-        var pb = el('button', 'rf-toggle', r.p.label); pb.type = 'button'; pb.setAttribute('aria-expanded', String(!state.collapsed[pk]));
-        pb.addEventListener('click', function () { state.collapsed[pk] = !state.collapsed[pk]; renderTree(); });
-        ptd.appendChild(pb); ptd.appendChild(el('span', 'rf-muted', '  · ' + r.p.online + ' online de ' + r.p.total + ' ONU(s)'));
-        ptr.appendChild(ptd); body.appendChild(ptr);
-        if (state.collapsed[pk]) { return; }
-        r.onus.forEach(function (o) {
-          var otr = el('tr', 'rf-row rf-row--onu' + (state.selected === o.id ? ' is-selected' : '')); otr.tabIndex = 0; otr.dataset.onu = String(o.id);
-          otr.appendChild(el('td', '', 'ONU ' + o.onu_index));
-          cols.forEach(function (c) { otr.appendChild(cell(o, c.k)); });
-          var open = function () { openSheet(o.id); };
-          otr.addEventListener('click', open);
-          otr.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
-          body.appendChild(otr); shown++;
+      if (!drows.length && onuLevel(f)) { return; }
+      var str = el('tr', 'rf-row rf-row--site'), std = el('td'); std.colSpan = span;
+      var sb = el('button', 'rf-toggle', g.site ? (SITE_LABEL[g.site.tipo] || 'Site') + ' ' + g.site.nome : 'Sem site'); sb.type = 'button'; sb.setAttribute('aria-expanded', String(!state.collapsed[skey]));
+      sb.addEventListener('click', function () { state.collapsed[skey] = !state.collapsed[skey]; renderTree(); });
+      std.appendChild(sb); std.appendChild(el('span', 'rf-muted', '  · ' + g.devs.length + ' equipamento(s)'));
+      str.appendChild(std); body.appendChild(str);
+      if (state.collapsed[skey]) { return; }
+      drows.forEach(function (dr) {
+        var d = dr.d, rows = dr.rows, key = 'd' + d.id, tr = el('tr', 'rf-row rf-row--eqp'), td = el('td'); td.colSpan = span;
+        var b = el('button', 'rf-toggle', (TYPE_LABEL[d.tipo_no] || 'Equipamento') + ' ' + d.nome); b.type = 'button'; b.setAttribute('aria-expanded', String(!state.collapsed[key]));
+        b.addEventListener('click', function () { state.collapsed[key] = !state.collapsed[key]; renderTree(); });
+        td.appendChild(b); td.appendChild(el('span', 'rf-muted', (d.tecnologia ? '  · ' + String(d.tecnologia).toUpperCase() : '') + '  · última leitura ok: ' + fmtDT(d.ultima_leitura_ok) + (d.ultimo_resultado && d.ultimo_resultado !== 'ok' ? ' · resultado: ' + d.ultimo_resultado : '')));
+        tr.appendChild(td); body.appendChild(tr);
+        if (state.collapsed[key]) { return; }
+        rows.forEach(function (r) {
+          var pk = key + 'p' + r.p.pon_index, ptr = el('tr', 'rf-row rf-row--pon'), ptd = el('td'); ptd.colSpan = span;
+          var pb = el('button', 'rf-toggle', r.p.label); pb.type = 'button'; pb.setAttribute('aria-expanded', String(!state.collapsed[pk]));
+          pb.addEventListener('click', function () { state.collapsed[pk] = !state.collapsed[pk]; renderTree(); });
+          ptd.appendChild(pb); ptd.appendChild(el('span', 'rf-muted', '  · ' + r.p.online + ' online de ' + r.p.total + ' ONU(s)'));
+          ptr.appendChild(ptd); body.appendChild(ptr);
+          if (state.collapsed[pk]) { return; }
+          r.onus.forEach(function (o) {
+            var otr = el('tr', 'rf-row rf-row--onu' + (state.selected === o.id ? ' is-selected' : '')); otr.tabIndex = 0; otr.dataset.onu = String(o.id);
+            otr.appendChild(el('td', '', 'ONU ' + o.onu_index));
+            cols.forEach(function (c) { otr.appendChild(cell(o, c.k)); });
+            var open = function () { openSheet(o.id); };
+            otr.addEventListener('click', open);
+            otr.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+            body.appendChild(otr); shown++;
+          });
         });
       });
     });
@@ -314,6 +340,7 @@
   ['rf-f-status', 'rf-f-down24', 'rf-f-novinc'].forEach(function (id) { $(id).addEventListener('change', function () { if (state.tree) { renderTree(); } }); });
   $('rf-f-q').addEventListener('input', function () { if (state.tree) { renderTree(); } });
   $('rf-f-olt').addEventListener('change', function () { if (state.tree) { fillPons(); renderTree(); } });
+  $('rf-f-site').addEventListener('change', function () { if (state.tree) { fillPons(); renderTree(); } });
   $('rf-f-pon').addEventListener('change', function () { if (state.tree) { renderTree(); } });
   $('rf-refresh').addEventListener('click', loadTree);
   $('rf-p-close').addEventListener('click', function () { state.selected = null; $('rf-panel').hidden = true; document.querySelector('.rf-layout').classList.remove('has-panel'); if (state.tree) { renderTree(); } });

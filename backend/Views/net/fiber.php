@@ -24,7 +24,8 @@ ob_start();
      data-api-onu="<?= $e(Url::to('/api/rede-fibra/onu')); ?>">
 
     <section class="card rf-filters" aria-label="Filtros">
-        <label class="rf-field"><span>OLT</span><select id="rf-f-olt"><option value="">Todas</option></select></label>
+        <label class="rf-field"><span>Site</span><select id="rf-f-site"><option value="">Todos</option></select></label>
+        <label class="rf-field"><span>Equipamento</span><select id="rf-f-olt"><option value="">Todos</option></select></label>
         <label class="rf-field"><span>PON</span><select id="rf-f-pon"><option value="">Todas</option></select></label>
         <label class="rf-field"><span>Estado</span>
             <select id="rf-f-status">
@@ -42,7 +43,7 @@ ob_start();
     <p class="rf-note" id="rf-note" hidden></p>
 
     <div class="rf-layout">
-        <section class="card rf-tree" aria-label="Árvore OLT, PON e ONU">
+        <section class="card rf-tree" aria-label="Árvore site, equipamento, PON e ONU">
             <div class="rf-tablewrap"><table class="rf-table" id="rf-table"><thead></thead><tbody></tbody></table></div>
             <p class="rf-empty" id="rf-empty" hidden>Nenhuma ONU com esses filtros.</p>
         </section>

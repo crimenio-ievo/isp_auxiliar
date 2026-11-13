@@ -37,9 +37,13 @@ final class NetFiberReader
         $reader = $this->outageReader($logAvailable);
         $period = $reader->period('24h');
 
-        $sql = 'SELECT d.id, d.map_node_id, d.enabled, d.status_interval_s, n.name, ps.last_attempt_at, ps.last_success_at, ps.last_result
-                  FROM net_devices d JOIN map_nodes n ON n.id = d.map_node_id LEFT JOIN net_device_poll_state ps ON ps.device_id = d.id
-                 WHERE d.provider_id = ?' . ($deviceId !== null ? ' AND d.id = ?' : '') . ' ORDER BY n.name, d.id';
+        $sql = 'SELECT d.id, d.map_node_id, d.enabled, d.status_interval_s, n.name, n.node_type, n.parent_node_id,
+                       st.name AS site_name, st.node_type AS site_type, pr.technology, ps.last_attempt_at, ps.last_success_at, ps.last_result
+                  FROM net_devices d JOIN map_nodes n ON n.id = d.map_node_id
+                  LEFT JOIN map_nodes st ON st.id = n.parent_node_id AND st.node_type IN (\'pop\', \'tower\')
+                  LEFT JOIN net_device_profiles pr ON pr.id = d.profile_id
+                  LEFT JOIN net_device_poll_state ps ON ps.device_id = d.id
+                 WHERE d.provider_id = ?' . ($deviceId !== null ? ' AND d.id = ?' : '') . ' ORDER BY st.name IS NULL, st.name, n.name, d.id';
         $st = $this->pdo->prepare($sql);
         $st->execute($deviceId !== null ? [$providerId, $deviceId] : [$providerId]);
         $devices = [];
@@ -84,6 +88,9 @@ final class NetFiberReader
                 'id' => $id, 'nome' => (string) $d['name'], 'ativo' => (bool) $d['enabled'], 'intervalo_status_s' => (int) $d['status_interval_s'],
                 'ultima_tentativa' => $d['last_attempt_at'], 'ultima_leitura_ok' => $d['last_success_at'], 'ultimo_resultado' => $d['last_result'],
                 'pons' => array_values($pons),
+                'tecnologia' => $d['technology'] === null ? null : (string) $d['technology'],
+                'tipo_no' => (string) $d['node_type'],
+                'site' => $d['site_name'] === null ? null : ['id' => (int) $d['parent_node_id'], 'nome' => (string) $d['site_name'], 'tipo' => (string) $d['site_type']],
             ];
         }
 

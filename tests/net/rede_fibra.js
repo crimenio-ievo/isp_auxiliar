@@ -16,10 +16,11 @@ const onu = (id, idx, pon, status, rx, band, extra) => Object.assign({id, pon_in
   distancia_origem: status === 'online' ? 'estimada pelo RTT' : null, cliente: null, cto: null, quedas_24h: 0, ultima_queda_em: null}, extra || {});
 const tree = {
   gerado_em: '2026-11-13 12:00:00',
-  dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', pons: [
+  dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: 'epon', tipo_no: 'olt', site: {id: 8, nome: 'Site-A', tipo: 'pop'}, pons: [
     {pon_index: 1, label: 'PON 1', total: 3, online: 2, onus: [onu(1, 1, 1, 'online', -20.0, 'ok', {quedas_24h: 1, ultima_queda_em: '2026-11-13 10:00:00'}), onu(2, 2, 1, 'online', -26.0, 'atencao'), onu(3, 3, 1, 'offline', -21.0, 'ok')]},
     {pon_index: 2, label: 'PON 2', total: 1, online: 1, onus: [onu(4, 1, 2, 'online', null, 'unknown')]},
-    {pon_index: 3, label: 'PON 3', total: 0, online: 0, onus: []}]}],
+    {pon_index: 3, label: 'PON 3', total: 0, online: 0, onus: []}]},
+    {id: 2, nome: 'SW-1', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: null, tipo_no: 'switch', site: null, pons: []}],
   resumo: {onus: 4, online: 3, offline: 1, desconhecido: 0, atencao: 1, critico: 0, saturado: 0, sem_sinal: 1, quedas_24h: 1, sem_vinculo: 4},
   limiares: {saturado_dbm: -8, atencao_dbm: -25, critico_dbm: -27, desvio_db: 3},
   fontes: {quedas_poll: true, quedas_log: false, vinculo_cliente: false, cto: false, sinal_na_olt: false}
@@ -37,7 +38,7 @@ const sheet = (over) => Object.assign({
 
 // Mesmas listas de chaves de tests/Feature/NetFiberReaderSmoke.php: se a API mudar, os dois testes devem mudar juntos.
 const K = {
-  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons',
+  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site',
   pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em',
   sheet: 'onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
   sheetOnu: 'baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto',
@@ -62,9 +63,14 @@ async function boot(opts) {
   ok(keys(tree) === K2(K.tree) && keys(tree.dispositivos[0]) === K2(K.device) && keys(tree.dispositivos[0].pons[0]) === K2(K.pon) && keys(tree.dispositivos[0].pons[0].onus[0]) === K2(K.onu), 'fixture da arvore com as mesmas chaves da API');
   ok(keys(sheet()) === K2(K.sheet) && keys(sheet().onu) === K2(K.onu.replace(',quedas_24h,ultima_queda_em', '') + ',' + K.sheetOnu) && keys(outage) === K2(K.outage), 'fixture da ficha com as mesmas chaves da API');
   let t = await boot();
+  const sel0 = (id, v) => { t.q(id).value = v; t.ev(t.q(id), 'change'); };
   ok(t.q('#rf-summary').textContent.indexOf('4 ONUs · 3 online · 1 offline') === 0, 'resumo no topo');
-  ok(t.qa('.rf-row--olt').length === 1 && t.qa('.rf-row--pon').length === 3 && t.qa('.rf-row--onu').length === 4, 'arvore: 1 OLT, 3 PONs (inclusive vazia), 4 ONUs');
-  ok(t.q('.rf-row--olt').textContent.indexOf('OLT-<b>X</b>') !== -1 && !t.q('.rf-row--olt b'), 'nome do equipamento como texto, sem HTML');
+  ok(t.qa('.rf-row--site').length === 2 && t.qa('.rf-row--eqp').length === 2 && t.qa('.rf-row--pon').length === 3 && t.qa('.rf-row--onu').length === 4, 'arvore: 2 sites (um "Sem site"), 2 equipamentos, 3 PONs (inclusive vazia), 4 ONUs');
+  ok(t.qa('.rf-row--site').map(x => x.textContent.split('  ·')[0]).join('|') === 'POP Site-A|Sem site', 'rotulos de site: tipo do no pai ou "Sem site"');
+  ok(t.qa('.rf-row--eqp')[0].textContent.indexOf('OLT OLT-<b>X</b>') === 0 && t.qa('.rf-row--eqp')[0].textContent.indexOf('EPON') !== -1, 'equipamento: rotulo do tipo do no (OLT) e tecnologia EPON');
+  ok(t.qa('.rf-row--eqp')[1].textContent.indexOf('Switch SW-1') === 0 && t.qa('.rf-row--eqp')[1].textContent.indexOf('EPON') === -1, 'a tela nao assume que todo equipamento e OLT (Switch, sem tecnologia)');
+  ok(t.q('.rf-row--site').nextElementSibling.classList.contains('rf-row--eqp') && t.qa('.rf-row--eqp')[0].nextElementSibling.classList.contains('rf-row--pon'), 'ordem: site > equipamento > PON > ONU');
+  ok(t.q('.rf-row--eqp').textContent.indexOf('OLT-<b>X</b>') !== -1 && !t.q('.rf-row--eqp b'), 'nome do equipamento como texto, sem HTML');
   const heads = t.qa('#rf-table thead th').map(x => x.textContent);
   ok(heads.join('|') === 'ONU|Estado|Sinal (dBm)|Faixa|Distância|Cliente|CTO|Quedas 24 h|MAC', 'colunas padrao: ' + heads.join('|'));
   const row1 = t.qa('.rf-row--onu')[0].textContent;
@@ -74,6 +80,11 @@ async function boot(opts) {
   ok(t.q('#rf-note').textContent.indexOf('Quedas do log da OLT ainda não importadas') !== -1, 'aviso quando o log da OLT ainda nao foi importado');
 
   // Filtros
+  sel0('#rf-f-site', '0'); ok(t.qa('.rf-row--site').length === 1 && t.q('.rf-row--site').textContent.indexOf('Sem site') !== -1 && t.qa('.rf-row--onu').length === 0, 'filtro por site: "Sem site"');
+  sel0('#rf-f-site', '8'); ok(t.qa('.rf-row--site').length === 1 && t.qa('.rf-row--eqp').length === 1 && t.qa('.rf-row--onu').length === 4, 'filtro por site: Site-A');
+  ok(t.qa('#rf-f-pon option').length === 4, 'PONs do filtro acompanham o site'); sel0('#rf-f-site', '');
+  ok(t.qa('#rf-f-site option').map(o => o.textContent).join('|') === 'Todos|Site-A|Sem site', 'seletor de site preenchido');
+  t.q('.rf-row--site .rf-toggle').click(); ok(t.qa('.rf-row--eqp').length === 1 && t.qa('.rf-row--pon').length === 0, 'recolher o site esconde equipamentos e PONs'); t.q('.rf-row--site .rf-toggle').click();
   const sel = (id, v) => { t.q(id).value = v; t.ev(t.q(id), 'change'); };
   sel('#rf-f-status', 'offline'); ok(t.qa('.rf-row--onu').length === 1 && t.q('.rf-row--onu').textContent.indexOf('Offline') !== -1, 'filtro estado offline');
   sel('#rf-f-status', ''); t.q('#rf-f-down24').checked = true; t.ev(t.q('#rf-f-down24'), 'change');
@@ -84,7 +95,7 @@ async function boot(opts) {
   sel('#rf-f-pon', '2'); ok(t.qa('.rf-row--onu').length === 1 && t.qa('.rf-row--pon').length === 1, 'filtro PON');
   sel('#rf-f-pon', ''); t.q('#rf-f-q').value = '00:2e:c7:00:00:03'; t.ev(t.q('#rf-f-q'), 'input'); ok(t.qa('.rf-row--onu').length === 1, 'busca por MAC');
   t.q('#rf-f-q').value = ''; t.ev(t.q('#rf-f-q'), 'input');
-  ok(t.qa('#rf-f-olt option').length === 2 && t.qa('#rf-f-pon option').length === 4, 'seletores de OLT e PON preenchidos');
+  ok(t.qa('#rf-f-olt option').length === 3 && t.qa('#rf-f-pon option').length === 4, 'seletores de equipamento e PON preenchidos');
   sel('#rf-f-status', 'unknown'); ok(t.qa('.rf-row--onu').length === 0 && !t.q('#rf-empty').hidden, 'sem resultado: mensagem de vazio'); sel('#rf-f-status', ''); ok(t.q('#rf-empty').hidden, 'mensagem de vazio some');
 
   // Colunas escolhiveis (persistem)
@@ -95,10 +106,10 @@ async function boot(opts) {
 
   // Recolher
   t.q('.rf-row--pon .rf-toggle').click(); ok(t.qa('.rf-row--onu').length === 1, 'recolher PON esconde as ONUs');
-  t.q('.rf-row--pon .rf-toggle').click(); t.q('.rf-row--olt .rf-toggle').click(); ok(t.qa('.rf-row--pon').length === 0, 'recolher OLT esconde as PONs'); t.q('.rf-row--olt .rf-toggle').click();
+  t.q('.rf-row--pon .rf-toggle').click(); t.q('.rf-row--eqp .rf-toggle').click(); ok(t.qa('.rf-row--pon').length === 0, 'recolher OLT esconde as PONs'); t.q('.rf-row--eqp .rf-toggle').click();
 
   // Horarios: a API vem em UTC e a tela mostra America/Sao_Paulo (UTC-3).
-  ok(t.q('.rf-row--olt').textContent.indexOf('última leitura ok: 13/11 09:00') !== -1, 'arvore: ultima leitura 12:00 UTC = 09:00 em Brasilia');
+  ok(t.q('.rf-row--eqp').textContent.indexOf('última leitura ok: 13/11 09:00') !== -1, 'arvore: ultima leitura 12:00 UTC = 09:00 em Brasilia');
   ok(t.q('#rf-summary').textContent.indexOf('gerado em 13/11 09:00') !== -1, 'resumo: gerado em horario de Brasilia');
   ok(t.qa('.rf-row--onu')[0].textContent.indexOf('13/11 07:00') !== -1, 'coluna Quedas 24 h: 10:00 UTC = 07:00');
 

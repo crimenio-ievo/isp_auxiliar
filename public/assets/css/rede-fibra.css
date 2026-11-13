@@ -17,15 +17,18 @@
 .rf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 .rf-table th { position: sticky; top: 0; background: var(--surface-muted); text-align: left; padding: 9px 10px; font-weight: 700; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .rf-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.rf-row--olt td { background: var(--primary-soft); font-weight: 800; }
+.rf-row--site td { background: #dbeee9; font-weight: 800; }
+.rf-row--eqp td { background: var(--primary-soft); font-weight: 800; }
+.rf-row--eqp td:first-child { padding-left: 26px; }
 .rf-row--pon td { background: var(--surface-muted); font-weight: 700; }
+.rf-row--pon td:first-child { padding-left: 42px; }
 .rf-toggle { all: unset; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
 .rf-toggle::before { content: "▾"; font-size: 0.8em; }
 .rf-toggle[aria-expanded="false"]::before { content: "▸"; }
 .rf-row--onu { cursor: pointer; }
 .rf-row--onu:hover td { background: var(--surface-muted); }
 .rf-row--onu.is-selected td { background: var(--primary-soft); }
-.rf-row--onu td:first-child { padding-left: 34px; }
+.rf-row--onu td:first-child { padding-left: 58px; }
 .rf-muted { color: var(--muted); }
 .rf-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
 .rf-pill--online, .rf-pill--ok { background: var(--alert-ok-bg); color: var(--alert-ok-ink); }

@@ -71,9 +71,16 @@ try {
         $pdo->exec("INSERT INTO map_nodes (id,provider_id,node_type,name,created_at,updated_at) VALUES ($id,$p,'olt','$name',NOW(),NOW())");
         for ($i = 1; $i <= 4; $i++) { $pdo->exec("INSERT INTO map_ports (provider_id,node_id,port_num,label,port_role,created_at,updated_at) VALUES ($p,$id,$i,'PON $i','pon',NOW(),NOW())"); }
     }
+    // Site (pop) pai do equipamento 42 e um equipamento que NAO e OLT, sem site (node_type other).
+    $pdo->exec("INSERT INTO map_nodes (id,provider_id,node_type,name,created_at,updated_at) VALUES (41,$providerId,'pop','SITE-TESTE',NOW(),NOW())");
+    $pdo->exec('UPDATE map_nodes SET parent_node_id = 41 WHERE id = 42');
+    $pdo->exec("INSERT INTO map_nodes (id,provider_id,node_type,name,created_at,updated_at) VALUES (44,$providerId,'other','ZZ-EQUIP',NOW(),NOW())");
+    $pdo->exec("INSERT INTO map_nodes (id,provider_id,node_type,name,created_at,updated_at) VALUES (45,$providerId,'cto','CTO-TESTE',NOW(),NOW())");
+    $pdo->exec('UPDATE map_nodes SET parent_node_id = 45 WHERE id = 44');
     $prof = "SELECT id FROM net_device_profiles WHERE version=3";
     $pdo->exec("INSERT INTO net_devices (id,provider_id,map_node_id,profile_id,mgmt_host,credential_ref,status_interval_s,created_at,updated_at) SELECT 1,$providerId,42,id,'fake','FAKE',600,NOW(),NOW() FROM net_device_profiles WHERE version=3");
     $pdo->exec("INSERT INTO net_devices (id,provider_id,map_node_id,profile_id,mgmt_host,credential_ref,created_at,updated_at) SELECT 2,$other,43,id,'fake','FAKE',NOW(),NOW() FROM net_device_profiles WHERE version=3");
+    $pdo->exec("INSERT INTO net_devices (id,provider_id,map_node_id,profile_id,mgmt_host,credential_ref,created_at,updated_at) SELECT 3,$providerId,44,id,'fake','FAKE',NOW(),NOW() FROM net_device_profiles WHERE version=3");
     $pdo->exec("INSERT INTO net_device_poll_state (device_id,last_attempt_at,last_success_at,last_result,updated_at) VALUES (1,'$now','$now','ok',NOW())");
     // id, device, provider, pon, onuIdx, mac, status, rtt, rx, band, removed
     $onus = [
@@ -104,7 +111,10 @@ try {
 
     $reader = new NetFiberReader($pdo);
     $t = $reader->tree($providerId);
-    $check(count($t['dispositivos']) === 1 && $t['dispositivos'][0]['nome'] === 'OLT-TESTE' && $t['dispositivos'][0]['ultimo_resultado'] === 'ok', 'arvore: so o equipamento do provedor');
+    $check(count($t['dispositivos']) === 2 && $t['dispositivos'][0]['nome'] === 'OLT-TESTE' && $t['dispositivos'][0]['ultimo_resultado'] === 'ok', 'arvore: so os equipamentos do provedor (OLT com site primeiro, sem site depois)');
+    $d0 = $t['dispositivos'][0]; $d1 = $t['dispositivos'][1];
+    $check($d0['tecnologia'] === 'epon' && $d0['tipo_no'] === 'olt' && $d0['site'] === ['id' => 41, 'nome' => 'SITE-TESTE', 'tipo' => 'pop'], 'equipamento: tecnologia do perfil, tipo do no e site (pop pai)');
+    $check($d1['nome'] === 'ZZ-EQUIP' && $d1['tipo_no'] === 'other' && $d1['site'] === null && $d1['pons'] === [] && $d1['tecnologia'] === 'epon', 'equipamento que nao e OLT e cujo pai (CTO) nao e site: "Sem site", sem PONs');
     $pons = $t['dispositivos'][0]['pons'];
     $check(count($pons) === 4 && $pons[0]['total'] === 5 && $pons[0]['online'] === 4 && $pons[1]['total'] === 1 && $pons[2]['total'] === 0 && $pons[3]['total'] === 0, 'PONs do mapa (port_num) com e sem ONU; ONU removida fora');
     $o1 = $pons[0]['onus'][0];
@@ -122,13 +132,13 @@ try {
     $check($t['fontes']['quedas_log'] === true && $t['fontes']['vinculo_cliente'] === false && $t['fontes']['cto'] === false && $t['fontes']['sinal_na_olt'] === false, 'fontes: o que ainda nao existe');
     $json = json_encode($t);
     $check(!str_contains((string) $json, '002EC7000008') && !str_contains((string) $json, 'OLT-OUTRO'), 'isolamento por provedor');
-    $check($reader->tree($providerId, 2) ['dispositivos'] === [], 'filtro por equipamento de outro provedor vazio');
+    $check($reader->tree($providerId, 2)['dispositivos'] === [] && count($reader->tree($providerId, 3)['dispositivos']) === 1, 'filtro por equipamento: de outro provedor vazio, do proprio 1');
 
     // Contrato de chaves da API (o fixture do jsdom em tests/net/rede_fibra.js usa as mesmas listas).
     $sortKeys = static function (string $csv): string { $x = explode(',', $csv); sort($x); return implode(',', $x); };
     $keys = static function (array $a): string { $x = array_keys($a); sort($x); return implode(',', $x); };
     $check($keys($t) === $sortKeys('gerado_em,dispositivos,resumo,limiares,fontes'), 'chaves da arvore');
-    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons'), 'chaves do equipamento');
+    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site'), 'chaves do equipamento (as atuais + tecnologia, tipo_no e site)');
     $check($keys($pons[0]) === $sortKeys('pon_index,label,onus,total,online'), 'chaves da PON');
     $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
     $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo'), 'chaves do resumo');
