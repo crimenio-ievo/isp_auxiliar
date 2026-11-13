@@ -69,6 +69,12 @@ final class NetOutageReader
         return $this->report($deviceId, $period, $includeMaintenance, static fn (array $onu): bool => (int) $onu['pon_index'] === $ponIndex);
     }
 
+    /** @return array<string,mixed> */
+    public function forDevice(int $deviceId, array $period, bool $includeMaintenance = false): array
+    {
+        return $this->report($deviceId, $period, $includeMaintenance, static fn (array $onu): bool => true);
+    }
+
     /** @param callable(array):bool $selected */
     private function report(int $deviceId, array $period, bool $includeMaintenance, callable $selected): array
     {

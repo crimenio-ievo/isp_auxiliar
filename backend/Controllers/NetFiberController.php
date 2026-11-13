@@ -1,0 +1,153 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use App\Core\AccessControl;
+use App\Core\Config;
+use App\Core\Flash;
+use App\Core\Request;
+use App\Core\Response;
+use App\Core\View;
+use App\Infrastructure\Database\Database;
+use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\Net\NetFiberReader;
+
+/**
+ * Tela "Rede de fibra" (somente leitura): página + dois endpoints JSON. Só gestor/admin. Lê apenas o banco de
+ * telemetria; não acessa a OLT nem o MkAuth e não grava nada (sem CSRF/auditoria porque não há escrita).
+ */
+final class NetFiberController
+{
+    private const NO_STORE = ['Cache-Control' => 'private, no-store'];
+
+    public function __construct(
+        private View $view,
+        private Config $config,
+        private LocalRepository $localRepository,
+        private Database $database
+    ) {
+    }
+
+    public function page(Request $request): Response
+    {
+        $user = $this->viewUser();
+        if (!AccessControl::isGestor($user['access'])) {
+            Flash::set('error', 'Seu usuário não possui acesso à rede de fibra.');
+
+            return Response::redirect('/dashboard');
+        }
+
+        $html = $this->view->render('net/fiber', [
+            'pageTitle' => 'Rede de fibra',
+            'currentPath' => $request->path(),
+            'basePath' => $request->basePath(),
+            'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
+            'user' => $user,
+        ]);
+
+        return Response::html($html, 200, self::NO_STORE);
+    }
+
+    public function tree(Request $request): Response
+    {
+        $providerId = $this->guard($denied);
+        if ($providerId === null) {
+            return $denied;
+        }
+        $device = $request->query('dispositivo');
+        try {
+            $data = (new NetFiberReader($this->database->pdo()))->tree($providerId, is_string($device) && ctype_digit($device) && $device !== '0' ? (int) $device : null);
+        } catch (\Throwable) {
+            return Response::json(['ok' => false, 'message' => 'Não foi possível ler a rede de fibra.'], 500, self::NO_STORE);
+        }
+
+        return Response::json(['ok' => true, 'data' => $data], 200, self::NO_STORE);
+    }
+
+    public function onu(Request $request): Response
+    {
+        $providerId = $this->guard($denied);
+        if ($providerId === null) {
+            return $denied;
+        }
+        $id = $request->query('id');
+        if (!is_string($id) || !ctype_digit($id) || $id === '0' || strlen($id) > 15) {
+            return Response::json(['ok' => false, 'message' => 'ONU inválida.'], 422, self::NO_STORE);
+        }
+        $kind = (string) $request->query('periodo', '24h');
+        if (!in_array($kind, ['1h', '24h', '7d', 'custom'], true)) {
+            return Response::json(['ok' => false, 'message' => 'Período inválido.'], 422, self::NO_STORE);
+        }
+        $from = $this->dateParam($request->query('de'));
+        $to = $this->dateParam($request->query('ate'));
+        if ($kind === 'custom' && $from === null) {
+            return Response::json(['ok' => false, 'message' => 'Informe o início do período personalizado.'], 422, self::NO_STORE);
+        }
+        try {
+            $data = (new NetFiberReader($this->database->pdo()))->sheet($providerId, (int) $id, $kind, $from, $to);
+        } catch (\InvalidArgumentException $e) {
+            return Response::json(['ok' => false, 'message' => 'Período personalizado inválido (início antes do fim, até 366 dias).'], 422, self::NO_STORE);
+        } catch (\Throwable) {
+            return Response::json(['ok' => false, 'message' => 'Não foi possível ler a ficha da ONU.'], 500, self::NO_STORE);
+        }
+        if ($data === null) {
+            return Response::json(['ok' => false, 'message' => 'ONU não encontrada.'], 404, self::NO_STORE);
+        }
+
+        return Response::json(['ok' => true, 'data' => $data], 200, self::NO_STORE);
+    }
+
+    /** Aceita "AAAA-MM-DD hh:mm:ss" ou "AAAA-MM-DDThh:mm" (campo datetime-local). */
+    private function dateParam(mixed $v): ?string
+    {
+        if (!is_string($v) || $v === '') {
+            return null;
+        }
+        $v = str_replace('T', ' ', trim($v));
+        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $v) === 1) {
+            $v .= ':00';
+        }
+        $d = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $v);
+
+        return $d !== false && $d->format('Y-m-d H:i:s') === $v ? $v : null;
+    }
+
+    /** @param Response|null $denied */
+    private function guard(?Response &$denied): ?int
+    {
+        $user = $this->viewUser();
+        if (!AccessControl::isGestor($user['access'])) {
+            $denied = Response::json(['ok' => false, 'message' => 'Acesso negado.'], 403, self::NO_STORE);
+
+            return null;
+        }
+        $providerId = $this->localRepository->currentProviderId();
+        if ($providerId === null) {
+            $denied = Response::json(['ok' => false, 'message' => 'Provedor não configurado.'], 500, self::NO_STORE);
+
+            return null;
+        }
+
+        return $providerId;
+    }
+
+    /** @return array<string,mixed> */
+    private function viewUser(): array
+    {
+        $user = is_array($_SESSION['user'] ?? null) ? $_SESSION['user'] : [];
+        $user['login'] = $this->localRepository->normalizeLogin((string) ($user['login'] ?? ''));
+        $access = $this->localRepository->accessProfileForUser($user);
+        $user['access'] = $access;
+        $user['can_manage_settings'] = $access['can_manage_settings'];
+        $user['can_access_contracts'] = $access['can_access_contracts'];
+        if ($access['is_admin']) {
+            $user['role'] = 'admin';
+        } elseif ($access['is_manager']) {
+            $user['role'] = 'manager';
+        }
+
+        return $user;
+    }
+}

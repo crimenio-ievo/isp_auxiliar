@@ -9,6 +9,7 @@ use App\Controllers\ClientController;
 use App\Controllers\ClientDocumentController;
 use App\Controllers\DashboardController;
 use App\Controllers\MapController;
+use App\Controllers\NetFiberController;
 use App\Controllers\OperationalProcessController;
 use App\Controllers\SettingsController;
 use App\Controllers\SystemController;
@@ -100,6 +101,9 @@ return static function (Router $router): void {
     $router->post('/api/mapa/links/excluir', [MapController::class, 'deleteLink'], 'api.map.links.delete');
     $router->post('/api/mapa/portas/editar', [MapController::class, 'updatePort'], 'api.map.ports.update');
     $router->post('/api/mapa/portas/excluir', [MapController::class, 'deletePort'], 'api.map.ports.delete');
+    $router->get('/rede-fibra', [NetFiberController::class, 'page'], 'net.fiber.page');
+    $router->get('/api/rede-fibra', [NetFiberController::class, 'tree'], 'api.net.fiber.tree');
+    $router->get('/api/rede-fibra/onu', [NetFiberController::class, 'onu'], 'api.net.fiber.onu');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');
     $router->post('/configuracoes', [SettingsController::class, 'save'], 'settings.save');
