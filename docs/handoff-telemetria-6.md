@@ -9,3 +9,6 @@
 **Hipótese:** os desvios negativos pequenos podem indicar erro no offset, diferença de relógio ou captura; a tarefa não autorizou tolerância negativa. Não escolher causa nem importar com esse resultado.
 
 **Não verificado:** equivalência pós-import, contagens no banco, e proteção em corrida entre checagem e gravação concorrente. Nenhum dado foi importado.
+
+## CP-A — layout
+Fato: eventos após árvore/ficha, cinco inicialmente e botão até 20; árvore com altura útil e rolagem, breakpoint 1100 px. `tests/net/run_all.sh`: 0 falhas, 42/88/97 verificações. Aparência real não verificada.

@@ -219,7 +219,9 @@ async function boot(opts) {
   ok(!m1.classList.contains('rf-ev--multi') && m1.querySelector('.rf-ev__text').textContent.indexOf('Queda sem aviso de energia em 1 ONU da PON 2') === 0 && m1.querySelector('.rf-ev__meta').textContent === '1 em aberto · precisão aproximada (ciclo de status)', 'evento unico em aberto, sem afirmar energia');
   const many = []; for (let i = 0; i < 25; i++) { many.push(evGroup({inicio: '2026-11-13 10:' + String(10 + i).padStart(2, '0') + ':00'})); }
   let ev2 = await boot({events: () => events(many)});
-  ok(ev2.qa('#rf-ev-list li.rf-ev').length === 20 && ev2.q('#rf-ev-list').lastElementChild.textContent === 'Mostrando os 20 mais recentes de 25.', 'limite de 20 eventos na tela com aviso');
+  ok(ev2.qa('#rf-ev-list li.rf-ev').length === 5 && !!ev2.qa('#rf-ev-list button').find(b => b.textContent === 'Mostrar mais'), 'eventos começam com cinco e botão');
+  ev2.qa('#rf-ev-list button').find(b => b.textContent === 'Mostrar mais').click();
+  ok(ev2.qa('#rf-ev-list li.rf-ev').length === 20 && ev2.q('#rf-ev-list').lastElementChild.textContent === 'Mostrando os 20 mais recentes de 25.', 'mostrar mais limita a 20 com aviso');
   let ev3 = await boot({events: () => events([evGroup()]), status: u => u.indexOf('/eventos') !== -1 ? 500 : 0});
   ok(ev3.q('#rf-ev-info').textContent === 'Acesso negado.' && ev3.qa('.rf-row--onu').length === 4, 'falha nos eventos nao quebra a arvore');
 

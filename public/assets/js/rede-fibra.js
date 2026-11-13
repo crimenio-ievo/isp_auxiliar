@@ -348,7 +348,7 @@
   function openModal() { $('rf-modal').hidden = false; drawChart($('rf-m-chart'), state.sheet, true); }
 
   /* ---------- eventos recentes (quedas correlacionadas por PON) ---------- */
-  var EV_MAX = 20;
+  var EV_MAX = 20, evLimit = 5;
   function renderEventPeriods() {
     var box = $('rf-ev-periods'); clear(box);
     [['1h', '1 h'], ['24h', '24 h'], ['7d', '1 semana']].forEach(function (p) {
@@ -363,7 +363,7 @@
     $('rf-ev-info').textContent = g.length === 0
       ? 'Nenhuma queda no período (' + fmtDT(d.periodo.from) + ' a ' + fmtDT(d.periodo.to) + ', horário de Brasília). Sem registro = estável. Manutenção e boot ficam de fora.'
       : g.length + ' evento(s) de queda no período (horário de Brasília); manutenção e boot ficam de fora.' + (d.fontes.quedas_log ? '' : ' Log da OLT ainda não importado: horas aproximadas.');
-    g.slice(0, EV_MAX).forEach(function (x) {
+    g.slice(0, evLimit).forEach(function (x) {
       var li = el('li', 'rf-ev' + (x.correlacionada ? ' rf-ev--multi' : ''));
       li.appendChild(el('span', 'rf-ev__when', fmtDT(x.inicio)));
       li.appendChild(el('span', 'rf-ev__text', x.texto.charAt(0).toUpperCase() + x.texto.slice(1) + (x.dispositivo_nome ? ' · ' + x.dispositivo_nome : '')));
@@ -377,7 +377,8 @@
       });
       li.appendChild(onus); list.appendChild(li);
     });
-    if (g.length > EV_MAX) { list.appendChild(el('li', 'rf-legend', 'Mostrando os ' + EV_MAX + ' mais recentes de ' + g.length + '.')); }
+    if (g.length > evLimit && evLimit < EV_MAX) { var more = el('button', '', 'Mostrar mais'); more.type = 'button'; more.addEventListener('click', function () { evLimit = EV_MAX; renderEvents(d); }); var item = el('li'); item.appendChild(more); list.appendChild(item); }
+    if (g.length > EV_MAX && evLimit >= EV_MAX) { list.appendChild(el('li', 'rf-legend', 'Mostrando os 20 mais recentes de ' + g.length + '.')); }
   }
   function loadEvents() {
     $('rf-ev-info').textContent = 'Carregando…';
