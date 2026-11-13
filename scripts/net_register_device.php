@@ -108,7 +108,7 @@ $pdo->beginTransaction();
 try {
     $ins = $pdo->prepare(
         "INSERT INTO net_devices (provider_id, map_node_id, profile_id, mgmt_host, snmp_version, credential_ref, expected_identity_json, enabled, status_interval_s, created_at, updated_at)
-         VALUES (:p, :n, :prof, :h, '2c', :ref, NULL, 1, 300, NOW(), NOW())"
+         VALUES (:p, :n, :prof, :h, '2c', :ref, NULL, 1, 600, NOW(), NOW())"
     );
     $ins->execute(['p' => $node['provider_id'], 'n' => $nodeId, 'prof' => $profile['id'], 'h' => $host, 'ref' => $ref]);
     $deviceId = (int) $pdo->lastInsertId();

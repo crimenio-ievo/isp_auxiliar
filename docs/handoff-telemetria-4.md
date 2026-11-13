@@ -49,3 +49,6 @@ Worktree `_isp_auxiliar_telemetria_fibra`, branch `feature/telemetria-fibra`, s�
 - A API entrega horários em UTC (`AAAA-MM-DD hh:mm:ss`). `public/assets/js/rede-fibra.js` agora interpreta como UTC e mostra tudo em `America/Sao_Paulo` via `Intl.DateTimeFormat`: `fmtDT` (árvore, resumo, listas, ficha), eixo do gráfico (dia = meia-noite de Brasília), cursor e dicas das faixas de queda. O texto do período indica "horário de Brasília".
 - Período personalizado: os campos `datetime-local` são horário de Brasília; antes de enviar, `de`/`ate` são convertidos para UTC (08:00 → 11:00; 23:30 → 02:30 do dia seguinte). O campo continua mostrando o que o usuário digitou; `ate` vazio não é enviado.
 - Servidor e API inalterados. Teste: `node tests/net/rede_fibra.js` (60 verificações) cobre as conversões, o eixo, o cursor e as listas.
+
+### 2. `net_register_device.php` com intervalo de status 600 s
+- O INSERT passa a gravar `status_interval_s = 600` (antes 300), alinhado ao que a migration 033 definiu para os equipamentos existentes. A migration 030 não foi tocada: o DEFAULT da coluna continua 300, só o script de registro explicita 600. Teste estático: `php tests/Feature/NetRegisterDeviceSmoke.php` (3 verificações). Nenhum equipamento foi registrado nem alterado.
