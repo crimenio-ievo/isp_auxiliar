@@ -125,6 +125,55 @@ final class NetFiberReader
         return ['estado' => $estado, 'minutos' => $age === null ? null : intdiv($age, 60), 'limite_s' => $limit];
     }
 
+    /**
+     * Eventos recentes: quedas correlacionadas por PON (até 10 s entre inícios), sem manutenção/boot.
+     *
+     * @return array<string,mixed>
+     */
+    public function events(int $providerId, string $kind = '24h', ?string $from = null, ?string $to = null, ?int $deviceId = null): array
+    {
+        $now = ($this->clock)();
+        $reader = $this->outageReader($logAvailable);
+        $period = $reader->period($kind, $from, $to);
+        $st = $this->pdo->prepare('SELECT d.id, n.name FROM net_devices d JOIN map_nodes n ON n.id = d.map_node_id WHERE d.provider_id = ?' . ($deviceId !== null ? ' AND d.id = ?' : '') . ' ORDER BY d.id');
+        $st->execute($deviceId !== null ? [$providerId, $deviceId] : [$providerId]);
+        $groups = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $d) {
+            $id = (int) $d['id'];
+            $onus = [];
+            foreach ($this->onuRows($id) as $r) {
+                $onus[(int) $r['id']] = $r;
+            }
+            $labels = [];
+            $p = $this->pdo->prepare("SELECT p.port_num, p.label FROM map_ports p JOIN net_devices d ON d.map_node_id = p.node_id WHERE d.id = ? AND p.port_role = 'pon'");
+            $p->execute([$id]);
+            foreach ($p->fetchAll(PDO::FETCH_ASSOC) as $port) {
+                $labels[(int) $port['port_num']] = (string) ($port['label'] ?: 'PON ' . $port['port_num']);
+            }
+            foreach ($reader->groupedByPon($id, $period) as $g) {
+                $g['dispositivo_id'] = $id;
+                $g['dispositivo_nome'] = (string) $d['name'];
+                $g['pon_label'] = $labels[$g['pon_index']] ?? 'PON ' . $g['pon_index'];
+                $g['onus'] = array_map(static function (array $o) use ($onus): array {
+                    $row = $onus[$o['onu_id']] ?? null;
+                    $mac = $row === null ? '' : (string) $row['onu_identifier'];
+
+                    return [
+                        'onu_id' => $o['onu_id'], 'onu_index' => $row === null ? null : (int) $row['onu_index'],
+                        'mac' => strlen($mac) === 12 ? implode(':', str_split($mac, 2)) : $mac,
+                        'started_at' => $o['started_at'], 'ended_at' => $o['ended_at'], 'open' => $o['open'], 'duration_s' => $o['duration_s'],
+                        'cause' => $o['cause'], 'source' => $o['source'],
+                    ];
+                }, $g['quedas']);
+                unset($g['quedas'], $g['device_id']);
+                $groups[] = $g;
+            }
+        }
+        usort($groups, static fn (array $a, array $b): int => [$b['inicio'], $a['dispositivo_id'], $a['pon_index']] <=> [$a['inicio'], $b['dispositivo_id'], $b['pon_index']]);
+
+        return ['gerado_em' => $now, 'periodo' => $period, 'grupos' => $groups, 'fontes' => ['quedas_poll' => true, 'quedas_log' => $logAvailable]];
+    }
+
     /** @return array<string,mixed>|null null se a ONU não existe neste provedor */
     public function sheet(int $providerId, int $onuId, string $kind = '24h', ?string $from = null, ?string $to = null): ?array
     {

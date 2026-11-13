@@ -80,3 +80,15 @@
   .rf-layout.has-panel { grid-template-columns: minmax(0, 1fr); }
   .rf-panel { position: static; max-height: none; }
 }
+
+.rf-events { padding: 14px 16px; display: grid; gap: 8px; }
+.rf-events h2 { margin: 0; font-size: 1.02rem; }
+.rf-events__head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.rf-events__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rf-ev { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; font-size: 0.88rem; }
+.rf-ev--multi { border-color: #e8a7a1; background: #fff7f6; }
+.rf-ev__when { font-weight: 700; }
+.rf-ev__text { font-weight: 700; }
+.rf-ev__meta { grid-column: 2; color: var(--muted); font-size: 0.8rem; }
+.rf-ev__onus { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
+.rf-ev__onus button { padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer; font: inherit; font-size: 0.78rem; color: var(--text); }

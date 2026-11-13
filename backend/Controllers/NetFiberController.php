@@ -76,17 +76,12 @@ final class NetFiberController
         if (!is_string($id) || !ctype_digit($id) || $id === '0' || strlen($id) > 15) {
             return Response::json(['ok' => false, 'message' => 'ONU inválida.'], 422, self::NO_STORE);
         }
-        $kind = (string) $request->query('periodo', '24h');
-        if (!in_array($kind, ['1h', '24h', '7d', 'custom'], true)) {
-            return Response::json(['ok' => false, 'message' => 'Período inválido.'], 422, self::NO_STORE);
-        }
-        $from = $this->dateParam($request->query('de'));
-        $to = $this->dateParam($request->query('ate'));
-        if ($kind === 'custom' && $from === null) {
-            return Response::json(['ok' => false, 'message' => 'Informe o início do período personalizado.'], 422, self::NO_STORE);
+        $period = $this->periodParams($request, $bad);
+        if ($period === null) {
+            return $bad;
         }
         try {
-            $data = (new NetFiberReader($this->database->pdo()))->sheet($providerId, (int) $id, $kind, $from, $to);
+            $data = (new NetFiberReader($this->database->pdo()))->sheet($providerId, (int) $id, $period[0], $period[1], $period[2]);
         } catch (\InvalidArgumentException $e) {
             return Response::json(['ok' => false, 'message' => 'Período personalizado inválido (início antes do fim, até 366 dias).'], 422, self::NO_STORE);
         } catch (\Throwable) {
@@ -97,6 +92,54 @@ final class NetFiberController
         }
 
         return Response::json(['ok' => true, 'data' => $data], 200, self::NO_STORE);
+    }
+
+    /** GET /api/rede-fibra/eventos?periodo=1h|24h|7d|custom[&de=&ate=][&dispositivo=ID]: quedas correlacionadas por PON. */
+    public function events(Request $request): Response
+    {
+        $providerId = $this->guard($denied);
+        if ($providerId === null) {
+            return $denied;
+        }
+        $period = $this->periodParams($request, $bad);
+        if ($period === null) {
+            return $bad;
+        }
+        $device = $request->query('dispositivo');
+        try {
+            $data = (new NetFiberReader($this->database->pdo()))->events($providerId, $period[0], $period[1], $period[2], is_string($device) && ctype_digit($device) && $device !== '0' ? (int) $device : null);
+        } catch (\InvalidArgumentException $e) {
+            return Response::json(['ok' => false, 'message' => 'Período personalizado inválido (início antes do fim, até 366 dias).'], 422, self::NO_STORE);
+        } catch (\Throwable) {
+            return Response::json(['ok' => false, 'message' => 'Não foi possível ler os eventos.'], 500, self::NO_STORE);
+        }
+
+        return Response::json(['ok' => true, 'data' => $data], 200, self::NO_STORE);
+    }
+
+    /**
+     * Validação comum de período (usada por /onu e /eventos).
+     *
+     * @param Response|null $bad
+     * @return array{0:string,1:?string,2:?string}|null
+     */
+    private function periodParams(Request $request, ?Response &$bad): ?array
+    {
+        $kind = (string) $request->query('periodo', '24h');
+        if (!in_array($kind, ['1h', '24h', '7d', 'custom'], true)) {
+            $bad = Response::json(['ok' => false, 'message' => 'Período inválido.'], 422, self::NO_STORE);
+
+            return null;
+        }
+        $from = $this->dateParam($request->query('de'));
+        $to = $this->dateParam($request->query('ate'));
+        if ($kind === 'custom' && $from === null) {
+            $bad = Response::json(['ok' => false, 'message' => 'Informe o início do período personalizado.'], 422, self::NO_STORE);
+
+            return null;
+        }
+
+        return [$kind, $from, $to];
     }
 
     /** Aceita "AAAA-MM-DD hh:mm:ss" ou "AAAA-MM-DDThh:mm" (campo datetime-local). */

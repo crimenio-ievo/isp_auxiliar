@@ -75,6 +75,86 @@ final class NetOutageReader
         return $this->report($deviceId, $period, $includeMaintenance, static fn (array $onu): bool => true);
     }
 
+    /**
+     * Agrupa quedas (sem manutenção/boot) da mesma PON cujo início fica a até $windowS segundos do início do grupo
+     * (o primeiro da fila de cada PON; não encadeia). Quedas de ONUs sem PON conhecida ficam de fora.
+     * Quedas só do poll têm hora aproximada (ciclo de status): o grupo vem com precisao 'aproximada'.
+     *
+     * @return list<array<string,mixed>> mais recente primeiro
+     */
+    public function groupedByPon(int $deviceId, array $period, int $windowS = 10): array
+    {
+        $rep = $this->forDevice($deviceId, $period);
+        $pon = [];
+        foreach ($this->net->deviceOnus($deviceId) as $o) {
+            $pon[(int) $o['id']] = (int) $o['pon_index'];
+        }
+        $byPon = [];
+        foreach ($rep['outages'] as $o) {
+            if (!isset($pon[$o['onu_id']])) {
+                continue;
+            }
+            $byPon[$pon[$o['onu_id']]][] = $o;
+        }
+        $groups = [];
+        foreach ($byPon as $ponIndex => $list) {
+            usort($list, static fn (array $a, array $b): int => [$a['started_at'], $a['onu_id']] <=> [$b['started_at'], $b['onu_id']]);
+            $cur = null;
+            foreach ($list as $o) {
+                if ($cur !== null && self::ts($o['started_at']) - self::ts($cur['inicio']) <= $windowS) {
+                    $cur['quedas'][] = $o;
+                    continue;
+                }
+                if ($cur !== null) {
+                    $groups[] = $this->finishGroup($deviceId, $ponIndex, $cur);
+                }
+                $cur = ['inicio' => $o['started_at'], 'quedas' => [$o]];
+            }
+            if ($cur !== null) {
+                $groups[] = $this->finishGroup($deviceId, $ponIndex, $cur);
+            }
+        }
+        usort($groups, static fn (array $a, array $b): int => [$b['inicio'], $a['pon_index']] <=> [$a['inicio'], $b['pon_index']]);
+
+        return $groups;
+    }
+
+    /** @param array{inicio:string,quedas:list<array<string,mixed>>} $cur @return array<string,mixed> */
+    private function finishGroup(int $deviceId, int $ponIndex, array $cur): array
+    {
+        $q = $cur['quedas'];
+        $n = count($q);
+        $causes = array_values(array_unique(array_map(static fn (array $o): string => (string) $o['cause'], $q)));
+        $allGasp = $causes === ['energia'];
+        $motivo = count($causes) === 1 ? $causes[0] : 'misto';
+        $withGasp = count(array_filter($q, static fn (array $o): bool => $o['cause'] === 'energia'));
+        $allLog = count(array_filter($q, static fn (array $o): bool => $o['source'] === 'log')) === $n;
+        $ends = array_map(static fn (array $o) => $o['ended_at'], $q);
+        $open = count(array_filter($q, static fn (array $o): bool => $o['open']));
+        $onus = $n === 1 ? '1 ONU' : $n . ' ONUs';
+        $texto = match (true) {
+            $allGasp => "queda de energia em {$onus} da PON {$ponIndex}",
+            $motivo === 'sem_aviso_energia' => "queda sem aviso de energia em {$onus} da PON {$ponIndex}",
+            $motivo === 'desconhecida' => "queda em {$onus} da PON {$ponIndex} (motivo não informado)",
+            default => "queda em {$onus} da PON {$ponIndex} ({$withGasp} com aviso de energia)",
+        };
+
+        return [
+            'device_id' => $deviceId,
+            'pon_index' => $ponIndex,
+            'inicio' => $cur['inicio'],
+            'fim' => $open > 0 ? null : max($ends),
+            'quantidade' => $n,
+            'em_aberto' => $open,
+            'motivo' => $motivo,
+            'todas_dying_gasp' => $allGasp,
+            'correlacionada' => $n >= 2,
+            'precisao' => $allLog ? 'exata' : 'aproximada (ciclo de status)',
+            'texto' => $texto,
+            'quedas' => $q,
+        ];
+    }
+
     /** @param callable(array):bool $selected */
     private function report(int $deviceId, array $period, bool $includeMaintenance, callable $selected): array
     {

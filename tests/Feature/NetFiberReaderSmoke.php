@@ -224,6 +224,37 @@ try {
     $check($status->getValue($r) === 200 && str_contains($html, 'id="rf-app"') && str_contains($html, 'data-api-tree="/api/rede-fibra"') && str_contains($html, 'data-api-onu="/api/rede-fibra/onu"') && str_contains($html, 'class="app-nav"') && str_contains($html, 'rede-fibra.js') && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', 'pagina: 200, shell, APIs e scripts, sem cache');
     $check(!preg_match('/simulad|fict[ií]c|lorem/i', $html), 'pagina sem dados simulados');
 
+    // Eventos recentes (CP3): quedas correlacionadas por PON.
+    foreach ([[2, 5000], [3, 4995]] as [$oid, $s]) {
+        $mac = '00' . '2EC700000' . $oid . '';
+        $pdo->exec("INSERT INTO net_onu_outages (provider_id,device_id,onu_id,onu_identifier,source,event_key,started_at,ended_at,duration_s,cause,category,imported_at,updated_at) VALUES ($providerId,1,$oid,'002EC700000$oid','log','" . str_repeat((string) $oid, 64) . "','{$ago($s)}','{$ago($s - 60)}',60,'energia','queda','$now','$now')");
+    }
+    $pdo->exec("INSERT INTO net_onu_outages (provider_id,device_id,onu_id,onu_identifier,source,event_key,started_at,ended_at,duration_s,cause,category,maintenance_reason,imported_at,updated_at) VALUES ($providerId,1,5,'002EC7000005','log','" . str_repeat('b', 64) . "','{$ago(4000)}','{$ago(3990)}',10,'sem_aviso_energia','manutencao','boot','$now','$now')");
+    $ev = $reader->events($providerId, '24h');
+    $check($keys($ev) === $sortKeys('gerado_em,periodo,grupos,fontes'), 'chaves dos eventos');
+    $gr = $ev['grupos'];
+    $check(count($gr) === 3 && $keys($gr[0]) === $sortKeys('dispositivo_id,dispositivo_nome,pon_index,pon_label,inicio,fim,quantidade,em_aberto,motivo,todas_dying_gasp,correlacionada,precisao,texto,onus'), 'grupos: 3 (ONU 6 so poll, ONU 1 e o par 2+3), chaves');
+    $pair = array_values(array_filter($gr, static fn ($g) => $g['quantidade'] === 2))[0];
+    $check($pair['pon_index'] === 1 && $pair['pon_label'] === 'PON 1' && $pair['dispositivo_nome'] === 'OLT-TESTE' && $pair['texto'] === 'queda de energia em 2 ONUs da PON 1' && $pair['todas_dying_gasp'] === true && $pair['precisao'] === 'exata' && $pair['correlacionada'] === true, 'par de ONUs a 5 s na PON 1 vira "queda de energia em 2 ONUs da PON 1"');
+    $check(array_column($pair['onus'], 'onu_index') === [2, 3] && $pair['onus'][0]['mac'] === '00:2E:C7:00:00:02' && $keys($pair['onus'][0]) === $sortKeys('onu_id,onu_index,mac,started_at,ended_at,open,duration_s,cause,source'), 'ONUs do grupo com indice e MAC');
+    $check(count(array_filter($gr, static fn ($g) => str_contains(json_encode($g), '002EC7000005'))) === 0 && !str_contains(json_encode($gr), '"maintenance'), 'manutencao/boot (ONU 5) fora dos eventos');
+    $check(count($reader->events($providerId, '1h')['grupos']) === 0, 'periodo de 1 h sem quedas: nenhum grupo');
+    $check($reader->events($providerId, '24h', null, null, 2)['grupos'] === [], 'filtro por equipamento de outro provedor: vazio');
+    foreach (['events'] as $m) {
+        $_SESSION = ['user' => ['login' => 'tec', 'role' => 'technician', 'name' => 'Tec']];
+        $r = $call($m, ['periodo' => '24h']);
+        $check($status->getValue($r) === 403, 'tecnico: eventos 403');
+        $_SESSION = ['user' => ['login' => 'adm', 'role' => 'admin', 'is_admin' => true, 'name' => 'Adm']];
+        $r = $call($m, ['periodo' => '24h']); $d = json_decode((string) $body->getValue($r), true);
+        $check($status->getValue($r) === 200 && count($d['data']['grupos']) === 3 && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', 'admin: eventos 200');
+        foreach ([[['periodo' => 'ano'], 422], [['periodo' => 'custom'], 422], [['periodo' => 'custom', 'de' => $now, 'ate' => '2020-01-01 00:00:00'], 422], [['periodo' => 'custom', 'de' => 'lixo'], 422]] as [$q, $code]) {
+            $check($status->getValue($call($m, $q)) === $code, 'eventos: validacao igual a da ficha ' . json_encode($q));
+        }
+        $r = $call($m, ['periodo' => 'custom', 'de' => date('Y-m-d\TH:i', time() - 7200), 'ate' => date('Y-m-d\TH:i', time() - 3000)]);
+        $check($status->getValue($r) === 200 && count(json_decode((string) $body->getValue($r), true)['data']['grupos']) >= 2, 'eventos: periodo personalizado');
+    }
+    $check($router->match('GET', '/api/rede-fibra/eventos') !== null && $router->match('POST', '/api/rede-fibra/eventos') === null, 'rota GET /api/rede-fibra/eventos (somente leitura)');
+
     // Sem a migration 034: so poll, avisa nas fontes.
     $pdo->exec('DROP TABLE net_onu_outages');
     $t = $reader->tree($providerId);

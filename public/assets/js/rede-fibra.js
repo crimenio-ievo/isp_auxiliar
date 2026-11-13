@@ -4,7 +4,7 @@
   'use strict';
   var app = document.getElementById('rf-app');
   if (!app) { return; }
-  var API = { tree: app.dataset.apiTree, onu: app.dataset.apiOnu };
+  var API = { tree: app.dataset.apiTree, onu: app.dataset.apiOnu, events: app.dataset.apiEvents };
   var $ = function (id) { return document.getElementById(id); };
   var NS = 'http://www.w3.org/2000/svg';
   var YMIN = -30, YMAX = -12;
@@ -18,7 +18,7 @@
   var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
   var SITE_LABEL = { pop: 'POP', tower: 'Torre' };
   var STATUS = { online: 'Online', offline: 'Offline', unknown: 'Desconhecido' };
-  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '24h', from: '', to: '', sheet: null };
+  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '24h', from: '', to: '', sheet: null, evPeriod: '24h' };
 
   function loadCols() {
     try { var v = JSON.parse(window.localStorage.getItem('rf.cols') || 'null'); if (Array.isArray(v)) { return v; } } catch (e) { /* sem storage */ }
@@ -347,6 +347,44 @@
   }
   function openModal() { $('rf-modal').hidden = false; drawChart($('rf-m-chart'), state.sheet, true); }
 
+  /* ---------- eventos recentes (quedas correlacionadas por PON) ---------- */
+  var EV_MAX = 20;
+  function renderEventPeriods() {
+    var box = $('rf-ev-periods'); clear(box);
+    [['1h', '1 h'], ['24h', '24 h'], ['7d', '1 semana']].forEach(function (p) {
+      var b = el('button', state.evPeriod === p[0] ? 'is-on' : '', p[1]); b.type = 'button';
+      b.addEventListener('click', function () { state.evPeriod = p[0]; renderEventPeriods(); loadEvents(); });
+      box.appendChild(b);
+    });
+  }
+  function renderEvents(d) {
+    var list = $('rf-ev-list'); clear(list);
+    var g = d.grupos;
+    $('rf-ev-info').textContent = g.length === 0
+      ? 'Nenhuma queda no período (' + fmtDT(d.periodo.from) + ' a ' + fmtDT(d.periodo.to) + ', horário de Brasília). Sem registro = estável. Manutenção e boot ficam de fora.'
+      : g.length + ' evento(s) de queda no período (horário de Brasília); manutenção e boot ficam de fora.' + (d.fontes.quedas_log ? '' : ' Log da OLT ainda não importado: horas aproximadas.');
+    g.slice(0, EV_MAX).forEach(function (x) {
+      var li = el('li', 'rf-ev' + (x.correlacionada ? ' rf-ev--multi' : ''));
+      li.appendChild(el('span', 'rf-ev__when', fmtDT(x.inicio)));
+      li.appendChild(el('span', 'rf-ev__text', x.texto.charAt(0).toUpperCase() + x.texto.slice(1) + (x.dispositivo_nome ? ' · ' + x.dispositivo_nome : '')));
+      var meta = (x.em_aberto ? x.em_aberto + ' em aberto' : 'retorno ' + fmtDT(x.fim)) + ' · precisão ' + x.precisao + (x.todas_dying_gasp ? ' · todas com Dying Gasp' : '');
+      li.appendChild(el('span', 'rf-ev__meta', meta));
+      var onus = el('span', 'rf-ev__onus');
+      x.onus.forEach(function (o) {
+        var b = el('button', '', 'ONU ' + o.onu_index); b.type = 'button'; b.title = o.mac;
+        b.addEventListener('click', function () { openSheet(o.onu_id); });
+        onus.appendChild(b);
+      });
+      li.appendChild(onus); list.appendChild(li);
+    });
+    if (g.length > EV_MAX) { list.appendChild(el('li', 'rf-legend', 'Mostrando os ' + EV_MAX + ' mais recentes de ' + g.length + '.')); }
+  }
+  function loadEvents() {
+    $('rf-ev-info').textContent = 'Carregando…';
+    return get(API.events + '?periodo=' + encodeURIComponent(state.evPeriod)).then(renderEvents)
+      .catch(function (e) { clear($('rf-ev-list')); $('rf-ev-info').textContent = e.message; });
+  }
+
   /* ---------- carga e eventos ---------- */
   function loadTree() {
     $('rf-summary').textContent = 'Carregando…';
@@ -358,11 +396,13 @@
   $('rf-f-olt').addEventListener('change', function () { if (state.tree) { fillPons(); renderTree(); } });
   $('rf-f-site').addEventListener('change', function () { if (state.tree) { fillPons(); renderTree(); } });
   $('rf-f-pon').addEventListener('change', function () { if (state.tree) { renderTree(); } });
-  $('rf-refresh').addEventListener('click', loadTree);
+  $('rf-refresh').addEventListener('click', function () { loadTree(); loadEvents(); });
   $('rf-p-close').addEventListener('click', function () { state.selected = null; $('rf-panel').hidden = true; document.querySelector('.rf-layout').classList.remove('has-panel'); if (state.tree) { renderTree(); } });
   $('rf-m-close').addEventListener('click', function () { $('rf-modal').hidden = true; });
   $('rf-modal').addEventListener('click', function (e) { if (e.target === $('rf-modal')) { $('rf-modal').hidden = true; } });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { $('rf-modal').hidden = true; } });
   renderColsMenu();
+  renderEventPeriods();
   loadTree();
+  loadEvents();
 })();

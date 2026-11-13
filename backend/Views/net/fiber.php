@@ -21,7 +21,8 @@ ob_start();
 
 <div class="rf" id="rf-app"
      data-api-tree="<?= $e(Url::to('/api/rede-fibra')); ?>"
-     data-api-onu="<?= $e(Url::to('/api/rede-fibra/onu')); ?>">
+     data-api-onu="<?= $e(Url::to('/api/rede-fibra/onu')); ?>"
+     data-api-events="<?= $e(Url::to('/api/rede-fibra/eventos')); ?>">
 
     <section class="card rf-filters" aria-label="Filtros">
         <label class="rf-field"><span>Site</span><select id="rf-f-site"><option value="">Todos</option></select></label>
@@ -42,6 +43,15 @@ ob_start();
     <div class="rf-health" id="rf-health" role="alert" hidden></div>
     <p class="rf-summary" id="rf-summary" aria-live="polite">Carregando…</p>
     <p class="rf-note" id="rf-note" hidden></p>
+
+    <section class="card rf-events" id="rf-events" aria-label="Eventos recentes">
+        <div class="rf-events__head">
+            <h2>Eventos recentes</h2>
+            <div class="rf-periods" id="rf-ev-periods"></div>
+        </div>
+        <p class="rf-legend" id="rf-ev-info">Carregando…</p>
+        <ul class="rf-events__list" id="rf-ev-list"></ul>
+    </section>
 
     <div class="rf-layout">
         <section class="card rf-tree" aria-label="Árvore site, equipamento, PON e ONU">

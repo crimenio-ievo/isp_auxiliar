@@ -46,6 +46,13 @@ const K = {
 };
 const keys = o => Object.keys(o).sort().join(',');
 const K2 = s => s.split(',').sort().join(',');
+const evGroup = (over) => Object.assign({dispositivo_id: 1, dispositivo_nome: 'OLT-<b>X</b>', pon_index: 1, pon_label: 'PON 1', inicio: '2026-11-13 11:34:01', fim: '2026-11-13 11:35:05', quantidade: 2, em_aberto: 0, motivo: 'energia',
+  todas_dying_gasp: true, correlacionada: true, precisao: 'exata', texto: 'queda de energia em 2 ONUs da PON 1',
+  onus: [{onu_id: 1, onu_index: 6, mac: '00:2E:C7:00:00:01', started_at: '2026-11-13 11:34:01', ended_at: '2026-11-13 11:35:05', open: false, duration_s: 64, cause: 'energia', source: 'log'},
+         {onu_id: 2, onu_index: 7, mac: '00:2E:C7:00:00:02', started_at: '2026-11-13 11:34:01', ended_at: '2026-11-13 11:35:05', open: false, duration_s: 64, cause: 'energia', source: 'log'}]}, over || {});
+const events = (groups) => ({gerado_em: '2026-11-13 12:00:00', periodo: {kind: '24h', from: '2026-11-12 12:00:00', to: '2026-11-13 12:00:00'}, grupos: groups, fontes: {quedas_poll: true, quedas_log: true}});
+const EVK = 'gerado_em,periodo,grupos,fontes', EVG = 'dispositivo_id,dispositivo_nome,pon_index,pon_label,inicio,fim,quantidade,em_aberto,motivo,todas_dying_gasp,correlacionada,precisao,texto,onus', EVO = 'onu_id,onu_index,mac,started_at,ended_at,open,duration_s,cause,source';
+
 async function boot(opts) {
   opts = opts || {};
   const errs = [], vc = new VirtualConsole(); vc.on('jsdomError', e => errs.push(String(e.detail && e.detail.message || e.message))); vc.on('error', e => errs.push(String(e)));
@@ -53,7 +60,7 @@ async function boot(opts) {
   const dom = new JSDOM(html, {runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc, url: 'http://localhost/rede-fibra'});
   const w = dom.window;
   const treeData = opts.tree ? opts.tree(JSON.parse(JSON.stringify(tree))) : tree;
-  w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
+  w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/eventos') !== -1 ? (opts.events ? opts.events(u) : events([evGroup()])) : u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
     return Promise.resolve({ok: !status, status: status || 200, json: () => Promise.resolve(body)}); };
   w.eval(js); await wait(40);
   const d = w.document, q = s => d.querySelector(s), qa = s => [...d.querySelectorAll(s)];
@@ -62,6 +69,7 @@ async function boot(opts) {
 
 (async () => {
   ok(keys(tree) === K2(K.tree) && keys(tree.dispositivos[0]) === K2(K.device) && keys(tree.dispositivos[0].pons[0]) === K2(K.pon) && keys(tree.dispositivos[0].pons[0].onus[0]) === K2(K.onu), 'fixture da arvore com as mesmas chaves da API');
+  ok(keys(events([evGroup()])) === K2(EVK) && keys(evGroup()) === K2(EVG) && keys(evGroup().onus[0]) === K2(EVO), 'fixture de eventos com as mesmas chaves da API');
   ok(keys(sheet()) === K2(K.sheet) && keys(sheet().onu) === K2(K.onu.replace(',quedas_24h,ultima_queda_em', '') + ',' + K.sheetOnu) && keys(outage) === K2(K.outage), 'fixture da ficha com as mesmas chaves da API');
   let t = await boot();
   const sel0 = (id, v) => { t.q(id).value = v; t.ev(t.q(id), 'change'); };
@@ -190,6 +198,31 @@ async function boot(opts) {
   sel2('offline'); ok(st.qa('.rf-row--onu').length === 0, 'filtro Offline nao inclui ONU desatualizada (offline so quando a OLT respondeu)');
   sel2('online'); ok(st.qa('.rf-row--onu').length === 2, 'filtro Online exclui as desatualizadas');
 
+  // Eventos recentes (CP3)
+  ok(t.calls.some(u => /\/api\/rede-fibra\/eventos\?periodo=24h$/.test(u)), 'a pagina pede os eventos de 24 h');
+  const li = t.qa('#rf-ev-list li.rf-ev');
+  ok(li.length === 1 && li[0].classList.contains('rf-ev--multi') && li[0].querySelector('.rf-ev__when').textContent === '13/11 08:34', 'evento correlacionado, hora 11:34 UTC = 08:34 em Brasilia');
+  ok(li[0].querySelector('.rf-ev__text').textContent === 'Queda de energia em 2 ONUs da PON 1 · OLT-<b>X</b>' && !li[0].querySelector('.rf-ev__text b'), 'texto "queda de energia em N ONUs da PON X" (texto puro, sem HTML)');
+  ok(li[0].querySelector('.rf-ev__meta').textContent === 'retorno 13/11 08:35 · precisão exata · todas com Dying Gasp', 'retorno, precisao e Dying Gasp: ' + li[0].querySelector('.rf-ev__meta').textContent);
+  ok(t.qa('#rf-ev-list .rf-ev__onus button').map(b => b.textContent).join('|') === 'ONU 6|ONU 7' && t.q('#rf-ev-info').textContent.indexOf('1 evento(s) de queda no período') === 0 && t.q('#rf-ev-info').textContent.indexOf('manutenção e boot ficam de fora') !== -1, 'ONUs do evento e resumo');
+  ok(!/fibra|cabo|rompimento/i.test(t.q('#rf-events').textContent), 'eventos nao afirmam a causa fisica');
+  const callsBefore = t.calls.length; t.qa('#rf-ev-list .rf-ev__onus button')[1].click(); await wait(30);
+  ok(/\/onu\?id=2&periodo=/.test(t.calls[t.calls.length - 1]) && t.calls.length === callsBefore + 1, 'clicar numa ONU do evento abre a ficha');
+  t.qa('#rf-ev-periods button').filter(b => b.textContent === '1 h')[0].click(); await wait(30);
+  ok(/\/eventos\?periodo=1h$/.test(t.calls[t.calls.length - 1]) && t.qa('#rf-ev-periods button.is-on')[0].textContent === '1 h', 'periodo 1 h dos eventos');
+  t.qa('#rf-ev-periods button').filter(b => b.textContent === '1 semana')[0].click(); await wait(30);
+  ok(/\/eventos\?periodo=7d$/.test(t.calls[t.calls.length - 1]), 'periodo 1 semana dos eventos');
+  let ev0 = await boot({events: () => events([])});
+  ok(ev0.qa('#rf-ev-list li').length === 0 && ev0.q('#rf-ev-info').textContent.indexOf('Nenhuma queda no período') === 0 && ev0.q('#rf-ev-info').textContent.indexOf('Sem registro = estável') !== -1 && ev0.q('#rf-ev-info').textContent.indexOf('(12/11 09:00 a 13/11 09:00, horário de Brasília)') !== -1, 'sem eventos: estavel, em horario de Brasilia');
+  let ev1 = await boot({events: () => events([evGroup({quantidade: 1, correlacionada: false, todas_dying_gasp: false, motivo: 'sem_aviso_energia', texto: 'queda sem aviso de energia em 1 ONU da PON 2', em_aberto: 1, fim: null, precisao: 'aproximada (ciclo de status)', onus: [evGroup().onus[0]]})])});
+  const m1 = ev1.q('#rf-ev-list li');
+  ok(!m1.classList.contains('rf-ev--multi') && m1.querySelector('.rf-ev__text').textContent.indexOf('Queda sem aviso de energia em 1 ONU da PON 2') === 0 && m1.querySelector('.rf-ev__meta').textContent === '1 em aberto · precisão aproximada (ciclo de status)', 'evento unico em aberto, sem afirmar energia');
+  const many = []; for (let i = 0; i < 25; i++) { many.push(evGroup({inicio: '2026-11-13 10:' + String(10 + i).padStart(2, '0') + ':00'})); }
+  let ev2 = await boot({events: () => events(many)});
+  ok(ev2.qa('#rf-ev-list li.rf-ev').length === 20 && ev2.q('#rf-ev-list').lastElementChild.textContent === 'Mostrando os 20 mais recentes de 25.', 'limite de 20 eventos na tela com aviso');
+  let ev3 = await boot({events: () => events([evGroup()]), status: u => u.indexOf('/eventos') !== -1 ? 500 : 0});
+  ok(ev3.q('#rf-ev-info').textContent === 'Acesso negado.' && ev3.qa('.rf-row--onu').length === 4, 'falha nos eventos nao quebra a arvore');
+
   // Erro 403 / falha de carga
   let f = await boot({status: () => 403});
   ok(f.q('#rf-summary').textContent === 'Acesso negado.', 'erro 403 mostrado, sem quebrar a pagina');
@@ -198,7 +231,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });
