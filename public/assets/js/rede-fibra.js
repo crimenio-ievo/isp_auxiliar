@@ -68,7 +68,7 @@
   }
   function onuLevel(f) { return !!(f.status || f.down || f.novinc || f.q); }
   function keep(o, f) {
-    if (f.status && o.status !== f.status) { return false; }
+    if (f.status === 'sem_resposta') { if (!o.desatualizado) { return false; } } else if (f.status && (o.desatualizado || o.status !== f.status)) { return false; }
     if (f.down && !(o.quedas_24h > 0)) { return false; }
     if (f.novinc && o.cliente !== null) { return false; }
     if (f.q && o.mac.replace(/:/g, '').toLowerCase().indexOf(f.q) === -1) { return false; }
@@ -97,7 +97,10 @@
   }
   function cell(o, k) {
     var td = el('td');
-    if (k === 'status') { td.appendChild(pill(o.status, STATUS[o.status] || o.status)); if (o.desatualizado) { td.appendChild(el('span', 'rf-muted', ' (desatualizado)')); } }
+    if (k === 'status') {
+      if (o.desatualizado) { td.appendChild(pill('unknown', 'Sem resposta')); td.appendChild(el('span', 'rf-muted', ' · último: ' + (STATUS[o.status] || o.status))); td.title = 'A OLT não respondeu na última coleta: este estado pode estar desatualizado.'; }
+      else { td.appendChild(pill(o.status, STATUS[o.status] || o.status)); }
+    }
     else if (k === 'rx') { td.textContent = o.rx_dbm === null ? 'sem leitura' : o.rx_dbm.toFixed(2); if (o.rx_dbm === null) { td.className = 'rf-muted'; } }
     else if (k === 'band') { td.appendChild(pill(o.rx_band, BAND[o.rx_band] || o.rx_band)); }
     else if (k === 'tx') { td.textContent = o.tx_dbm === null ? 'sem leitura' : o.tx_dbm.toFixed(2); }
@@ -172,11 +175,24 @@
     $('rf-empty').hidden = shown !== 0;
     var s = state.tree.resumo;
     $('rf-summary').textContent = s.onus + ' ONUs · ' + s.online + ' online · ' + s.offline + ' offline · atenção ' + s.atencao + ' · crítico ' + s.critico +
-      ' · caíram em 24 h: ' + s.quedas_24h + ' · sem vínculo: ' + s.sem_vinculo + ' · gerado em ' + fmtDT(state.tree.gerado_em);
+      ' · caíram em 24 h: ' + s.quedas_24h + (s.sem_resposta ? ' · sem resposta: ' + s.sem_resposta : '') + ' · sem vínculo: ' + s.sem_vinculo + ' · gerado em ' + fmtDT(state.tree.gerado_em);
+    renderHealth();
     var notes = [];
     if (!state.tree.fontes.quedas_log) { notes.push('Quedas do log da OLT ainda não importadas: as quedas abaixo vêm só da coleta (hora aproximada, sem motivo).'); }
     notes.push('Cliente vinculado e CTO ainda não são lidos (sem vínculo cadastrado).');
     $('rf-note').textContent = notes.join(' '); $('rf-note').hidden = false;
+  }
+  /* Aviso de saúde da coleta (vem do servidor: ok, atrasada, falha ou sem_leitura). Não afirma a causa. */
+  function renderHealth() {
+    var box = $('rf-health'); clear(box); var n = 0;
+    state.tree.dispositivos.forEach(function (d) {
+      var h = d.saude; if (!h || h.estado === 'ok') { return; }
+      var who = (TYPE_LABEL[d.tipo_no] || 'Equipamento') + ' ' + d.nome, p = el('p', 'rf-health__item');
+      if (h.estado === 'sem_leitura') { p.textContent = who + ': ainda sem nenhuma leitura registrada. Os estados abaixo podem estar desatualizados.'; }
+      else { p.textContent = who + ' sem resposta há ' + dur(h.minutos * 60) + ': os estados abaixo podem estar desatualizados (última leitura ok: ' + fmtDT(d.ultima_leitura_ok) + ', horário de Brasília' + (d.ultimo_resultado && d.ultimo_resultado !== 'ok' ? '; resultado da última coleta: ' + d.ultimo_resultado : '') + ').'; }
+      box.appendChild(p); n++;
+    });
+    box.hidden = n === 0;
   }
   function renderColsMenu() {
     var box = $('rf-cols-list'); clear(box);

@@ -29,7 +29,7 @@ ob_start();
         <label class="rf-field"><span>PON</span><select id="rf-f-pon"><option value="">Todas</option></select></label>
         <label class="rf-field"><span>Estado</span>
             <select id="rf-f-status">
-                <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Desconhecido</option>
+                <option value="">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Desconhecido</option><option value="sem_resposta">Sem resposta (desatualizado)</option>
             </select>
         </label>
         <label class="rf-field"><span>Buscar MAC</span><input id="rf-f-q" type="search" placeholder="ex.: 00:2E:C7" autocomplete="off"></label>
@@ -39,6 +39,7 @@ ob_start();
         <button type="button" class="button" id="rf-refresh">Atualizar</button>
     </section>
 
+    <div class="rf-health" id="rf-health" role="alert" hidden></div>
     <p class="rf-summary" id="rf-summary" aria-live="polite">Carregando…</p>
     <p class="rf-note" id="rf-note" hidden></p>
 

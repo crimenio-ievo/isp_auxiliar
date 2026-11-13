@@ -138,10 +138,10 @@ try {
     $sortKeys = static function (string $csv): string { $x = explode(',', $csv); sort($x); return implode(',', $x); };
     $keys = static function (array $a): string { $x = array_keys($a); sort($x); return implode(',', $x); };
     $check($keys($t) === $sortKeys('gerado_em,dispositivos,resumo,limiares,fontes'), 'chaves da arvore');
-    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site'), 'chaves do equipamento (as atuais + tecnologia, tipo_no e site)');
+    $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site,saude'), 'chaves do equipamento (as atuais + tecnologia, tipo_no, site e saude)');
     $check($keys($pons[0]) === $sortKeys('pon_index,label,onus,total,online'), 'chaves da PON');
     $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
-    $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo'), 'chaves do resumo');
+    $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo,sem_resposta'), 'chaves do resumo');
     $fk = $reader->sheet($providerId, 1);
     $check($keys($fk) === $sortKeys('onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto'), 'chaves da ficha');
     $check($keys($fk['onu']) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto'), 'chaves da ONU na ficha');
@@ -166,6 +166,26 @@ try {
     $check($reader->sheet($providerId, 999) === null && $reader->sheet($providerId, 8) === null && $reader->sheet($providerId, 7) === null, 'ONU inexistente, de outro provedor ou removida = null');
     $f5 = $reader->sheet($providerId, 5);
     $check($f5['vizinhos']['mediana_dbm'] === null && $f5['onu']['rx_dbm'] === null && $f5['serie_7d']['pontos'] === [], 'ONU sem leitura: sem mediana e sem serie');
+
+    // Saude da coleta (CP2): ok / atrasada / falha / sem_leitura, sem afirmar a causa.
+    $check($d0['saude'] === ['estado' => 'ok', 'minutos' => 0, 'limite_s' => 1200] && $d1['saude']['estado'] === 'sem_leitura' && $d1['saude']['minutos'] === null, 'saude: ok com leitura recente; sem_leitura quando nunca houve');
+    $check($t['resumo']['sem_resposta'] === 0 && $o1['desatualizado'] === false, 'sem ONU desatualizada: sem_resposta = 0');
+    $pdo->exec("UPDATE net_device_poll_state SET last_success_at = '{$ago(1190)}' WHERE device_id = 1");
+    $h = $reader->tree($providerId)['dispositivos'][0]['saude'];
+    $check($h['estado'] === 'ok' && $h['minutos'] === 20, 'saude: logo abaixo de 2 intervalos ainda e ok');
+    $pdo->exec("UPDATE net_device_poll_state SET last_success_at = '{$ago(1500)}' WHERE device_id = 1");
+    $h = $reader->tree($providerId)['dispositivos'][0]['saude'];
+    $check($h['estado'] === 'atrasada' && $h['minutos'] === 25 && $h['limite_s'] === 1200, 'saude: leitura de 25 min com intervalo de 10 = atrasada');
+    $pdo->exec("UPDATE net_device_poll_state SET last_success_at = '$now', last_result = 'timeout' WHERE device_id = 1");
+    $check($reader->tree($providerId)['dispositivos'][0]['saude']['estado'] === 'falha', 'saude: ultimo resultado diferente de ok = falha, mesmo com leitura recente');
+    $pdo->exec("UPDATE net_device_poll_state SET last_result = 'partial' WHERE device_id = 1");
+    $check($reader->tree($providerId)['dispositivos'][0]['saude']['estado'] === 'falha', 'saude: resultado parcial tambem');
+    $pdo->exec("UPDATE net_onu_state SET stale = 1 WHERE onu_id IN (1, 4)");
+    $tt = $reader->tree($providerId);
+    $dd = array_column($tt['dispositivos'][0]['pons'][0]['onus'], 'desatualizado', 'id');
+    $check($dd[1] === true && $dd[4] === true && $dd[2] === false && $tt['resumo']['sem_resposta'] === 2 && $tt['resumo']['offline'] === 1, 'ONU desatualizada (stale) distinta de offline; resumo conta sem_resposta');
+    $check($reader->sheet($providerId, 4)['onu']['desatualizado'] === true, 'ficha tambem traz desatualizado');
+    $pdo->exec("UPDATE net_onu_state SET stale = 0"); $pdo->exec("UPDATE net_device_poll_state SET last_result = 'ok' WHERE device_id = 1");
 
     // Limiares do provedor sobrescrevem o padrao.
     $pdo->exec("INSERT INTO provider_settings (provider_id,setting_key,setting_value,updated_at) VALUES ($providerId,'net.rx.warn_dbm','-24',NOW())");

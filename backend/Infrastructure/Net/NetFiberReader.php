@@ -47,7 +47,7 @@ final class NetFiberReader
         $st = $this->pdo->prepare($sql);
         $st->execute($deviceId !== null ? [$providerId, $deviceId] : [$providerId]);
         $devices = [];
-        $sum = ['onus' => 0, 'online' => 0, 'offline' => 0, 'desconhecido' => 0, 'atencao' => 0, 'critico' => 0, 'saturado' => 0, 'sem_sinal' => 0, 'quedas_24h' => 0, 'sem_vinculo' => 0];
+        $sum = ['onus' => 0, 'online' => 0, 'offline' => 0, 'desconhecido' => 0, 'atencao' => 0, 'critico' => 0, 'saturado' => 0, 'sem_sinal' => 0, 'quedas_24h' => 0, 'sem_vinculo' => 0, 'sem_resposta' => 0];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $d) {
             $id = (int) $d['id'];
             $down = [];
@@ -77,6 +77,7 @@ final class NetFiberReader
                 $sum['sem_sinal'] += $onu['rx_dbm'] === null ? 1 : 0;
                 $sum['quedas_24h'] += $onu['quedas_24h'] > 0 ? 1 : 0;
                 $sum['sem_vinculo']++; // não há tabela de vínculo ONU->cliente ainda
+                $sum['sem_resposta'] += $onu['desatualizado'] ? 1 : 0;
             }
             ksort($pons);
             foreach ($pons as &$pon) {
@@ -88,6 +89,7 @@ final class NetFiberReader
                 'id' => $id, 'nome' => (string) $d['name'], 'ativo' => (bool) $d['enabled'], 'intervalo_status_s' => (int) $d['status_interval_s'],
                 'ultima_tentativa' => $d['last_attempt_at'], 'ultima_leitura_ok' => $d['last_success_at'], 'ultimo_resultado' => $d['last_result'],
                 'pons' => array_values($pons),
+                'saude' => $this->health((int) $d['status_interval_s'], $d['last_success_at'], $d['last_result'], $now),
                 'tecnologia' => $d['technology'] === null ? null : (string) $d['technology'],
                 'tipo_no' => (string) $d['node_type'],
                 'site' => $d['site_name'] === null ? null : ['id' => (int) $d['parent_node_id'], 'nome' => (string) $d['site_name'], 'tipo' => (string) $d['site_type']],
@@ -101,6 +103,26 @@ final class NetFiberReader
             'limiares' => $limits,
             'fontes' => ['quedas_poll' => true, 'quedas_log' => $logAvailable, 'vinculo_cliente' => false, 'cto' => false, 'sinal_na_olt' => false],
         ];
+    }
+
+    /**
+     * Saúde da coleta do equipamento (sem afirmar causa): 'ok' | 'atrasada' (última leitura ok mais velha que 2 intervalos de
+     * status) | 'falha' (último resultado diferente de ok) | 'sem_leitura' (nunca houve leitura ok).
+     *
+     * @return array{estado:string,minutos:?int,limite_s:int}
+     */
+    private function health(int $interval, ?string $lastOk, ?string $lastResult, string $now): array
+    {
+        $limit = 2 * max(60, $interval);
+        $age = $lastOk === null ? null : max(0, (int) strtotime($now . ' UTC') - (int) strtotime($lastOk . ' UTC'));
+        $estado = match (true) {
+            $age === null => 'sem_leitura',
+            $lastResult !== null && $lastResult !== 'ok' => 'falha',
+            $age > $limit => 'atrasada',
+            default => 'ok',
+        };
+
+        return ['estado' => $estado, 'minutos' => $age === null ? null : intdiv($age, 60), 'limite_s' => $limit];
     }
 
     /** @return array<string,mixed>|null null se a ONU não existe neste provedor */

@@ -9,6 +9,9 @@
 .rf-cols__list { position: absolute; z-index: 20; top: 100%; margin-top: 4px; padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: grid; gap: 6px; min-width: 180px; }
 .rf-cols__list label { display: flex; gap: 6px; align-items: center; font-size: 0.88rem; }
 .rf-summary { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.rf-health { padding: 10px 14px; border-radius: 12px; background: var(--alert-urgent-bg); color: var(--alert-urgent-ink); border: 1px solid #e8a7a1; }
+.rf-health[hidden] { display: none; }
+.rf-health__item { margin: 2px 0; font-size: 0.9rem; font-weight: 600; }
 .rf-note { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--alert-caution-bg); color: var(--alert-caution-ink); font-size: 0.85rem; }
 .rf-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
 .rf-layout.has-panel { grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); }

@@ -16,12 +16,12 @@ const onu = (id, idx, pon, status, rx, band, extra) => Object.assign({id, pon_in
   distancia_origem: status === 'online' ? 'estimada pelo RTT' : null, cliente: null, cto: null, quedas_24h: 0, ultima_queda_em: null}, extra || {});
 const tree = {
   gerado_em: '2026-11-13 12:00:00',
-  dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: 'epon', tipo_no: 'olt', site: {id: 8, nome: 'Site-A', tipo: 'pop'}, pons: [
+  dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: 'epon', tipo_no: 'olt', site: {id: 8, nome: 'Site-A', tipo: 'pop'}, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: [
     {pon_index: 1, label: 'PON 1', total: 3, online: 2, onus: [onu(1, 1, 1, 'online', -20.0, 'ok', {quedas_24h: 1, ultima_queda_em: '2026-11-13 10:00:00'}), onu(2, 2, 1, 'online', -26.0, 'atencao'), onu(3, 3, 1, 'offline', -21.0, 'ok')]},
     {pon_index: 2, label: 'PON 2', total: 1, online: 1, onus: [onu(4, 1, 2, 'online', null, 'unknown')]},
     {pon_index: 3, label: 'PON 3', total: 0, online: 0, onus: []}]},
-    {id: 2, nome: 'SW-1', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: null, tipo_no: 'switch', site: null, pons: []}],
-  resumo: {onus: 4, online: 3, offline: 1, desconhecido: 0, atencao: 1, critico: 0, saturado: 0, sem_sinal: 1, quedas_24h: 1, sem_vinculo: 4},
+    {id: 2, nome: 'SW-1', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: null, tipo_no: 'switch', site: null, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: []}],
+  resumo: {onus: 4, online: 3, offline: 1, desconhecido: 0, atencao: 1, critico: 0, saturado: 0, sem_sinal: 1, quedas_24h: 1, sem_vinculo: 4, sem_resposta: 0},
   limiares: {saturado_dbm: -8, atencao_dbm: -25, critico_dbm: -27, desvio_db: 3},
   fontes: {quedas_poll: true, quedas_log: false, vinculo_cliente: false, cto: false, sinal_na_olt: false}
 };
@@ -38,7 +38,7 @@ const sheet = (over) => Object.assign({
 
 // Mesmas listas de chaves de tests/Feature/NetFiberReaderSmoke.php: se a API mudar, os dois testes devem mudar juntos.
 const K = {
-  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site',
+  tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,site,saude',
   pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em',
   sheet: 'onu,vizinhos,serie_7d,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
   sheetOnu: 'baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto',
@@ -52,7 +52,8 @@ async function boot(opts) {
   const calls = [];
   const dom = new JSDOM(html, {runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc, url: 'http://localhost/rede-fibra'});
   const w = dom.window;
-  w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : tree};
+  const treeData = opts.tree ? opts.tree(JSON.parse(JSON.stringify(tree))) : tree;
+  w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
     return Promise.resolve({ok: !status, status: status || 200, json: () => Promise.resolve(body)}); };
   w.eval(js); await wait(40);
   const d = w.document, q = s => d.querySelector(s), qa = s => [...d.querySelectorAll(s)];
@@ -166,6 +167,29 @@ async function boot(opts) {
   let a = await boot({sheet: () => sheet({quedas: [Object.assign({}, outage, {open: true, ended_at: null, duration_s: null})]})});
   a.q('.rf-row--onu').click(); await wait(30); ok(a.q('#rf-p-body .rf-outages').textContent.indexOf('em aberto') !== -1, 'queda em aberto na lista');
 
+  // Saude da coleta (CP2)
+  ok(t.q('#rf-health').hidden && t.q('#rf-health').children.length === 0 && t.q('#rf-table').textContent.indexOf('Sem resposta') === -1, 'coleta saudavel: sem aviso e sem "Sem resposta"');
+  let h1 = await boot({tree: d => { d.dispositivos[0].saude = {estado: 'atrasada', minutos: 25, limite_s: 1200}; d.dispositivos[0].ultima_leitura_ok = '2026-11-13 11:35:00'; return d; }});
+  const hb = h1.q('#rf-health');
+  ok(!hb.hidden && hb.getAttribute('role') === 'alert' && hb.children.length === 1 && hb.textContent.indexOf('OLT OLT-<b>X</b> sem resposta há 25 min: os estados abaixo podem estar desatualizados') === 0, 'aviso: "sem resposta ha 25 min" com o rotulo do equipamento (' + hb.textContent + ')');
+  ok(hb.textContent.indexOf('última leitura ok: 13/11 08:35, horário de Brasília') !== -1, 'aviso: ultima leitura em horario de Brasilia (11:35 UTC = 08:35)');
+  ok(!/causa|rede caiu|energia|fibra|cabo/i.test(hb.textContent), 'aviso nao afirma a causa');
+  let h2 = await boot({tree: d => { d.dispositivos[0].saude = {estado: 'falha', minutos: 3, limite_s: 1200}; d.dispositivos[0].ultimo_resultado = 'timeout'; return d; }});
+  ok(h2.q('#rf-health').textContent.indexOf('sem resposta há 3 min') !== -1 && h2.q('#rf-health').textContent.indexOf('resultado da última coleta: timeout') !== -1, 'aviso quando o ultimo resultado nao e ok (mesmo com leitura recente)');
+  let h3 = await boot({tree: d => { d.dispositivos[1].saude = {estado: 'sem_leitura', minutos: null, limite_s: 1200}; d.dispositivos[1].ultima_leitura_ok = null; return d; }});
+  ok(h3.q('#rf-health').textContent.indexOf('Switch SW-1: ainda sem nenhuma leitura registrada') === 0 && h3.q('#rf-health').children.length === 1, 'aviso para equipamento que nunca teve leitura (rotulo pelo tipo do no)');
+  let h4 = await boot({tree: d => { d.dispositivos[0].saude = {estado: 'atrasada', minutos: 90, limite_s: 1200}; d.dispositivos[1].saude = {estado: 'falha', minutos: 1, limite_s: 1200}; return d; }});
+  ok(h4.q('#rf-health').children.length === 2 && h4.q('#rf-health').textContent.indexOf('sem resposta há 1 h 30 min') !== -1, 'um aviso por equipamento; 90 min = 1 h 30 min');
+  let st = await boot({tree: d => { const on = d.dispositivos[0].pons[0].onus; on[2].desatualizado = true; on[0].desatualizado = true; d.resumo.sem_resposta = 2; d.dispositivos[0].saude = {estado: 'atrasada', minutos: 25, limite_s: 1200}; return d; }});
+  const rows = st.qa('.rf-row--onu');
+  ok(rows[0].textContent.indexOf('Sem resposta') !== -1 && rows[0].textContent.indexOf('último: Online') !== -1 && rows[2].textContent.indexOf('Sem resposta') !== -1 && rows[2].textContent.indexOf('último: Offline') !== -1, 'ONU desatualizada aparece como "Sem resposta" (com o ultimo estado), nao como Online/Offline');
+  ok(rows[1].textContent.indexOf('Online') !== -1 && rows[1].textContent.indexOf('Sem resposta') === -1, 'ONU nao desatualizada continua com o estado normal');
+  ok(st.q('#rf-summary').textContent.indexOf('sem resposta: 2') !== -1, 'resumo mostra quantas ONUs estao sem resposta');
+  const sel2 = (v) => { st.q('#rf-f-status').value = v; st.ev(st.q('#rf-f-status'), 'change'); };
+  sel2('sem_resposta'); ok(st.qa('.rf-row--onu').length === 2, 'filtro "Sem resposta" mostra so as desatualizadas');
+  sel2('offline'); ok(st.qa('.rf-row--onu').length === 0, 'filtro Offline nao inclui ONU desatualizada (offline so quando a OLT respondeu)');
+  sel2('online'); ok(st.qa('.rf-row--onu').length === 2, 'filtro Online exclui as desatualizadas');
+
   // Erro 403 / falha de carga
   let f = await boot({status: () => 403});
   ok(f.q('#rf-summary').textContent === 'Acesso negado.', 'erro 403 mostrado, sem quebrar a pagina');
@@ -174,7 +198,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });
