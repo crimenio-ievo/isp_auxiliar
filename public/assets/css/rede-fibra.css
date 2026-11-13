@@ -47,17 +47,19 @@
 .rf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 0.86rem; }
 .rf-grid dt { color: var(--muted); font-size: 0.78rem; }
 .rf-grid dd { margin: 0; font-weight: 700; }
-.rf-ruler { position: relative; height: 14px; border-radius: 7px; overflow: visible; display: flex; margin: 22px 0 22px; }
-.rf-ruler__z { height: 100%; }
-.rf-ruler__z--crit { background: #e8a7a1; border-radius: 7px 0 0 7px; }
-.rf-ruler__z--warn { background: #f1d27a; }
-.rf-ruler__z--ok { background: #8cc9a0; border-radius: 0 7px 7px 0; }
-.rf-ruler__mark { position: absolute; top: -6px; width: 0; border-left: 2px solid var(--text); height: 26px; }
-.rf-ruler__mark span { position: absolute; top: -16px; left: 0; transform: translateX(-50%); font-size: 0.72rem; white-space: nowrap; font-weight: 700; }
-.rf-ruler__mark--ref { border-left: 2px dashed var(--muted); }
-.rf-ruler__mark--ref span { top: 28px; font-weight: 400; color: var(--muted); }
-.rf-ruler__mark--med { border-left: 2px dotted var(--primary); }
-.rf-ruler__scale { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); margin-top: -16px; }
+ .rf-ruler { position:relative; height:28px; border-radius:7px; display:flex; margin:38px 0 80px; }
+.rf-ruler__z { height:100%; display:flex; justify-content:center; align-items:center; font-size:11px; font-weight:700; overflow:hidden; }
+.rf-ruler__z--crit { background:#e8a7a1; border-radius:7px 0 0 7px; }
+.rf-ruler__z--warn { background:#f1d27a; }
+.rf-ruler__z--ok { background:#8cc9a0; border-radius:0 7px 7px 0; }
+.rf-ruler__mark { position:absolute; top:8px; transform:translateX(-50%); z-index:1; }
+.rf-ruler__mark--now { width:15px; height:15px; border-radius:50%; background:#17324d; }
+.rf-ruler__mark--med { width:11px; height:11px; background:#0f766e; transform:translateX(-50%) rotate(45deg); }
+.rf-ruler__mark--ref { width:0; height:0; border-left:7px solid transparent; border-right:7px solid transparent; border-bottom:13px solid #718096; }
+.rf-ruler__label { position:absolute; transform:translateX(-50%); font-size:12px; white-space:nowrap; font-weight:700; }
+.rf-ruler__label--above { top:-25px; color:#17324d; }
+.rf-ruler__label--below { top:35px; color:#0f766e; }
+.rf-ruler__scale { display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted); margin-top:-18px; }
 .rf-legend { font-size: 0.75rem; color: var(--muted); margin: 0; }
 .rf-periods { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .rf-periods button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--text); }

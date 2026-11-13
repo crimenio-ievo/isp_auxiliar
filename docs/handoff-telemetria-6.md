@@ -15,3 +15,6 @@ Fato: eventos após árvore/ficha, cinco inicialmente e botão até 20; árvore 
 
 ## CP-B — período único
 Fato: seletor padrão 7 dias antes do gráfico; API `serie` limitada ao período com amostra anterior marcada e posicionada no início, gráfico e quedas do mesmo período, eixo no horário de Brasília; últimas quedas preservadas. Suíte net: 42/90/97, zero falhas. Aparência real não verificada.
+
+## CP-C — régua e gráfico
+Fato: faixas e marcadores identificados com formas e cores, agrupamento de valores próximos e alturas diferentes para rótulos próximos; gráfico compacto com referências, vizinhos, faixas de queda e números decimais em português. Suíte net: 42/90/100, zero falhas. Aparência real e colisões em todos os tamanhos não foram verificadas em navegador.

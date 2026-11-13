@@ -53,7 +53,8 @@
     if (h > 0) { return h + ' h ' + pad(m % 60) + ' min'; }
     return m + ' min' + (s ? ' ' + s + ' s' : '');
   }
-  function dbm(v, d) { return v === null || v === undefined ? 'sem leitura' : v.toFixed(d === undefined ? 2 : d) + ' dBm'; }
+  function num(v, d) { return Number(v).toFixed(d).replace('.', ','); }
+  function dbm(v, d) { return v === null || v === undefined ? 'sem leitura' : num(v, d === undefined ? 2 : d) + ' dBm'; }
   function pill(kind, text) { return el('span', 'rf-pill rf-pill--' + kind, text); }
   function get(url) {
     return window.fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (r) {
@@ -104,7 +105,7 @@
     else if (k === 'rx') { td.textContent = o.rx_dbm === null ? 'sem leitura' : o.rx_dbm.toFixed(2); if (o.rx_dbm === null) { td.className = 'rf-muted'; } }
     else if (k === 'band') { td.appendChild(pill(o.rx_band, BAND[o.rx_band] || o.rx_band)); }
     else if (k === 'tx') { td.textContent = o.tx_dbm === null ? 'sem leitura' : o.tx_dbm.toFixed(2); }
-    else if (k === 'temp') { td.textContent = o.temp_c === null ? 'sem leitura' : o.temp_c.toFixed(1); }
+    else if (k === 'temp') { td.textContent = o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1); }
     else if (k === 'dist') { td.textContent = o.distancia_m === null ? '—' : '≈ ' + (o.distancia_m / 1000).toFixed(2) + ' km'; if (o.distancia_origem) { td.title = o.distancia_origem; } }
     else if (k === 'cliente') { td.textContent = o.cliente === null ? 'sem vínculo' : String(o.cliente); if (o.cliente === null) { td.className = 'rf-muted'; } }
     else if (k === 'cto') { td.textContent = o.cto === null ? 'ainda não lido' : String(o.cto); if (o.cto === null) { td.className = 'rf-muted'; } }
@@ -222,16 +223,22 @@
   function pct(v) { return Math.max(0, Math.min(100, (v - YMIN) / (YMAX - YMIN) * 100)); }
   function ruler(d) {
     var L = d.limiares, box = el('div'), r = el('div', 'rf-ruler'); r.setAttribute('role', 'img');
-    var z = [['crit', pct(L.critico_dbm)], ['warn', pct(L.atencao_dbm) - pct(L.critico_dbm)], ['ok', 100 - pct(L.atencao_dbm)]];
-    z.forEach(function (x) { var s = el('div', 'rf-ruler__z rf-ruler__z--' + x[0]); s.style.width = x[1] + '%'; r.appendChild(s); });
-    function mark(v, cls, label) { if (v === null || v === undefined) { return; } var m = el('div', 'rf-ruler__mark ' + cls); m.style.left = pct(v) + '%'; m.appendChild(el('span', '', label)); r.appendChild(m); }
-    mark(d.onu.baseline_dbm, 'rf-ruler__mark--ref', 'ref. ' + (d.onu.baseline_dbm === null ? '' : d.onu.baseline_dbm.toFixed(1)));
-    mark(d.vizinhos.mediana_dbm, 'rf-ruler__mark--med', 'viz. ' + (d.vizinhos.mediana_dbm === null ? '' : d.vizinhos.mediana_dbm.toFixed(1)));
-    mark(d.onu.rx_dbm, 'rf-ruler__mark--now', d.onu.rx_dbm === null ? '' : d.onu.rx_dbm.toFixed(1));
-    r.setAttribute('aria-label', 'Régua de sinal de ' + YMIN + ' a ' + YMAX + ' dBm: atual ' + dbm(d.onu.rx_dbm));
-    box.appendChild(r);
+    var z = [['crit', pct(L.critico_dbm), 'Crítico'], ['warn', pct(L.atencao_dbm) - pct(L.critico_dbm), 'Atenção'], ['ok', 100 - pct(L.atencao_dbm), 'Normal']];
+    z.forEach(function (x) { var part = el('div', 'rf-ruler__z rf-ruler__z--' + x[0], x[2]); part.style.width = x[1] + '%'; r.appendChild(part); });
+    var values = [{v:d.onu.rx_dbm, name:'Esta ONU', cls:'now'}, {v:d.vizinhos.mediana_dbm, name:'Vizinhos', cls:'med'}, {v:d.onu.baseline_dbm, name:'Referência', cls:'ref'}].filter(function (x) { return x.v !== null && x.v !== undefined; });
+    values.forEach(function (x) { var marker=el('div','rf-ruler__mark rf-ruler__mark--'+x.cls); marker.style.left=pct(x.v)+'%'; r.appendChild(marker); });
+    var groups=[];
+    values.forEach(function (x) { var group=groups.find(function (g) { return Math.abs(g[0].v-x.v)<0.3; }); if(group) group.push(x); else groups.push([x]); });
+    var below=[];
+    groups.forEach(function (g) {
+      var x=g[0], label=el('span','rf-ruler__label '+(g.some(function(q){return q.cls==='now';})?'rf-ruler__label--above':'rf-ruler__label--below'),g.map(function(q){return q.name;}).join(' = ')+' '+num(x.v,1));
+      label.style.left=pct(x.v)+'%';
+      if (!g.some(function(q){return q.cls==='now';})) { if (below.some(function(p){return Math.abs(p-pct(x.v))<14;})) label.style.top='53px'; below.push(pct(x.v)); }
+      r.appendChild(label);
+    });
+    r.setAttribute('aria-label', 'Régua de sinal de ' + YMIN + ' a ' + YMAX + ' dBm: atual ' + dbm(d.onu.rx_dbm)); box.appendChild(r);
     var sc = el('div', 'rf-ruler__scale'); [YMIN, L.critico_dbm, L.atencao_dbm, YMAX].forEach(function (v) { sc.appendChild(el('span', '', String(v))); }); box.appendChild(sc);
-    box.appendChild(el('p', 'rf-legend', 'Crítico < ' + L.critico_dbm + ' · Atenção < ' + L.atencao_dbm + ' dBm · linha cheia = atual, tracejada = referência, pontilhada = mediana dos vizinhos'));
+    box.appendChild(el('p', 'rf-legend', 'Crítico abaixo de ' + L.critico_dbm + ' dBm · Atenção abaixo de ' + L.atencao_dbm + ' dBm'));
     return box;
   }
   function outageRows(list, max) {
@@ -256,9 +263,9 @@
     function row(k, v) { g.appendChild(el('dt', '', k)); g.appendChild(el('dd', '', v)); }
     row('Sinal atual', dbm(o.rx_dbm) + (o.rx_dbm === null ? '' : ' · ' + (BAND[o.rx_band] || '')));
     row('Referência', o.baseline_dbm === null ? 'ainda sem referência' : dbm(o.baseline_dbm) + ' (' + o.baseline_amostras + ' leituras)');
-    row('Mediana dos vizinhos', d.vizinhos.mediana_dbm === null ? 'sem vizinhos com leitura' : dbm(d.vizinhos.mediana_dbm) + ' (' + d.vizinhos.quantidade + ' ONUs' + (d.vizinhos.diferenca_db === null ? '' : ', diferença ' + (d.vizinhos.diferenca_db > 0 ? '+' : '') + d.vizinhos.diferenca_db.toFixed(2) + ' dB') + ')');
-    row('Tx da ONU', dbm(o.tx_dbm)); row('Temperatura', o.temp_c === null ? 'sem leitura' : o.temp_c.toFixed(1) + ' °C');
-    row('Distância', o.distancia_m === null ? '—' : '≈ ' + (o.distancia_m / 1000).toFixed(2) + ' km (estimada pelo RTT)');
+    row('Mediana dos vizinhos', d.vizinhos.mediana_dbm === null ? 'sem vizinhos com leitura' : dbm(d.vizinhos.mediana_dbm) + ' (' + d.vizinhos.quantidade + ' ONUs' + (d.vizinhos.diferenca_db === null ? '' : ', diferença ' + (d.vizinhos.diferenca_db > 0 ? '+' : '') + num(d.vizinhos.diferenca_db, 2) + ' dB') + ')');
+    row('Tx da ONU', dbm(o.tx_dbm)); row('Temperatura', o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1) + ' °C');
+    row('Distância', o.distancia_m === null ? '—' : '≈ ' + num(o.distancia_m / 1000, 2) + ' km (estimada pelo RTT)');
     row('Sinal recebido na OLT', d.onu.olt_rx_texto); row('Cliente', d.cliente_texto); row('CTO', d.cto_texto);
     row('Última leitura', fmtDT(o.rx_medido_em));
     body.appendChild(g);
@@ -281,6 +288,7 @@
     var cb = el('div', 'rf-chartbar'); cb.appendChild(el('h3', '', 'Sinal e quedas'));
     var big = el('button', '', 'Ampliar'); big.type = 'button'; big.addEventListener('click', function () { openModal(); }); cb.appendChild(big); body.appendChild(cb);
     var ch = el('div', 'rf-chart'); ch.id = 'rf-p-chart'; body.appendChild(ch); drawChart(ch, d, false);
+    var legend = el('p', 'rf-legend rf-chart-legend'); [['━━','Esta ONU','#17324d'],['┄','Referência','#718096'],['┄','Vizinhos','#0f766e'],['▉','Queda','#d64545']].forEach(function (item) { var mark=el('span','',item[0]); mark.style.color=item[2]; legend.appendChild(mark); legend.appendChild(document.createTextNode(' '+item[1]+'  ')); }); body.appendChild(legend);
     body.appendChild(el('p', 'rf-legend', 'O sinal é gravado quando muda mais de 1 dB e uma vez por dia.'));
     pr = el('div'); pr.appendChild(el('h3', '', 'Quedas'));
     var tot = d.quedas_total;
@@ -296,8 +304,9 @@
   /* ---------- gráfico ---------- */
   function drawChart(box, d, big) {
     clear(box);
-    var W = 720, H = big ? 400 : 210, ml = 44, mr = 10, mt = 10, mb = 24, S = d.serie;
+    var W = big ? 840 : 420, H = big ? 400 : 220, ml = 38, mr = 72, mt = 10, mb = 25, S = d.serie;
     var t0 = parse(S.de), t1 = parse(S.ate), pts = S.pontos.map(function (p) { return { t: parse(p.t), s: p.t, v: p.rx }; });
+    if (t1 <= t0) { t1 = t0 + 1000; }
     function X(t) { return ml + (Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0) * (W - ml - mr); }
     function Y(v) { return mt + (YMAX - Math.max(YMIN, Math.min(YMAX, v))) / (YMAX - YMIN) * (H - mt - mb); }
     var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Sinal da ONU no período selecionado, com as quedas como faixas verticais' });
@@ -305,13 +314,13 @@
     [[YMIN, L.critico_dbm, '#f6d8d5'], [L.critico_dbm, L.atencao_dbm, '#fbefc7'], [L.atencao_dbm, YMAX, '#e6f4ea']].forEach(function (z) {
       s.appendChild(svg('rect', { x: ml, y: Y(z[1]), width: W - ml - mr, height: Y(z[0]) - Y(z[1]), fill: z[2] }));
     });
-    [YMIN, L.critico_dbm, L.atencao_dbm, -20, YMAX].forEach(function (v) {
+    [YMIN, -27, -25, -20, YMAX].forEach(function (v) {
       s.appendChild(svg('line', { x1: ml, x2: W - mr, y1: Y(v), y2: Y(v), stroke: '#c9d3dc', 'stroke-width': 1 }));
-      var tx = svg('text', { x: ml - 5, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#617587' }); tx.textContent = String(v); s.appendChild(tx);
+      var tx = svg('text', { x: ml - 5, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 12, fill: '#617587' }); tx.textContent = String(v); s.appendChild(tx);
     });
     var span = t1 - t0, step = state.period === '1h' ? 600000 : state.period === '24h' ? 14400000 : state.period === '7d' ? 86400000 : span <= 7200000 ? 600000 : span <= 172800000 ? 14400000 : span <= 1209600000 ? 86400000 : Math.ceil(span / 6 / 86400000) * 86400000;
     for (var h = Math.ceil((t0 - 10800000) / step) * step + 10800000; h <= t1; h += step) {
-      var tx2 = svg('text', { x: X(h), y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: '#617587' });
+      var tx2 = svg('text', { x: X(h), y: H - 6, 'text-anchor': 'middle', 'font-size': 12, fill: '#617587' });
       tx2.textContent = step < 86400000 ? fmtMs(h).slice(-5) : fmtDay(h); s.appendChild(tx2);
     }
     var outs = d.quedas_serie.map(function (q) { return { a: parse(q.started_at), b: q.ended_at ? parse(q.ended_at) : t1, q: q }; });
@@ -325,9 +334,15 @@
       var path = 'M' + X(pts[0].t) + ' ' + Y(pts[0].v);
       for (var i = 1; i < pts.length; i++) { path += ' H' + X(pts[i].t) + ' V' + Y(pts[i].v); }
       path += ' H' + X(t1);
-      s.appendChild(svg('path', { d: path, fill: 'none', stroke: '#17324d', 'stroke-width': 2, class: 'rf-line' }));
+      s.appendChild(svg('path', { d: path, fill: 'none', stroke: '#17324d', 'stroke-width': 3, class: 'rf-line' }));
       pts.forEach(function (p) { s.appendChild(svg('circle', { cx: X(p.t), cy: Y(p.v), r: 2.6, fill: '#17324d' })); });
     }
+    var referenceLines = [{v:d.onu.baseline_dbm, name:'Ref.', color:'#718096'}, {v:d.vizinhos.mediana_dbm, name:'Vizinhos', color:'#0f766e'}].filter(function (x) { return x.v !== null && x.v !== undefined; });
+    referenceLines.forEach(function (x, i) {
+      s.appendChild(svg('line', {x1:ml,x2:W-mr,y1:Y(x.v),y2:Y(x.v),stroke:x.color,'stroke-width':1.5,'stroke-dasharray':'4 3'}));
+      var y=Y(x.v); if (i && Math.abs(Y(referenceLines[0].v)-y)<14) y=Math.min(H-mb-2,y+15);
+      var label=svg('text',{x:W-mr+4,y:y+4,'font-size':12,fill:x.color}); label.textContent=x.name+' '+num(x.v,1); s.appendChild(label);
+    });
     var cur = svg('line', { x1: 0, x2: 0, y1: mt, y2: H - mb, stroke: '#0f766e', 'stroke-width': 1, visibility: 'hidden' }); s.appendChild(cur);
     var dot = svg('circle', { r: 4, fill: '#0f766e', visibility: 'hidden' }); s.appendChild(dot);
     var tip = el('div', 'rf-tip'); tip.hidden = true;
@@ -339,7 +354,7 @@
       for (i2 = 0; i2 < pts.length; i2++) { if (pts[i2].t <= t) { val = pts[i2]; } }
       var inQ = outs.filter(function (o) { return t >= o.a && t <= o.b; })[0];
       var label = fmtMs(t);
-      tip.textContent = label + ' · ' + (val ? val.v.toFixed(2) + ' dBm' : 'sem leitura') + (inQ ? ' · em queda (' + inQ.q.reason + ')' : '');
+      tip.textContent = label + ' · ' + (val ? num(val.v, 2) + ' dBm' : 'sem leitura') + (inQ ? ' · em queda (' + inQ.q.reason + ')' : '');
       tip.hidden = false; tip.style.left = (vx / W * 100) + '%'; tip.style.top = (val ? Y(val.v) / H * 100 : 20) + '%';
       cur.setAttribute('x1', vx); cur.setAttribute('x2', vx); cur.setAttribute('visibility', 'visible');
       if (val) { dot.setAttribute('cx', vx); dot.setAttribute('cy', Y(val.v)); dot.setAttribute('visibility', 'visible'); } else { dot.setAttribute('visibility', 'hidden'); }

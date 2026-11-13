@@ -91,3 +91,4 @@ Blocos da Home com estado de rede (depende de telemetria): vermelho = desconecta
 - **Etapa 6 — segmentos de relógio (2026-11-13):** conversão segmentada e verificação de divergências implementadas, importação não executada: três dos oito resíduos ficaram negativos, fora de 0..660 s exigidos. Detalhes em `docs/handoff-telemetria-6.md`.
 - **Etapa 6 CP-A:** ordem da tela e eventos compactos, árvore com rolagem e breakpoint 1100 px. Suíte `tests/net/run_all.sh` verde. Detalhes no handoff 6.
 - **Etapa 6 CP-B:** período único para gráfico e quedas; `serie` por período com amostra anterior; padrão da ficha uma semana. Suíte net verde; contrato da API atualizado em ambos os testes.
+- **Etapa 6 CP-C:** régua e gráfico da ficha com rótulos, formas, anticolisão, faixas e decimais brasileiros; suíte net verde. Validação visual real pendente.

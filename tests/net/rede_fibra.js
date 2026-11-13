@@ -30,7 +30,7 @@ const sheetOnu = () => { const o = onu(1, 1, 1, 'online', -20.0, 'ok'); delete o
 const sheet = (over) => Object.assign({
   onu: Object.assign(sheetOnu(), {baseline_dbm: -20.5, baseline_desde: '2026-11-12 00:00:00', baseline_amostras: 5, olt_rx_dbm: null, olt_rx_texto: 'ainda não lido'}),
   vizinhos: {mediana_dbm: -26.0, quantidade: 3, diferenca_db: 6.0},
-  serie: {pontos: [{t: '2026-11-07 12:00:00', rx: -20.0}, {t: '2026-11-10 12:00:00', rx: -22.5}, {t: '2026-11-13 11:00:00', rx: -20.0}], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'},
+  serie: {pontos: [{t: '2026-11-07 12:00:00', rx: -20.0}, {t: '2026-11-10 12:00:00', rx: -22.5}, {t: '2026-11-13 11:00:00', rx: -20.0}], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00'},
   periodo: {kind: '24h', from: '2026-11-12 12:00:00', to: '2026-11-13 12:00:00'}, quedas: [outage], quedas_total: {quedas: 1, em_aberto: 0, downtime_no_periodo_s: 600, por_motivo: {energia: 1}, do_log: 1, do_poll: 0, log_sem_onu_cadastrada: 0},
   quedas_serie: [outage, Object.assign({}, outage, {started_at: '2026-11-11 08:00:00', ended_at: null, open: true, duration_s: null, reason: 'Sem aviso de energia', cause: 'sem_aviso_energia'})],
   ultimas_quedas: [outage], estavel: false, estavel_texto: null, limiares: tree.limiares, fontes: {quedas_poll: true, quedas_log: true},
@@ -127,8 +127,11 @@ async function boot(opts) {
   ok(t.calls.some(u => /\/api\/rede-fibra\/onu\?id=1&periodo=7d$/.test(u)), 'abrir ficha chama a API com periodo 7d');
   ok(!t.q('#rf-panel').hidden && t.q('#rf-p-title').textContent === 'ONU 1 · PON 1' && t.q('#rf-p-sub').textContent.indexOf('00:2E:C7:00:00:01') === 0, 'painel lateral com a ONU');
   const body = t.q('#rf-p-body').textContent;
-  ok(body.indexOf('ainda não lido') !== -1 && body.indexOf('sem vínculo') !== -1 && body.indexOf('≈ 22.64 km (estimada pelo RTT)') !== -1 && body.indexOf('-26.00 dBm (3 ONUs, diferença +6.00 dB)') !== -1, 'ficha: sinal na OLT/CTO "ainda nao lido", cliente "sem vinculo", mediana dos vizinhos');
+  ok(body.indexOf('ainda não lido') !== -1 && body.indexOf('sem vínculo') !== -1 && body.indexOf('≈ 22,64 km (estimada pelo RTT)') !== -1 && body.indexOf('-26,00 dBm (3 ONUs, diferença +6,00 dB)') !== -1, 'ficha: sinal na OLT/CTO "ainda nao lido", cliente "sem vinculo", mediana dos vizinhos');
   ok(t.qa('.rf-ruler__z').length === 3 && t.qa('.rf-ruler__mark').length === 3 && t.q('.rf-ruler__scale').textContent.indexOf('-30') !== -1 && t.q('.rf-ruler__scale').textContent.indexOf('-12') !== -1, 'regua de -30 a -12 com 3 faixas e 3 marcas');
+  ok(t.qa('.rf-ruler__z').map(z => z.textContent).join('|') === 'Crítico|Atenção|Normal' && t.q('.rf-ruler__mark--now') && t.q('.rf-ruler__mark--ref') && t.q('.rf-ruler__mark--med'), 'faixas e formas diferenciadas');
+  ok(t.q('#rf-p-chart svg').getAttribute('viewBox') === '0 0 420 220' && t.q('#rf-p-chart').textContent.includes('Ref.') && t.q('#rf-p-chart').textContent.includes('Vizinhos'), 'grafico compacto com referencias rotuladas');
+  ok(keys(sheet().serie) === K2('pontos,de,ate'), 'contrato da série contém pontos e limites');
   const zs = t.qa('.rf-ruler__z').map(z => parseFloat(z.style.width)); ok(Math.abs(zs[0] - 16.67) < 0.1 && Math.abs(zs[1] - 11.11) < 0.1 && Math.abs(zs[0] + zs[1] + zs[2] - 100) < 0.01, 'larguras das faixas seguem -27 e -25');
   const mk = t.q('.rf-ruler__mark:not(.rf-ruler__mark--ref):not(.rf-ruler__mark--med)'); ok(Math.abs(parseFloat(mk.style.left) - 55.56) < 0.1, 'marca do sinal atual em -20 dBm');
   ok(t.qa('#rf-p-chart svg').length === 1 && t.qa('#rf-p-chart .rf-outage').length === 2 && t.qa('#rf-p-chart path.rf-line').length === 1, 'grafico com linha e as quedas como faixas verticais');
@@ -143,13 +146,13 @@ async function boot(opts) {
   ok(dayLabels[0] === '07/11' && dayLabels[dayLabels.length - 1] === '13/11' && dayLabels.length === 7, 'eixo: dias em Brasilia (meia-noite de Brasilia = 03:00 UTC): ' + dayLabels.join(','));
   ok(t.q('#rf-p-chart .rf-outage title').textContent.indexOf('Queda 13/11 07:00') === 0, 'faixa da queda com dica em horario de Brasilia');
   // Cursor do grafico
-  const ov = t.q('#rf-p-chart .rf-overlay'), svg = t.q('#rf-p-chart svg'); svg.getBoundingClientRect = () => ({left: 0, width: 720, top: 0, height: 210});
+  const ov = t.q('#rf-p-chart .rf-overlay'), svg = t.q('#rf-p-chart svg'); svg.getBoundingClientRect = () => ({left: 0, width: 420, top: 0, height: 220});
   const move = x => ov.dispatchEvent(new t.w.MouseEvent('pointermove', {clientX: x, bubbles: true}));
-  move(44 + (666 * (parse('2026-11-10 20:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
-  const tip = t.q('#rf-p-chart .rf-tip'); ok(!tip.hidden && /10\/11 17:00 · -22\.50 dBm$/.test(tip.textContent), 'cursor em horario de Brasilia (UTC 20:00 = 17:00): ' + tip.textContent);
-  move(44 + (666 * (parse('2026-11-12 10:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00')))); 
+  move(38 + (310 * (parse('2026-11-10 20:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
+  const tip = t.q('#rf-p-chart .rf-tip'); ok(!tip.hidden && /10\/11 17:00 · -22,50 dBm$/.test(tip.textContent), 'cursor em horario de Brasilia (UTC 20:00 = 17:00): ' + tip.textContent);
+  move(38 + (310 * (parse('2026-11-12 10:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
   ok(/em queda \(Sem aviso de energia\)/.test(tip.textContent), 'cursor dentro de uma queda em aberto mostra o motivo (' + tip.textContent + ')');
-  move(44); ok(/sem leitura/.test(tip.textContent), 'cursor antes da primeira leitura: sem leitura'); ov.dispatchEvent(new t.w.MouseEvent('pointerleave', {bubbles: true})); ok(tip.hidden, 'cursor some ao sair');
+  move(38); ok(/sem leitura/.test(tip.textContent), 'cursor antes da primeira leitura: sem leitura'); ov.dispatchEvent(new t.w.MouseEvent('pointerleave', {bubbles: true})); ok(tip.hidden, 'cursor some ao sair');
 
   // Ampliar
   t.qa('#rf-p-body .rf-chartbar button')[0].click(); ok(!t.q('#rf-modal').hidden && t.qa('#rf-m-chart svg').length === 1 && t.q('#rf-m-chart svg').getAttribute('viewBox').indexOf('400') !== -1, 'ampliar abre o grafico grande');
@@ -169,7 +172,7 @@ async function boot(opts) {
   function parse(s) { return new Date(s.replace(' ', 'T') + 'Z').getTime(); }
 
   // Estavel e em aberto
-  let e = await boot({sheet: () => sheet({quedas: [], quedas_serie: [], ultimas_quedas: [], estavel: true, estavel_texto: 'Sem queda registrada no período (estável).', quedas_total: {quedas: 0, em_aberto: 0, downtime_no_periodo_s: 0, por_motivo: {}, do_log: 0, do_poll: 0, log_sem_onu_cadastrada: 0}, serie: {pontos: [], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00', amostragem: 'x'}})});
+  let e = await boot({sheet: () => sheet({quedas: [], quedas_serie: [], ultimas_quedas: [], estavel: true, estavel_texto: 'Sem queda registrada no período (estável).', quedas_total: {quedas: 0, em_aberto: 0, downtime_no_periodo_s: 0, por_motivo: {}, do_log: 0, do_poll: 0, log_sem_onu_cadastrada: 0}, serie: {pontos: [], de: '2026-11-06 12:00:00', ate: '2026-11-13 12:00:00'}})});
   e.q('.rf-row--onu').click(); await wait(30);
   ok(e.q('#rf-p-body').textContent.indexOf('Sem queda registrada no período (estável).') !== -1 && e.qa('#rf-p-body .rf-outages').length === 0 && e.q('#rf-p-chart').textContent.indexOf('Sem leituras no período') !== -1, 'sem registro no periodo = estavel; grafico sem leituras avisa');
   let a = await boot({sheet: () => sheet({quedas: [Object.assign({}, outage, {open: true, ended_at: null, duration_s: null})]})});
