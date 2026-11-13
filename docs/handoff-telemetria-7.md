@@ -27,3 +27,8 @@ Auditoria em `docs/integracao-telemetria-testes.md`: testes serve mapa-fase1 em 
 ## CP-C — busca global
 Fato: sugestões locais de ONU por MAC com pelo menos 4 hex (formatos normalizados), equipamento por nome/host, somente gestor/admin, endpoint GET isolado por provedor. A busca global mantém o fluxo existente de clientes e acrescenta sugestões de rede. Resultado de ONU abre `?onu=ID`; link inválido/inexistente mostra aviso, API valida provedor. Filtro MAC local removido. Login/nome de cliente não são vinculados à ONU: vínculo ainda não existe. Nenhuma consulta à OLT.
 Testes net 42/99/105 + 7 de sugestões globais, todos verdes. Nenhuma chave da árvore/ficha foi alterada; rota adicional de busca testada para técnico/admin, MAC parcial e isolamento.
+
+## Passo 4 — navegador headless
+Fato: Playwright 1.48.2 instalado em `/tmp/net7-browser` e Chromium/dependências instalados no servidor de teste. A versão mais recente exigia Node >=20; foi usada a versão compatível com Node 18. Servidor temporário escutou apenas 127.0.0.1, com HTML do render_page e as fixtures já existentes dos testes; nenhuma sessão/usuário real, banco ou OLT.
+
+Capturas fora do Git: `tmp/net7-100-arvore.png`, `tmp/net7-100-ficha.png`, `tmp/net7-100-fechada.png`, `tmp/net7-125-arvore.png`, `tmp/net7-125-ficha.png`, `tmp/net7-125-fechada.png`. Em ambas as escalas CSS 1 e 1,25, nenhum elemento `.rf [hidden]` teve display diferente de none; zero pageerrors. Ficha aberta e fechada inspecionadas nas capturas. Não equivale a todos os navegadores nem ao zoom nativo de todos os dispositivos. Painel de grupo não capturado, pois CP-B foi pulado pela falta do mockup. Servidor temporário encerrado.
