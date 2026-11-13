@@ -32,3 +32,12 @@ Testes net 42/99/105 + 7 de sugestões globais, todos verdes. Nenhuma chave da �
 Fato: Playwright 1.48.2 instalado em `/tmp/net7-browser` e Chromium/dependências instalados no servidor de teste. A versão mais recente exigia Node >=20; foi usada a versão compatível com Node 18. Servidor temporário escutou apenas 127.0.0.1, com HTML do render_page e as fixtures já existentes dos testes; nenhuma sessão/usuário real, banco ou OLT.
 
 Capturas fora do Git: `tmp/net7-100-arvore.png`, `tmp/net7-100-ficha.png`, `tmp/net7-100-fechada.png`, `tmp/net7-125-arvore.png`, `tmp/net7-125-ficha.png`, `tmp/net7-125-fechada.png`. Em ambas as escalas CSS 1 e 1,25, nenhum elemento `.rf [hidden]` teve display diferente de none; zero pageerrors. Ficha aberta e fechada inspecionadas nas capturas. Não equivale a todos os navegadores nem ao zoom nativo de todos os dispositivos. Painel de grupo não capturado, pois CP-B foi pulado pela falta do mockup. Servidor temporário encerrado.
+
+## Encerramento
+Fato: suíte final em código copiado sem `.env` real e schema descartável: Feature + Acceptance 48/48; mapa 25/25; net 42/99/105 e busca global 7, zero falhas. A execução conjunta Feature+mapa atingiu limite externo (143); mapa foi repetido sozinho e passou integralmente. Schemas baseline/final e cópias temporárias removidos. Sintaxe PHP e diff --check verdes. Cron continuou ativo: último ponto conferido 13/11 16:11:01, maior intervalo entre ticks disponíveis 348 s, inferior aos 1800 s pedidos.
+
+Commits da rodada: f9339ac continuidade; 5133696 import/evidência; cb5c189 caminho; 5b59681 CP-A; f15664e integração (auditoria); c5c3cf2 CP-C; 26c8ade capturas. Documentação final em commit posterior. CP-B pulado por ausência do mockup exato, inclusive painel de grupo e cabeçalho ONU/ONT dessa etapa. Não houve merge/checkout/push, consulta à OLT, parada do cron, alteração de topologia ou criação de usuário de teste.
+
+Hipótese: o padrão de configuração em código aponta os dois vhosts ao banco local, mas isso não confirma que os ambientes efetivos sejam iguais. Ainda é necessário conferir esse ponto numa rodada que permita verificar configuração ou sessão administrativa real.
+
+Não verificado: integração efetiva em testes.ievo.com.br, login real e sessão no navegador, painel de grupo (não implementado), zoom nativo de todos os navegadores, continuidade óptica/caminho de rádio no campo. As capturas são de fixtures de teste existentes; não são prova de leitura de dados reais autenticada.
