@@ -20,3 +20,6 @@ Auditoria SELECT registrada em `docs/rede-caminho-ate-site.md`: 1 POP, 1 OLT, 2 
 
 ## CP-A
 Fato: `[hidden]` vence os layouts grid/flex da tela; personalizado vazio não consulta e abrir outra ONU nesse estado volta para 7 dias. Suíte net: 42/90/102 verificações, zero falhas; jsdom confere estilo computado do painel fechado. Zoom/navegador real ainda não conferidos.
+
+## Passo 5 — integração, somente leitura
+Auditoria em `docs/integracao-telemetria-testes.md`: testes serve mapa-fase1 em cf85e9a, ancestral da telemetria; simulação sem conflitos e FF possível. 030–034 extras no banco não quebram o auditor de pendências. Banco efetivo dos dois vhosts não confirmado: `.env` não lido e arquivos distintos. Plano e rollback descritos, nenhum merge/checkout executado.

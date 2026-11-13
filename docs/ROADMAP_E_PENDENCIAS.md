@@ -97,3 +97,4 @@ Blocos da Home com estado de rede (depende de telemetria): vermelho = desconecta
 - **Etapa 7 import concluído:** eventos do poll usam início do ciclo; resíduos passam na faixa autorizada baseada no cycle_ms. Dump fora do Git, 92 ocorrências importadas; repetição com 0 novas/divergentes. Oito pares do poll cobertos, sem dupla contagem. Evidências no handoff 7.
 - **Etapa 7, caminho até site:** auditoria SELECT e proposta de grafo/API em `docs/rede-caminho-ate-site.md`; sem mudança de topologia ou implementação da API.
 - **Etapa 7 CP-A:** painel hidden corrigido e custom sem datas protegido; suíte net verde, incluindo regressões dos dois casos.
+- **Etapa 7, integração com testes:** auditoria sem merge e plano/rollback em `docs/integracao-telemetria-testes.md`; FF possível no estado medido. Banco efetivo do vhost testes não confirmado sem ler configuração restrita.
