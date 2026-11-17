@@ -35,3 +35,6 @@ backups/
 logs/
 .env
 .env.backup-*
+
+# Symlink local para o node_modules do harness do mapa (jsdom); nao versionar.
+tests/map/node_modules
