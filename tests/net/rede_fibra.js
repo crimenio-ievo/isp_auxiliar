@@ -315,6 +315,21 @@ async function boot(opts) {
   const mg5 = await mig(JSON.stringify(['status', 'rx', 'xyz', 'sinal'])); ok(mg5.heads === 'ONU|Estado|Sinal', 'migracao: chave desconhecida descartada e sem Sinal duplicado');
   const mgnew = await mig(JSON.stringify(['status', 'sinal', 'cliente'])); ok(mgnew.heads === 'ONU|Estado|Sinal|Cliente', 'preferencia ja no formato novo permanece');
 
+  // CP-3: escala da regua nas posicoes reais e rotulos sem sobreposicao
+  const rulerOf = async (now, med, ref) => { const sh = sheet(); sh.onu.rx_dbm = now; sh.vizinhos.mediana_dbm = med; sh.onu.baseline_dbm = ref; const b = await boot({sheet: () => sh}); b.q('.rf-row--onu').click(); await wait(40); return b; };
+  const boxesOf = b => b.qa('.rf-ruler__label').map(l => { const w = l.textContent.length * 6.6, c = parseFloat(l.style.left); return {t: l.textContent, lo: c - w / 2, hi: c + w / 2, top: l.classList.contains('rf-ruler__label--above') ? 'above' : l.style.top || '35px'}; });
+  const collide = bs => bs.some((a, i) => bs.some((c, j) => j > i && a.top === c.top && a.lo < c.hi && c.lo < a.hi));
+  const rr = await rulerOf(-20.0, -20.4, -21.0);
+  const ticks = rr.qa('.rf-ruler__tick'), expectPct = v => (v + 30) / 18 * 100;
+  ok(ticks.map(x => x.textContent).join('|') === '-30|-27|-25|-12' && ticks.every(x => Math.abs(parseFloat(x.style.left) - expectPct(Number(x.textContent))) < 0.01), 'escala: -30, -27, -25 e -12 nas posicoes reais (mesma funcao pct das marcas), nao espacadas igualmente: ' + ticks.map(x => x.style.left).join(' '));
+  ok(Math.abs(parseFloat(ticks[1].style.left) - 16.67) < 0.01 && Math.abs(parseFloat(ticks[2].style.left) - 27.78) < 0.01 && ticks[0].classList.contains('rf-ruler__tick--first') && ticks[3].classList.contains('rf-ruler__tick--last'), 'escala: -27 em 16,67% e -25 em 27,78%; extremos alinhados as bordas');
+  ok(rr.qa('.rf-ruler__label').length === 3 && !collide(boxesOf(rr)), 'rotulos Esta ONU / Vizinhos / Referencia com valores proximos (-20,0 / -20,4 / -21,0) nao se sobrepoem: ' + JSON.stringify(boxesOf(rr).map(x => [x.t, x.top, Math.round(x.lo), Math.round(x.hi)])));
+  const rows2 = new Set(rr.qa('.rf-ruler__label--below').map(l => l.dataset.row)); ok(rows2.size === 2, 'rotulos que colidiam foram deslocados para linhas diferentes');
+  const rEdge = await rulerOf(-12.4, -12.0, -12.9); ok(rEdge.qa('.rf-ruler__label').length === 3 && !collide(boxesOf(rEdge)) && boxesOf(rEdge).every(b => b.lo >= -0.5 && b.hi <= 380.5), 'rotulos perto da borda direita ficam dentro da regua e sem colisao');
+  const rEq = await rulerOf(-20.0, -20.1, -20.2); ok(rEq.qa('.rf-ruler__label').length === 1 && rEq.q('.rf-ruler__label').textContent.indexOf('Esta ONU = Vizinhos = Referência') === 0, 'valores praticamente iguais continuam num rotulo so');
+  const rFar = await rulerOf(-20.0, -27.0, -14.0); ok(!collide(boxesOf(rFar)) && rFar.qa('.rf-ruler__label--below').every(l => l.dataset.row === '0'), 'rotulos distantes ficam na primeira linha');
+  rr.errs.length + rEdge.errs.length + rEq.errs.length + rFar.errs.length === 0 || ok(false, 'erros de console na regua');
+
   // Erro 403 / falha de carga
   let f = await boot({status: () => 403});
   ok(f.q('#rf-summary').textContent === 'Acesso negado.', 'erro 403 mostrado, sem quebrar a pagina');
@@ -323,7 +338,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });

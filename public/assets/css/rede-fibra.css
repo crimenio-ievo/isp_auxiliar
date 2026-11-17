@@ -77,10 +77,13 @@
 .rf-ruler__mark--now { width:15px; height:15px; border-radius:50%; background:#17324d; }
 .rf-ruler__mark--med { width:11px; height:11px; background:#0f766e; transform:translateX(-50%) rotate(45deg); }
 .rf-ruler__mark--ref { width:0; height:0; border-left:7px solid transparent; border-right:7px solid transparent; border-bottom:13px solid #718096; }
-.rf-ruler__label { position:absolute; transform:translateX(-50%); font-size:12px; white-space:nowrap; font-weight:700; }
+.rf-ruler__label { position:absolute; transform:translateX(-50%); /* left em px, já limitado às bordas, por layoutRuler */ font-size:12px; white-space:nowrap; font-weight:700; }
 .rf-ruler__label--above { top:-25px; color:#17324d; }
 .rf-ruler__label--below { top:35px; color:#0f766e; }
-.rf-ruler__scale { display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted); margin-top:-18px; }
+.rf-ruler__scale { position:relative; height:16px; font-size:0.75rem; color:var(--muted); margin-top:-18px; }
+.rf-ruler__tick { position:absolute; top:0; transform:translateX(-50%); }
+.rf-ruler__tick--first { transform:none; }
+.rf-ruler__tick--last { transform:translateX(-100%); }
 .rf-legend { font-size: 0.75rem; color: var(--muted); margin: 0; }
 .rf-periods { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .rf-periods button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--text); }

@@ -333,6 +333,30 @@
     });
   }
   function pct(v) { return Math.max(0, Math.min(100, (v - YMIN) / (YMAX - YMIN) * 100)); }
+  // Rótulos da régua: mede as caixas (getBoundingClientRect; sem layout, estima pelo texto) e desloca o que colidir
+  // para outra linha; se nem 3 linhas resolvem, junta tudo num rótulo só. Chamar depois de anexar ao documento.
+  var LABEL_ROWS = [35, 53, 71];
+  function layoutRuler(box) {
+    var r = box.querySelector('.rf-ruler'); if (!r) { return; }
+    var W = r.getBoundingClientRect().width || 380;
+    var width = function (l) { return l.getBoundingClientRect().width || l.textContent.length * 6.6; };
+    var clamp = function (l) { var half = width(l) / 2, c = Math.max(half, Math.min(W - half, parseFloat(l.dataset.pct) * W / 100)); l.style.left = c + 'px'; return [c - half, c + half]; };
+    var above = r.querySelector('.rf-ruler__label--above'); if (above) { clamp(above); }
+    var below = [].slice.call(r.querySelectorAll('.rf-ruler__label--below')).sort(function (a, b) { return parseFloat(a.dataset.pct) - parseFloat(b.dataset.pct); });
+    var rows = LABEL_ROWS.map(function () { return []; }), fits = true;
+    below.forEach(function (l) {
+      var box1 = clamp(l), row = -1;
+      for (var i = 0; i < rows.length && row < 0; i++) { if (rows[i].every(function (o) { return box1[1] + 4 <= o[0] || box1[0] >= o[1] + 4; })) { row = i; } }
+      if (row < 0) { fits = false; return; }
+      rows[row].push(box1); l.style.top = LABEL_ROWS[row] + 'px'; l.dataset.row = String(row);
+    });
+    if (!fits && below.length > 1) {
+      below[0].textContent = below.map(function (l) { return l.textContent; }).join(' · ');
+      below[0].dataset.pct = String(below.reduce(function (a, l) { return a + parseFloat(l.dataset.pct); }, 0) / below.length);
+      below.slice(1).forEach(function (l) { l.remove(); });
+      clamp(below[0]); below[0].style.top = LABEL_ROWS[0] + 'px'; below[0].dataset.row = '0';
+    }
+  }
   function ruler(d) {
     var L = d.limiares, box = el('div'), r = el('div', 'rf-ruler'); r.setAttribute('role', 'img');
     var z = [['crit', pct(L.critico_dbm), 'Crítico'], ['warn', pct(L.atencao_dbm) - pct(L.critico_dbm), 'Atenção'], ['ok', 100 - pct(L.atencao_dbm), 'Normal']];
@@ -341,15 +365,19 @@
     values.forEach(function (x) { var marker=el('div','rf-ruler__mark rf-ruler__mark--'+x.cls); marker.style.left=pct(x.v)+'%'; r.appendChild(marker); });
     var groups=[];
     values.forEach(function (x) { var group=groups.find(function (g) { return Math.abs(g[0].v-x.v)<0.3; }); if(group) group.push(x); else groups.push([x]); });
-    var below=[];
     groups.forEach(function (g) {
-      var x=g[0], label=el('span','rf-ruler__label '+(g.some(function(q){return q.cls==='now';})?'rf-ruler__label--above':'rf-ruler__label--below'),g.map(function(q){return q.name;}).join(' = ')+' '+num(x.v,1));
-      label.style.left=pct(x.v)+'%';
-      if (!g.some(function(q){return q.cls==='now';})) { if (below.some(function(p){return Math.abs(p-pct(x.v))<14;})) label.style.top='53px'; below.push(pct(x.v)); }
+      var x=g[0], isNow=g.some(function(q){return q.cls==='now';});
+      var label=el('span','rf-ruler__label '+(isNow?'rf-ruler__label--above':'rf-ruler__label--below'),g.map(function(q){return q.name;}).join(' = ')+' '+num(x.v,1));
+      label.dataset.pct=String(pct(x.v)); label.style.left=pct(x.v)+'%';
       r.appendChild(label);
     });
     r.setAttribute('aria-label', 'Régua de sinal de ' + YMIN + ' a ' + YMAX + ' dBm: atual ' + dbm(d.onu.rx_dbm)); box.appendChild(r);
-    var sc = el('div', 'rf-ruler__scale'); [YMIN, L.critico_dbm, L.atencao_dbm, YMAX].forEach(function (v) { sc.appendChild(el('span', '', String(v))); }); box.appendChild(sc);
+    var sc = el('div', 'rf-ruler__scale');
+    [YMIN, L.critico_dbm, L.atencao_dbm, YMAX].forEach(function (v, i, all) {
+      var t = el('span', 'rf-ruler__tick' + (i === 0 ? ' rf-ruler__tick--first' : i === all.length - 1 ? ' rf-ruler__tick--last' : ''), String(v));
+      t.dataset.pct = String(pct(v)); t.style.left = pct(v) + '%'; sc.appendChild(t);
+    });
+    box.appendChild(sc);
     box.appendChild(el('p', 'rf-legend', 'Crítico abaixo de ' + L.critico_dbm + ' dBm · Atenção abaixo de ' + L.atencao_dbm + ' dBm'));
     return box;
   }
@@ -370,7 +398,7 @@
     var d = state.sheet, o = d.onu, body = $('rf-p-body'); clear(body);
     $('rf-p-title').textContent = 'ONU ' + o.onu_index + ' · PON ' + o.pon_index + ' · ONU ou ONT: a identificar';
     $('rf-p-sub').textContent = o.mac + ' · ' + (STATUS[o.status] || o.status) + (o.status_desde ? ' desde ' + fmtDT(o.status_desde) : '');
-    var s1 = el('div'); s1.appendChild(el('h3', '', 'Sinal')); s1.appendChild(ruler(d)); body.appendChild(s1);
+    var s1 = el('div'); s1.appendChild(el('h3', '', 'Sinal')); var rb = ruler(d); s1.appendChild(rb); body.appendChild(s1); layoutRuler(rb);
     var g = el('dl', 'rf-grid');
     function row(k, v) { g.appendChild(el('dt', '', k)); g.appendChild(el('dd', '', v)); }
     row('Sinal atual', dbm(o.rx_dbm) + (o.rx_dbm === null ? '' : ' · ' + (BAND[o.rx_band] || '')));
