@@ -20,7 +20,9 @@
   var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
   var SITE_LABEL = { pop: 'POP', tower: 'Torre' };
   var STATUS = { online: 'Online', offline: 'Offline', unknown: 'Desconhecido' };
-  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '7d', from: '', to: '', sheet: null, evPeriod: '24h' };
+  var SORTABLE = { status: 'text', sinal: 'number', tx: 'number', temp: 'number', dist: 'number', quedas: 'number', mac: 'text' };
+  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '7d', from: '', to: '', sheet: null, evPeriod: '24h', sort: null };
+  state.sort = loadSort();
 
   // Migra a preferência salva: as antigas colunas "Sinal (dBm)" (rx) e "Faixa" (band) viram a coluna única "Sinal".
   // Quem tinha qualquer uma das duas visível passa a ver "Sinal"; chaves desconhecidas são descartadas.
@@ -42,6 +44,49 @@
       }
     } catch (e) { /* sem storage ou valor corrompido: usa o padrão */ }
     return DEFAULT_COLS.slice();
+  }
+  // Ordenação por coluna: 3 estados (crescente, decrescente, ordem normal), guardada à parte em rf.sort.
+  function loadSort() {
+    try {
+      var v = JSON.parse(window.localStorage.getItem('rf.sort') || 'null');
+      if (v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(SORTABLE, v.k) && (v.d === 'asc' || v.d === 'desc')) { return { k: v.k, d: v.d }; }
+    } catch (e) { /* sem storage ou valor corrompido: ordem normal */ }
+    return null;
+  }
+  function saveSort() { try { if (state.sort) { window.localStorage.setItem('rf.sort', JSON.stringify(state.sort)); } else { window.localStorage.removeItem('rf.sort'); } } catch (e) { /* sem storage */ } }
+  function statusRank(o) {
+    if (o.status === 'offline') { return 0; }
+    if (o.status !== 'online') { return 5; }
+    return o.rx_dbm === null ? 4 : ({ critico: 1, atencao: 2, saturado: 2, ok: 3 })[o.rx_band] || 4;
+  }
+  // Valor de ordenação por coluna; null = vai sempre para o fim, nos dois sentidos.
+  function sortValue(o, k) {
+    if (k === 'status') { return statusRank(o); }
+    if (k === 'sinal') { return isStale(o) ? null : o.rx_dbm; }
+    if (k === 'tx') { return o.tx_dbm; }
+    if (k === 'temp') { return o.temp_c; }
+    if (k === 'dist') { return o.distancia_m; }
+    if (k === 'quedas') { return o.quedas_24h; }
+    if (k === 'mac') { return o.mac; }
+    return null;
+  }
+  function sortOnus(list, cols) {
+    var s = state.sort;
+    if (!s || cols.every(function (c) { return c.k !== s.k; })) { return list; }
+    var dir = s.d === 'desc' ? -1 : 1;
+    return list.slice().sort(function (a, b) {
+      var x = sortValue(a, s.k), y = sortValue(b, s.k);
+      if ((x === null || x === undefined) !== (y === null || y === undefined)) { return x === null || x === undefined ? 1 : -1; }
+      var r = 0;
+      if (x !== null && x !== undefined) { r = SORTABLE[s.k] === 'text' ? String(x).localeCompare(String(y)) : x - y; }
+      return r !== 0 ? r * dir : a.onu_index - b.onu_index;
+    });
+  }
+  function cycleSort(k) {
+    var s = state.sort;
+    state.sort = !s || s.k !== k ? { k: k, d: 'asc' } : (s.d === 'asc' ? { k: k, d: 'desc' } : null);
+    saveSort(); renderTree();
+    var again = document.querySelector('#rf-table th[data-col="' + k + '"] .rf-sort'); if (again) { again.focus(); }
   }
   function saveCols() { try { window.localStorage.setItem('rf.cols', JSON.stringify(state.cols)); } catch (e) { /* sem storage */ } }
 
@@ -74,6 +119,7 @@
   }
   function num(v, d) { return Number(v).toFixed(d).replace('.', ','); }
   function dbm(v, d) { return v === null || v === undefined ? 'sem leitura' : num(v, d === undefined ? 2 : d) + ' dBm'; }
+  function isStale(o) { return o.status === 'offline' || !!o.desatualizado; }
   function pill(kind, text) { return el('span', 'rf-pill rf-pill--' + kind, text); }
   function get(url) {
     return window.fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' }).then(function (r) {
@@ -123,19 +169,22 @@
     }
     else if (k === 'sinal') {
       // Barra (cor forte da faixa) + valor em dBm + palavra da faixa, nesta ordem, numa linha só.
-      var v = o.rx_dbm, L = state.tree.limiares, band = v === null ? 'unknown' : o.rx_band, wrap = el('span', 'rf-signal-cell');
+      // ONU offline ou sem resposta: a última leitura não vale como faixa; barra cinza, valor apagado "último: ..." e sem pílula.
+      var v = o.rx_dbm, L = state.tree.limiares, stale = isStale(o), wrap = el('span', 'rf-signal-cell');
+      var band = v === null || stale ? 'unknown' : o.rx_band;
       var bar = el('span', 'rf-signal'), fill = el('span', 'rf-signal__fill rf-fill--' + band), width = 0;
-      if (v !== null) {
+      if (v !== null && !stale) {
         width = v < L.critico_dbm ? Math.max(0, (v + 32) / (L.critico_dbm + 32)) * 100 / 3
           : v < L.atencao_dbm ? 100 / 3 + (v - L.critico_dbm) / (L.atencao_dbm - L.critico_dbm) * 100 / 3
           : 200 / 3 + (v - L.atencao_dbm) / (-8 - L.atencao_dbm) * 100 / 3;
         width = Math.max(4, Math.min(100, width));
       }
       fill.style.width = width + '%'; bar.appendChild(fill);
-      bar.setAttribute('role', 'img'); bar.setAttribute('aria-label', v === null ? 'Sem leitura de sinal' : 'Sinal ' + dbm(v) + ', ' + (BAND[o.rx_band] || o.rx_band));
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', v === null ? 'Sem leitura de sinal' : stale ? 'ONU sem estado atual; último sinal ' + dbm(v) : 'Sinal ' + dbm(v) + ', ' + (BAND[o.rx_band] || o.rx_band));
       wrap.appendChild(bar);
-      wrap.appendChild(el('span', 'rf-signal__val rf-signal__val--' + band, v === null ? 'sem leitura' : v.toFixed(2) + ' dBm'));
-      if (v !== null) { wrap.appendChild(pill(o.rx_band, BAND[o.rx_band] || o.rx_band)); td.dataset.sortValue = String(v); }
+      wrap.appendChild(el('span', 'rf-signal__val rf-signal__val--' + (stale && v !== null ? 'stale' : band), v === null ? 'sem leitura' : (stale ? 'último: ' : '') + dbm(v)));
+      if (v !== null && !stale) { wrap.appendChild(pill(o.rx_band, BAND[o.rx_band] || o.rx_band)); td.dataset.sortValue = String(v); }
       td.appendChild(wrap);
     }
     else if (k === 'tx') { td.textContent = o.tx_dbm === null ? 'sem leitura' : o.tx_dbm.toFixed(2); }
@@ -164,7 +213,18 @@
     var f = filters(), head = $('rf-table').tHead, body = $('rf-table').tBodies[0], cols = COLS.filter(function (c) { return state.cols.indexOf(c.k) !== -1; });
     clear(head); clear(body);
     var hr = el('tr'); hr.appendChild(el('th', '', 'ONU'));
-    cols.forEach(function (c) { var th = el('th', '', c.l); th.dataset.col = c.k; if (c.k === 'sinal') { th.dataset.sortKey = 'sort-value'; th.dataset.sortType = 'number'; } hr.appendChild(th); });
+    cols.forEach(function (c) {
+      var th = el('th'); th.dataset.col = c.k;
+      if (c.k === 'sinal') { th.dataset.sortKey = 'sort-value'; th.dataset.sortType = 'number'; }
+      if (SORTABLE[c.k]) {
+        var cur = state.sort && state.sort.k === c.k ? state.sort.d : null, btn = el('button', 'rf-sort', c.l); btn.type = 'button';
+        th.setAttribute('aria-sort', cur === 'asc' ? 'ascending' : cur === 'desc' ? 'descending' : 'none');
+        btn.title = 'Ordenar por ' + c.l + ' (clique: crescente, decrescente, ordem normal)';
+        btn.addEventListener('click', function () { cycleSort(c.k); });
+        th.appendChild(btn);
+      } else { th.textContent = c.l; }
+      hr.appendChild(th);
+    });
     head.appendChild(hr);
     var span = cols.length + 1, shown = 0;
     var groups = [], gi = {};
@@ -208,7 +268,7 @@
           ptd.appendChild(pb); ptd.appendChild(el('span', 'rf-muted', '  · ' + r.p.online + ' online de ' + r.p.total + ' ONU(s)'));
           decorateGroup(ptr,ptd,pk,r.p.onus,{kind:'pon',pon:r.p,device:d}); ptr.appendChild(ptd); body.appendChild(ptr);
           if (state.collapsed[pk]) { return; }
-          r.onus.forEach(function (o) {
+          sortOnus(r.onus, cols).forEach(function (o) {
             var otr = el('tr', 'rf-row rf-row--onu' + (state.selected === o.id ? ' is-selected' : '')); otr.tabIndex = 0; otr.dataset.onu = String(o.id);
             otr.appendChild(el('td', '', 'ONU ' + o.onu_index));
             cols.forEach(function (c) { otr.appendChild(cell(o, c.k)); });

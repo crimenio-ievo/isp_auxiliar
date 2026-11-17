@@ -145,3 +145,10 @@
 .rf-signal__val--atencao, .rf-signal__val--saturado { color: var(--rf-warn-ink); }
 .rf-signal__val--critico { color: var(--rf-crit-ink); }
 .rf-signal__val--unknown { font-weight: 600; color: var(--rf-none-ink); }
+/* Ordenação por coluna: indicador só por CSS (o texto do cabeçalho continua limpo); aria-sort no <th>. */
+.rf-sort { all: unset; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.rf-sort::after { content: '↕'; color: var(--muted); opacity: .55; font-size: .85em; }
+.rf-table th[aria-sort="ascending"] .rf-sort::after { content: '▲'; opacity: 1; color: var(--text); }
+.rf-table th[aria-sort="descending"] .rf-sort::after { content: '▼'; opacity: 1; color: var(--text); }
+.rf-sort:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
+.rf-signal__val--stale { font-weight: 600; color: var(--rf-none-ink); }

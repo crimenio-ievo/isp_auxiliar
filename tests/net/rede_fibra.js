@@ -53,6 +53,7 @@ const evGroup = (over) => Object.assign({dispositivo_id: 1, dispositivo_nome: 'O
 const events = (groups) => ({gerado_em: '2026-11-13 12:00:00', periodo: {kind: '24h', from: '2026-11-12 12:00:00', to: '2026-11-13 12:00:00'}, grupos: groups, fontes: {quedas_poll: true, quedas_log: true}});
 const EVK = 'gerado_em,periodo,grupos,fontes', EVG = 'dispositivo_id,dispositivo_nome,pon_index,pon_label,inicio,fim,quantidade,em_aberto,motivo,todas_dying_gasp,correlacionada,precisao,texto,onus', EVO = 'onu_id,onu_index,mac,started_at,ended_at,open,duration_s,cause,source';
 
+function document_activeIsSort(b) { const a = b.d.activeElement; return !!a && a.classList.contains('rf-sort'); }
 async function boot(opts) {
   opts = opts || {};
   const errs = [], vc = new VirtualConsole(); vc.on('jsdomError', e => errs.push(String(e.detail && e.detail.message || e.message))); vc.on('error', e => errs.push(String(e)));
@@ -85,7 +86,7 @@ async function boot(opts) {
   const heads = t.qa('#rf-table thead th').map(x => x.textContent);
   ok(heads.join('|') === 'ONU|Estado|Sinal|Distância|Quedas 24 h|MAC', 'colunas padrao: ' + heads.join('|'));
   const row1 = t.qa('.rf-row--onu')[0].textContent;
-  ok(row1.indexOf('-20.00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada e MAC (Cliente/CTO ficam ocultas por padrao)');
+  ok(row1.indexOf('-20,00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada e MAC (Cliente/CTO ficam ocultas por padrao)');
   ok(t.qa('.rf-row--onu')[3].textContent.indexOf('sem leitura') !== -1, 'ONU sem leitura de sinal');
   ok(!/simulad|fict[ií]c|fake/i.test(t.d.body.textContent), 'nenhum texto de dado simulado');
   let linked = await boot({url:'http://localhost/rede-fibra?onu=2'});
@@ -264,16 +265,44 @@ async function boot(opts) {
   ok(pairsOk, 'contraste texto/fundo de pilula >= 4,5:1 em todas as faixas e no estado Online');
   const tc = await boot({tree: tr => { tr.dispositivos[0].pons[0].onus[1].rx_dbm = -29; tr.dispositivos[0].pons[0].onus[1].rx_band = 'critico'; return tr; }});
   const fills = tc.qa('.rf-row--onu').map(r => { const f = r.querySelector('.rf-signal__fill'); return f ? f.className.replace('rf-signal__fill ', '') + ':' + Math.round(parseFloat(f.style.width)) : null; });
-  ok(fills.join('|') === 'rf-fill--ok:' + fills[0].split(':')[1] + '|rf-fill--critico:' + fills[1].split(':')[1] + '|rf-fill--ok:' + fills[2].split(':')[1] + '|rf-fill--unknown:0', 'barra: classe de preenchimento por faixa (normal, critico, offline com leitura, sem leitura): ' + fills.join('|'));
+  ok(fills.join('|') === 'rf-fill--ok:' + fills[0].split(':')[1] + '|rf-fill--critico:' + fills[1].split(':')[1] + '|rf-fill--unknown:0|rf-fill--unknown:0', 'barra: preenchimento por faixa (normal, critico; offline e sem leitura ficam no trilho): ' + fills.join('|'));
   const w0 = fills.map(x => parseInt(x.split(':')[1], 10)); ok(w0[0] >= 67 && w0[0] <= 100 && w0[1] >= 4 && w0[1] < 33.4 && w0[3] === 0, 'barra: normal ocupa 67-100%, critico 0-33%, sem leitura vazia');
   const tcs = await boot(); const fa = tcs.qa('.rf-row--onu .rf-signal__fill'); ok(fa[1].classList.contains('rf-fill--atencao') && parseFloat(fa[1].style.width) > 33.3 && parseFloat(fa[1].style.width) < 66.7, 'barra: atencao no estagio do meio');
   const rows0 = tcs.qa('.rf-row--onu'), c0 = rows0[0].querySelectorAll('td')[2].querySelector('.rf-signal-cell');
-  ok(c0 && [...c0.children].map(x => x.className.split(' ')[0]).join('|') === 'rf-signal|rf-signal__val|rf-pill' && c0.children[1].textContent === '-20.00 dBm' && c0.children[2].textContent === 'Normal', 'coluna Sinal: barra, valor em dBm e palavra da faixa, nesta ordem');
+  ok(c0 && [...c0.children].map(x => x.className.split(' ')[0]).join('|') === 'rf-signal|rf-signal__val|rf-pill' && c0.children[1].textContent === '-20,00 dBm' && c0.children[2].textContent === 'Normal', 'coluna Sinal: barra, valor em dBm e palavra da faixa, nesta ordem');
   const c3 = rows0[3].querySelectorAll('td')[2], f3 = c3.querySelector('.rf-signal__fill');
   ok(f3.style.width === '0%' && c3.textContent === 'sem leitura' && !c3.querySelector('.rf-pill') && !c3.hasAttribute('data-sort-value'), 'ONU sem leitura: barra vazia e "sem leitura", sem pilula nem valor de ordenacao');
   ok(rows0[0].querySelectorAll('td')[2].dataset.sortValue === '-20' && rows0[1].querySelectorAll('td')[2].dataset.sortValue === '-26' && tcs.q('#rf-table thead th[data-col="sinal"]').dataset.sortType === 'number', 'coluna Sinal pronta para ordenar pelo valor numerico (data-sort-value), nao pela palavra');
   ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Faixa' || x.textContent === 'Sinal (dBm)') && tcs.qa('.rf-row--onu').every(r => r.querySelectorAll('td').length === 6), 'sem colunas Faixa/Sinal (dBm) separadas');
   ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Cliente' || x.textContent === 'CTO'), 'Cliente e CTO ocultas por padrao');
+  // CP-1 (offline) e CP-2 (ordenacao)
+  const cOff = rows0[2].querySelectorAll('td')[2], fOff = cOff.querySelector('.rf-signal__fill');
+  ok(cOff.textContent === 'último: -21,00 dBm' && !cOff.querySelector('.rf-pill') && fOff.className.indexOf('rf-fill--unknown') !== -1 && fOff.style.width === '0%' && cOff.querySelector('.rf-signal__val').classList.contains('rf-signal__val--stale') && !cOff.hasAttribute('data-sort-value'), 'ONU offline: barra cinza (sem preenchimento de faixa), "último: -21,00 dBm" apagado, sem pilula e sem valor de ordenacao');
+  const stl = await boot({tree: tr => { tr.dispositivos[0].pons[0].onus[0].desatualizado = true; return tr; }});
+  const cStl = stl.qa('.rf-row--onu')[0].querySelectorAll('td')[2];
+  ok(cStl.textContent === 'último: -20,00 dBm' && !cStl.querySelector('.rf-pill') && cStl.querySelector('.rf-signal__fill').style.width === '0%', 'ONU "sem resposta" (desatualizado) segue a mesma regra do offline');
+  const sortTree = tr => { const p = tr.dispositivos[0].pons[0]; p.onus = [onu(1, 1, 1, 'online', -20.0, 'ok', {quedas_24h: 1, ultima_queda_em: '2026-11-13 10:00:00'}), onu(2, 2, 1, 'online', -29.0, 'critico', {quedas_24h: 3, ultima_queda_em: '2026-11-13 10:00:00'}), onu(3, 3, 1, 'offline', -21.0, 'ok', {quedas_24h: 2, ultima_queda_em: '2026-11-13 10:00:00'}), onu(5, 4, 1, 'online', null, 'unknown'), onu(6, 5, 1, 'online', -15.0, 'ok', {distancia_m: 9000})]; p.total = 5; return tr; };
+  const order = b => b.qa('.rf-row--onu').slice(0, 5).map(r => r.querySelector('td').textContent.replace('ONU ', '')).join('|');
+  const hdr = (b, k) => b.q('#rf-table thead th[data-col="' + k + '"]'), clickH = (b, k) => hdr(b, k).querySelector('.rf-sort').click();
+  const so = await boot({tree: sortTree}); const skeleton = () => so.qa('.rf-row--site,.rf-row--eqp,.rf-row--pon').map(r => r.textContent).join('~');
+  const sk0 = skeleton(), pon2row0 = so.qa('.rf-row--onu')[5].textContent;
+  ok(order(so) === '1|2|3|4|5' && hdr(so, 'sinal').getAttribute('aria-sort') === 'none' && hdr(so, 'status').getAttribute('aria-sort') === 'none' && !hdr(so, 'sinal').textContent.match(/[▲▼↕]/) && !hdr(so, 'sinal').hasAttribute('data-sorted'), 'ordenacao: ordem normal inicial, aria-sort="none" nas colunas ordenaveis, texto do cabecalho limpo');
+  ok(!!hdr(so, 'sinal').querySelector('button') && !!hdr(so, 'status').querySelector('button') && !!hdr(so, 'dist').querySelector('button') && !!hdr(so, 'quedas').querySelector('button') && !!hdr(so, 'mac').querySelector('button'), 'cabecalhos Estado, Sinal, Distancia, Quedas e MAC sao botoes (teclado)');
+  clickH(so, 'sinal'); ok(order(so) === '2|1|5|3|4' && hdr(so, 'sinal').getAttribute('aria-sort') === 'ascending' && so.w.localStorage.getItem('rf.sort') === '{"k":"sinal","d":"asc"}', 'Sinal crescente por dBm numerico; offline e sem leitura no fim: ' + order(so));
+  ok(skeleton() === sk0 && so.qa('.rf-row--onu')[5].textContent === pon2row0, 'ordenacao so dentro de cada PON: site, equipamento e PON mantem a ordem; ONU da PON 2 continua na PON 2');
+  clickH(so, 'sinal'); ok(order(so) === '5|1|2|3|4' && hdr(so, 'sinal').getAttribute('aria-sort') === 'descending', 'Sinal decrescente: offline e sem leitura continuam no fim: ' + order(so));
+  ok(document_activeIsSort(so), 'foco volta ao botao do cabecalho depois de reordenar');
+  clickH(so, 'sinal'); ok(order(so) === '1|2|3|4|5' && hdr(so, 'sinal').getAttribute('aria-sort') === 'none' && so.w.localStorage.getItem('rf.sort') === null, 'terceiro clique volta a ordem normal e limpa a preferencia');
+  clickH(so, 'status'); ok(order(so) === '3|2|1|5|4', 'Estado: offline, critico, atencao, normal (depois sem leitura): ' + order(so));
+  clickH(so, 'dist'); ok(order(so) === '5|1|2|4|3' && hdr(so, 'status').getAttribute('aria-sort') === 'none', 'Distancia crescente numerica, offline (sem distancia) no fim; so uma coluna ativa: ' + order(so));
+  clickH(so, 'dist'); ok(order(so) === '1|2|4|5|3', 'Distancia decrescente: sem distancia continua no fim: ' + order(so));
+  clickH(so, 'quedas'); clickH(so, 'quedas'); ok(order(so) === '2|3|1|4|5', 'Quedas decrescente numerica: ' + order(so));
+  clickH(so, 'mac'); ok(order(so) === '1|2|3|4|5', 'MAC crescente (texto)'); clickH(so, 'mac'); ok(order(so) === '5|4|3|2|1', 'MAC decrescente (texto)');
+  const sp = await boot({tree: sortTree, storage: {'rf.sort': '{"k":"sinal","d":"desc"}'}});
+  ok(order(sp) === '5|1|2|3|4' && sp.q('#rf-table thead th[data-col="sinal"]').getAttribute('aria-sort') === 'descending', 'a ordenacao escolhida persiste no navegador');
+  for (const bad of ['{xx', '{"k":"inexistente","d":"asc"}', '{"k":"sinal","d":"x"}', '42', 'null']) { const sb = await boot({tree: sortTree, storage: {'rf.sort': bad}}); ok(order(sb) === '1|2|3|4|5' && sb.errs.length === 0, 'preferencia de ordenacao invalida ignorada sem erro: ' + bad); }
+  const sh = await boot({tree: sortTree, storage: {'rf.sort': '{"k":"sinal","d":"asc"}', 'rf.cols': JSON.stringify(['status', 'mac'])}});
+  ok(order(sh) === '1|2|3|4|5', 'ordenacao por coluna oculta e ignorada');
   // Migracao da preferencia salva
   const mig = async (saved) => { const b = await boot({storage: {'rf.cols': saved}}); return {heads: b.qa('#rf-table thead th').map(x => x.textContent).join('|'), stored: b.w.localStorage.getItem('rf.cols'), errs: b.errs}; };
   const mg1 = await mig(JSON.stringify(['status', 'rx', 'band', 'dist', 'cliente', 'cto', 'quedas', 'mac']));
@@ -294,7 +323,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });
