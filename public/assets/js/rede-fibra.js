@@ -14,6 +14,7 @@
     { k: 'quedas', l: 'Quedas 24 h' }, { k: 'mac', l: 'MAC' }
   ];
   var DEFAULT_COLS = ['status', 'rx', 'band', 'dist', 'cliente', 'cto', 'quedas', 'mac'];
+  var COUNT_LABEL = { ok: 'normal', atencao: 'atenção', critico: 'crítico', offline: 'offline' };
   var BAND = { ok: 'Normal', atencao: 'Atenção', critico: 'Crítico', saturado: 'Saturado', unknown: 'Sem leitura' };
   var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
   var SITE_LABEL = { pop: 'POP', tower: 'Torre' };
@@ -114,10 +115,10 @@
     return td;
   }
   function counts(onus) { var c={ok:0,atencao:0,critico:0,offline:0}; onus.forEach(function(o){if(o.status==='offline')c.offline++;else if(o.rx_dbm!==null){c[o.rx_band==='saturado'?'atencao':o.rx_band]=(c[o.rx_band==='saturado'?'atencao':o.rx_band]||0)+1;}});return c; }
-  function stacked(onus) { var c=counts(onus),bar=el('div','rf-stacked'); ['ok','atencao','critico','offline'].forEach(function(k){var part=el('span','rf-pill--'+k);part.style.width=(onus.length?100*c[k]/onus.length:0)+'%';part.title=k+': '+c[k];bar.appendChild(part);});return bar; }
+  function stacked(onus) { var c=counts(onus),bar=el('div','rf-stacked'); ['ok','atencao','critico','offline'].forEach(function(k){var part=el('span','rf-fill--'+k);part.style.width=(onus.length?100*c[k]/onus.length:0)+'%';part.title=k+': '+c[k];bar.appendChild(part);});return bar; }
   function decorateGroup(row,cell,key,onus,data) {
     var toggle=cell.querySelector('.rf-toggle'), label=el('span','rf-group-label',toggle.textContent); toggle.setAttribute('aria-label','Expandir ou recolher '+toggle.textContent); toggle.textContent=''; toggle.after(label);
-    var badges=el('span','rf-group-counts'),c=counts(onus);Object.keys(c).forEach(function(k){badges.appendChild(pill(k,k+' '+c[k]));});cell.appendChild(badges);row.tabIndex=0;
+    var badges=el('span','rf-group-counts'),c=counts(onus);Object.keys(c).forEach(function(k){var b=pill(k,COUNT_LABEL[k]+' ');b.appendChild(el('span','rf-count-n',String(c[k])));badges.appendChild(b);});cell.appendChild(badges);row.tabIndex=0;
     function open(){if(state.group===key){state.group=null;state.selected=null;$('rf-panel').hidden=true;document.querySelector('.rf-layout').classList.remove('has-panel');return;}state.group=key;state.selected=null;var body=$('rf-p-body');clear(body);$('rf-panel').hidden=false;document.querySelector('.rf-layout').classList.add('has-panel');$('rf-p-title').textContent=data.kind==='site'?(data.site?data.site.nome:'Sem site'):data.kind==='device'?data.device.nome:data.pon.label;$('rf-p-sub').textContent='';
       var online=onus.filter(function(o){return o.status==='online';}).length;
       body.appendChild(el('p','',online+' online / '+onus.length+' ONUs'));body.appendChild(stacked(onus));
@@ -306,7 +307,7 @@
     var cb = el('div', 'rf-chartbar'); cb.appendChild(el('h3', '', 'Sinal e quedas'));
     var big = el('button', '', 'Ampliar'); big.type = 'button'; big.addEventListener('click', function () { openModal(); }); cb.appendChild(big); body.appendChild(cb);
     var ch = el('div', 'rf-chart'); ch.id = 'rf-p-chart'; body.appendChild(ch); drawChart(ch, d, false);
-    var legend = el('p', 'rf-legend rf-chart-legend'); [['━━','Esta ONU','#17324d'],['┄','Referência','#718096'],['┄','Vizinhos','#0f766e'],['▉','Queda','#d64545']].forEach(function (item) { var mark=el('span','',item[0]); mark.style.color=item[2]; legend.appendChild(mark); legend.appendChild(document.createTextNode(' '+item[1]+'  ')); }); body.appendChild(legend);
+    var legend = el('p', 'rf-legend rf-chart-legend'); [['━━','Esta ONU','#17324d'],['┄','Referência','#718096'],['┄','Vizinhos','#0f766e'],['▉','Queda','var(--rf-off-fill)']].forEach(function (item) { var mark=el('span','',item[0]); mark.style.color=item[2]; legend.appendChild(mark); legend.appendChild(document.createTextNode(' '+item[1]+'  ')); }); body.appendChild(legend);
     body.appendChild(el('p', 'rf-legend', 'O sinal é gravado quando muda mais de 1 dB e uma vez por dia.'));
     pr = el('div'); pr.appendChild(el('h3', '', 'Quedas'));
     var tot = d.quedas_total;
@@ -329,8 +330,8 @@
     function Y(v) { return mt + (YMAX - Math.max(YMIN, Math.min(YMAX, v))) / (YMAX - YMIN) * (H - mt - mb); }
     var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Sinal da ONU no período selecionado, com as quedas como faixas verticais' });
     var L = d.limiares;
-    [[YMIN, L.critico_dbm, '#f6d8d5'], [L.critico_dbm, L.atencao_dbm, '#fbefc7'], [L.atencao_dbm, YMAX, '#e6f4ea']].forEach(function (z) {
-      s.appendChild(svg('rect', { x: ml, y: Y(z[1]), width: W - ml - mr, height: Y(z[0]) - Y(z[1]), fill: z[2] }));
+    [[YMIN, L.critico_dbm, 'critico'], [L.critico_dbm, L.atencao_dbm, 'atencao'], [L.atencao_dbm, YMAX, 'ok']].forEach(function (z) {
+      s.appendChild(svg('rect', { x: ml, y: Y(z[1]), width: W - ml - mr, height: Y(z[0]) - Y(z[1]), 'class': 'rf-zone rf-zone--' + z[2] }));
     });
     [YMIN, -27, -25, -20, YMAX].forEach(function (v) {
       s.appendChild(svg('line', { x1: ml, x2: W - mr, y1: Y(v), y2: Y(v), stroke: '#c9d3dc', 'stroke-width': 1 }));
@@ -343,7 +344,7 @@
     }
     var outs = d.quedas_serie.map(function (q) { return { a: parse(q.started_at), b: q.ended_at ? parse(q.ended_at) : t1, q: q }; });
     outs.forEach(function (o) {
-      var x = X(o.a), w = Math.max(2.5, X(o.b) - x), r = svg('rect', { x: x, y: mt, width: w, height: H - mt - mb, fill: '#d64545', opacity: 0.35, class: 'rf-outage' });
+      var x = X(o.a), w = Math.max(2.5, X(o.b) - x), r = svg('rect', { x: x, y: mt, width: w, height: H - mt - mb, opacity: 0.35, class: 'rf-outage' });
       var tt = svg('title'); tt.textContent = 'Queda ' + fmtDT(o.q.started_at) + ' · ' + o.q.reason; r.appendChild(tt); s.appendChild(r);
     });
     if (!pts.length) {

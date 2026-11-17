@@ -1,5 +1,16 @@
 /* Rede de fibra: só estilos desta tela; reaproveita as variáveis do app.css. */
-.rf { display: grid; gap: 14px; }
+/* Paleta única por faixa (valores do mockup aprovado). Escopo .rf: não vaza para o resto do sistema.
+   fill = barra/segmento/régua/gráfico · ink = texto · bg = fundo de pílula. Nenhum componente define tom de faixa por conta própria. */
+.rf {
+  --rf-crit-fill: #E5484D; --rf-crit-ink: #B42318; --rf-crit-bg: #FDE8E6;
+  --rf-warn-fill: #F2A33A; --rf-warn-ink: #9A4D00; --rf-warn-bg: #FFF3DC;
+  --rf-ok-fill: #3B82F6; --rf-ok-ink: #1D4ED8; --rf-ok-bg: #E8EFFD;
+  --rf-off-fill: #B42318; --rf-off-ink: #B42318; --rf-off-bg: #FDE8E6;
+  --rf-none-fill: #ECEFED; --rf-none-ink: #5B6864; --rf-none-bg: #ECEFED;
+  --rf-online-ink: #157E3C; --rf-online-bg: #E7F6EC; /* #15803D do mockup dava 4,49:1; só a luminosidade foi reduzida */
+  --rf-track: #ECEFED; --rf-sep: #FFFFFF;
+  display: grid; gap: 14px;
+}
 .rf-filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; padding: 14px 16px; }
 .rf-field { display: grid; gap: 4px; font-size: 0.82rem; color: var(--muted); }
 .rf-field select, .rf-field input { min-width: 130px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text); font: inherit; }
@@ -34,10 +45,19 @@
 .rf-row--onu td:first-child { padding-left: 58px; }
 .rf-muted { color: var(--muted); }
 .rf-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
-.rf-pill--online, .rf-pill--ok { background: var(--alert-ok-bg); color: var(--alert-ok-ink); }
-.rf-pill--offline, .rf-pill--critico { background: var(--alert-urgent-bg); color: var(--alert-urgent-ink); }
-.rf-pill--atencao, .rf-pill--saturado { background: var(--alert-caution-bg); color: var(--alert-caution-ink); }
-.rf-pill--unknown { background: var(--surface-muted); color: var(--muted); }
+.rf-pill--online { background: var(--rf-online-bg); color: var(--rf-online-ink); }
+.rf-pill--ok { background: var(--rf-ok-bg); color: var(--rf-ok-ink); }
+.rf-pill--offline { background: var(--rf-off-bg); color: var(--rf-off-ink); }
+.rf-pill--critico { background: var(--rf-crit-bg); color: var(--rf-crit-ink); }
+.rf-pill--atencao, .rf-pill--saturado { background: var(--rf-warn-bg); color: var(--rf-warn-ink); }
+.rf-pill--unknown { background: var(--rf-none-bg); color: var(--rf-none-ink); }
+.rf-count-n { font-weight: 800; }
+/* Preenchimentos (barra de sinal, empilhado): cor forte da faixa. */
+.rf-fill--ok { background: var(--rf-ok-fill); }
+.rf-fill--atencao, .rf-fill--saturado { background: var(--rf-warn-fill); }
+.rf-fill--critico { background: var(--rf-crit-fill); }
+.rf-fill--offline { background: var(--rf-off-fill); }
+.rf-fill--unknown { background: var(--rf-none-fill); }
 .rf-empty { padding: 18px; color: var(--muted); margin: 0; }
 .rf-panel { padding: 16px; display: grid; gap: 14px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
 .rf-panel h2 { margin: 0; font-size: 1.05rem; }
@@ -48,10 +68,11 @@
 .rf-grid dt { color: var(--muted); font-size: 0.78rem; }
 .rf-grid dd { margin: 0; font-weight: 700; }
  .rf-ruler { position:relative; height:28px; border-radius:7px; display:flex; margin:38px 0 80px; }
-.rf-ruler__z { height:100%; display:flex; justify-content:center; align-items:center; font-size:11px; font-weight:700; overflow:hidden; }
-.rf-ruler__z--crit { background:#e8a7a1; border-radius:7px 0 0 7px; }
-.rf-ruler__z--warn { background:#f1d27a; }
-.rf-ruler__z--ok { background:#8cc9a0; border-radius:0 7px 7px 0; }
+/* Como no mockup, a régua não escreve texto sobre a cor (nenhum fill forte alcança 4,5:1 com texto); o nome da faixa fica só para leitor de tela. */
+.rf-ruler__z { height:100%; display:flex; justify-content:center; align-items:center; font-size:0; overflow:hidden; }
+.rf-ruler__z--crit { background:var(--rf-crit-fill); border-radius:7px 0 0 7px; }
+.rf-ruler__z--warn { background:var(--rf-warn-fill); }
+.rf-ruler__z--ok { background:var(--rf-ok-fill); border-radius:0 7px 7px 0; }
 .rf-ruler__mark { position:absolute; top:8px; transform:translateX(-50%); z-index:1; }
 .rf-ruler__mark--now { width:15px; height:15px; border-radius:50%; background:#17324d; }
 .rf-ruler__mark--med { width:11px; height:11px; background:#0f766e; transform:translateX(-50%) rotate(45deg); }
@@ -103,8 +124,21 @@
 .rf-group-counts { float:right; display:inline-flex;gap:6px; }
 .rf-row--site,.rf-row--eqp,.rf-row--pon { cursor:pointer; }
 .rf-toggle::before { display:inline-grid;place-items:center;min-width:32px;min-height:32px; }
-.rf-stacked { display:flex; width:100%;height:14px;border-radius:6px;overflow:hidden;background:var(--surface-muted); }
+.rf-stacked { display:flex; width:100%;height:14px;border-radius:6px;overflow:hidden;background:var(--rf-track); }
 .rf-stacked span { height:100%; }
 .rf-group-counts { float:none; margin-left:12px; vertical-align:middle; }
 .rf-row--site td { border-top:2px solid var(--border); }
 .rf-row--eqp td { border-top:1px solid var(--border); }
+
+/* Gráfico: zonas e quedas pelas mesmas variáveis (classes aplicadas pelo JS nos elementos SVG). */
+.rf-zone { fill-opacity: .14; }
+.rf-zone--critico { fill: var(--rf-crit-fill); }
+.rf-zone--atencao { fill: var(--rf-warn-fill); }
+.rf-zone--ok { fill: var(--rf-ok-fill); }
+.rf-outage { fill: var(--rf-off-fill); }
+/* Pesos do mockup: nome da ONU 600, valor em dBm 800 (colorido em atenção/crítico). */
+.rf-row--onu td:first-child { font-weight: 600; }
+.rf-signal__val { font-weight: 800; }
+.rf-signal__val--atencao, .rf-signal__val--saturado { color: var(--rf-warn-ink); }
+.rf-signal__val--critico { color: var(--rf-crit-ink); }
+.rf-signal__val--unknown { font-weight: 600; color: var(--rf-none-ink); }
