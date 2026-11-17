@@ -63,6 +63,7 @@ async function boot(opts) {
   const treeData = opts.tree ? opts.tree(JSON.parse(JSON.stringify(tree))) : tree;
   w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/eventos') !== -1 ? (opts.events ? opts.events(u) : events([evGroup()])) : u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
     return Promise.resolve({ok: !status, status: status || 200, json: () => Promise.resolve(body)}); };
+  if (opts.storage) { Object.keys(opts.storage).forEach(k => w.localStorage.setItem(k, opts.storage[k])); }
   w.eval(js); await wait(40);
   const d = w.document, q = s => d.querySelector(s), qa = s => [...d.querySelectorAll(s)];
   return {w, d, q, qa, calls, errs, ev: (el, type, init) => el.dispatchEvent(new w.Event(type, Object.assign({bubbles: true}, init || {})))};
@@ -82,9 +83,9 @@ async function boot(opts) {
   ok(t.q('.rf-row--site').nextElementSibling.classList.contains('rf-row--eqp') && t.qa('.rf-row--eqp')[0].nextElementSibling.classList.contains('rf-row--pon'), 'ordem: site > equipamento > PON > ONU');
   ok(t.q('.rf-row--eqp').textContent.indexOf('OLT-<b>X</b>') !== -1 && !t.q('.rf-row--eqp b'), 'nome do equipamento como texto, sem HTML');
   const heads = t.qa('#rf-table thead th').map(x => x.textContent);
-  ok(heads.join('|') === 'ONU|Estado|Sinal (dBm)|Faixa|Distância|Cliente|CTO|Quedas 24 h|MAC', 'colunas padrao: ' + heads.join('|'));
+  ok(heads.join('|') === 'ONU|Estado|Sinal|Distância|Quedas 24 h|MAC', 'colunas padrao: ' + heads.join('|'));
   const row1 = t.qa('.rf-row--onu')[0].textContent;
-  ok(row1.indexOf('sem vínculo') !== -1 && row1.indexOf('ainda não lido') !== -1 && row1.indexOf('-20.00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada, "sem vinculo" e "ainda nao lido"');
+  ok(row1.indexOf('-20.00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada e MAC (Cliente/CTO ficam ocultas por padrao)');
   ok(t.qa('.rf-row--onu')[3].textContent.indexOf('sem leitura') !== -1, 'ONU sem leitura de sinal');
   ok(!/simulad|fict[ií]c|fake/i.test(t.d.body.textContent), 'nenhum texto de dado simulado');
   let linked = await boot({url:'http://localhost/rede-fibra?onu=2'});
@@ -115,9 +116,9 @@ async function boot(opts) {
 
   // Colunas escolhiveis (persistem)
   const boxes = t.qa('#rf-cols-list input');
-  ok(boxes.length === 10, 'menu de colunas'); const macBox = boxes[9]; macBox.checked = false; t.ev(macBox, 'change');
+  ok(boxes.length === 9 && t.qa('#rf-cols-list label').map(x => x.textContent.trim()).join('|') === 'Estado|Sinal|Tx (dBm)|Temp. (°C)|Distância|Cliente|CTO|Quedas 24 h|MAC', 'menu de colunas: Cliente e CTO continuam disponíveis; Sinal e Faixa unificados'); const macBox = boxes[8]; macBox.checked = false; t.ev(macBox, 'change');
   ok(t.qa('#rf-table thead th').map(x => x.textContent).indexOf('MAC') === -1 && t.w.localStorage.getItem('rf.cols').indexOf('mac') === -1, 'coluna MAC oculta e salva');
-  boxes[3].checked = true; t.ev(boxes[3], 'change'); ok(t.qa('#rf-table thead th').map(x => x.textContent).indexOf('Tx (dBm)') !== -1, 'coluna Tx habilitada');
+  boxes[2].checked = true; t.ev(boxes[2], 'change'); ok(t.qa('#rf-table thead th').map(x => x.textContent).indexOf('Tx (dBm)') !== -1, 'coluna Tx habilitada');
 
   // Recolher
   t.q('.rf-row--pon .rf-toggle').click(); ok(t.qa('.rf-row--onu').length === 1, 'recolher PON esconde as ONUs');
@@ -249,6 +250,42 @@ async function boot(opts) {
   let ev3 = await boot({events: () => events([evGroup()]), status: u => u.indexOf('/eventos') !== -1 ? 500 : 0});
   ok(ev3.q('#rf-ev-info').textContent === 'Acesso negado.' && ev3.qa('.rf-row--onu').length === 4, 'falha nos eventos nao quebra a arvore');
 
+  // Cores/colunas (CP-1..CP-3): paleta única, barra de sinal, coluna Sinal, preferência migrada
+  const cssText = fs.readFileSync(path.join(root, 'public/assets/css/rede-fibra.css'), 'utf8');
+  const cssVars = {}; (cssText.match(/\.rf \{[^}]*\}/) || [''])[0].replace(/(--rf-[a-z-]+):\s*(#[0-9A-Fa-f]{6})/g, (m, k, v) => { cssVars[k] = v.toUpperCase(); });
+  const fillOf = cls => { const m = cssText.match(new RegExp('(?:^|[\\s,])\\.' + cls + '(?=[\\s,{])[^{]*\\{[^}]*background:\\s*var\\((--rf-[a-z-]+)\\)', 'm')); return m ? cssVars[m[1]] : null; };
+  ok(fillOf('rf-fill--ok') === '#3B82F6' && fillOf('rf-fill--atencao') === '#F2A33A' && fillOf('rf-fill--critico') === '#E5484D' && fillOf('rf-fill--offline') === '#B42318', 'CSS: preenchimento forte por faixa (normal azul, atencao ambar, critico vermelho, offline vermelho escuro)');
+  ok(fillOf('rf-fill--saturado') === '#F2A33A' && fillOf('rf-fill--unknown') === cssVars['--rf-track'], 'CSS: saturado usa a cor de atencao; sem leitura usa o trilho');
+  ok(!/#e2f3e8|#fbe4e2|#fff4cc|#e8a7a1|#f1d27a|#8cc9a0|#f6d8d5|#fbefc7|#e6f4ea|#d64545/i.test(cssText), 'CSS: nenhum tom antigo solto de faixa');
+  const outsideVars = cssText.replace(/\.rf \{[^}]*\}/, ''); ok(!/#(E5484D|F2A33A|3B82F6|B42318|1D4ED8|9A4D00)/i.test(outsideVars), 'CSS: cores das faixas so existem no bloco de variaveis (uma paleta)');
+  const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16) / 255).map(x => x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const pairsOk = ['ok', 'warn', 'crit', 'off', 'none'].every(k => ratio(cssVars['--rf-' + k + '-ink'], cssVars['--rf-' + k + '-bg']) >= 4.5) && ratio(cssVars['--rf-online-ink'], cssVars['--rf-online-bg']) >= 4.5;
+  ok(pairsOk, 'contraste texto/fundo de pilula >= 4,5:1 em todas as faixas e no estado Online');
+  const tc = await boot({tree: tr => { tr.dispositivos[0].pons[0].onus[1].rx_dbm = -29; tr.dispositivos[0].pons[0].onus[1].rx_band = 'critico'; return tr; }});
+  const fills = tc.qa('.rf-row--onu').map(r => { const f = r.querySelector('.rf-signal__fill'); return f ? f.className.replace('rf-signal__fill ', '') + ':' + Math.round(parseFloat(f.style.width)) : null; });
+  ok(fills.join('|') === 'rf-fill--ok:' + fills[0].split(':')[1] + '|rf-fill--critico:' + fills[1].split(':')[1] + '|rf-fill--ok:' + fills[2].split(':')[1] + '|rf-fill--unknown:0', 'barra: classe de preenchimento por faixa (normal, critico, offline com leitura, sem leitura): ' + fills.join('|'));
+  const w0 = fills.map(x => parseInt(x.split(':')[1], 10)); ok(w0[0] >= 67 && w0[0] <= 100 && w0[1] >= 4 && w0[1] < 33.4 && w0[3] === 0, 'barra: normal ocupa 67-100%, critico 0-33%, sem leitura vazia');
+  const tcs = await boot(); const fa = tcs.qa('.rf-row--onu .rf-signal__fill'); ok(fa[1].classList.contains('rf-fill--atencao') && parseFloat(fa[1].style.width) > 33.3 && parseFloat(fa[1].style.width) < 66.7, 'barra: atencao no estagio do meio');
+  const rows0 = tcs.qa('.rf-row--onu'), c0 = rows0[0].querySelectorAll('td')[2].querySelector('.rf-signal-cell');
+  ok(c0 && [...c0.children].map(x => x.className.split(' ')[0]).join('|') === 'rf-signal|rf-signal__val|rf-pill' && c0.children[1].textContent === '-20.00 dBm' && c0.children[2].textContent === 'Normal', 'coluna Sinal: barra, valor em dBm e palavra da faixa, nesta ordem');
+  const c3 = rows0[3].querySelectorAll('td')[2], f3 = c3.querySelector('.rf-signal__fill');
+  ok(f3.style.width === '0%' && c3.textContent === 'sem leitura' && !c3.querySelector('.rf-pill') && !c3.hasAttribute('data-sort-value'), 'ONU sem leitura: barra vazia e "sem leitura", sem pilula nem valor de ordenacao');
+  ok(rows0[0].querySelectorAll('td')[2].dataset.sortValue === '-20' && rows0[1].querySelectorAll('td')[2].dataset.sortValue === '-26' && tcs.q('#rf-table thead th[data-col="sinal"]').dataset.sortType === 'number', 'coluna Sinal pronta para ordenar pelo valor numerico (data-sort-value), nao pela palavra');
+  ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Faixa' || x.textContent === 'Sinal (dBm)') && tcs.qa('.rf-row--onu').every(r => r.querySelectorAll('td').length === 6), 'sem colunas Faixa/Sinal (dBm) separadas');
+  ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Cliente' || x.textContent === 'CTO'), 'Cliente e CTO ocultas por padrao');
+  // Migracao da preferencia salva
+  const mig = async (saved) => { const b = await boot({storage: {'rf.cols': saved}}); return {heads: b.qa('#rf-table thead th').map(x => x.textContent).join('|'), stored: b.w.localStorage.getItem('rf.cols'), errs: b.errs}; };
+  const mg1 = await mig(JSON.stringify(['status', 'rx', 'band', 'dist', 'cliente', 'cto', 'quedas', 'mac']));
+  ok(mg1.heads === 'ONU|Estado|Sinal|Distância|Cliente|CTO|Quedas 24 h|MAC' && mg1.stored === JSON.stringify(['status', 'sinal', 'dist', 'cliente', 'cto', 'quedas', 'mac']) && mg1.errs.length === 0, 'migracao: rx+band viram uma coluna Sinal (preferencia de Cliente/CTO mantida) e a preferencia e regravada: ' + mg1.heads);
+  const mg2 = await mig(JSON.stringify(['status', 'band', 'mac']));
+  ok(mg2.heads === 'ONU|Estado|Sinal|MAC', 'migracao: quem tinha so Faixa visivel passa a ver Sinal');
+  const mg3 = await mig(JSON.stringify(['status', 'mac']));
+  ok(mg3.heads === 'ONU|Estado|MAC', 'migracao: quem nao tinha Sinal nem Faixa continua sem Sinal');
+  const mg4 = await mig('{isso nao e json'); ok(mg4.heads === 'ONU|Estado|Sinal|Distância|Quedas 24 h|MAC' && mg4.errs.length === 0, 'preferencia corrompida: usa o padrao sem erro');
+  const mg5 = await mig(JSON.stringify(['status', 'rx', 'xyz', 'sinal'])); ok(mg5.heads === 'ONU|Estado|Sinal', 'migracao: chave desconhecida descartada e sem Sinal duplicado');
+  const mgnew = await mig(JSON.stringify(['status', 'sinal', 'cliente'])); ok(mgnew.heads === 'ONU|Estado|Sinal|Cliente', 'preferencia ja no formato novo permanece');
+
   // Erro 403 / falha de carga
   let f = await boot({status: () => 403});
   ok(f.q('#rf-summary').textContent === 'Acesso negado.', 'erro 403 mostrado, sem quebrar a pagina');
@@ -257,7 +294,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });

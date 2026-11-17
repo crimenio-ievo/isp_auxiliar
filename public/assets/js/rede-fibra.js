@@ -9,11 +9,12 @@
   var NS = 'http://www.w3.org/2000/svg';
   var YMIN = -30, YMAX = -12;
   var COLS = [
-    { k: 'status', l: 'Estado' }, { k: 'rx', l: 'Sinal (dBm)' }, { k: 'band', l: 'Faixa' }, { k: 'tx', l: 'Tx (dBm)' },
+    { k: 'status', l: 'Estado' }, { k: 'sinal', l: 'Sinal' }, { k: 'tx', l: 'Tx (dBm)' },
     { k: 'temp', l: 'Temp. (°C)' }, { k: 'dist', l: 'Distância' }, { k: 'cliente', l: 'Cliente' }, { k: 'cto', l: 'CTO' },
     { k: 'quedas', l: 'Quedas 24 h' }, { k: 'mac', l: 'MAC' }
   ];
-  var DEFAULT_COLS = ['status', 'rx', 'band', 'dist', 'cliente', 'cto', 'quedas', 'mac'];
+  // Cliente e CTO ficam ocultas por padrão: ainda não existe o vínculo ONU↔cliente↔CTO (continuam no seletor de colunas).
+  var DEFAULT_COLS = ['status', 'sinal', 'dist', 'quedas', 'mac'];
   var COUNT_LABEL = { ok: 'normal', atencao: 'atenção', critico: 'crítico', offline: 'offline' };
   var BAND = { ok: 'Normal', atencao: 'Atenção', critico: 'Crítico', saturado: 'Saturado', unknown: 'Sem leitura' };
   var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
@@ -21,8 +22,25 @@
   var STATUS = { online: 'Online', offline: 'Offline', unknown: 'Desconhecido' };
   var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '7d', from: '', to: '', sheet: null, evPeriod: '24h' };
 
+  // Migra a preferência salva: as antigas colunas "Sinal (dBm)" (rx) e "Faixa" (band) viram a coluna única "Sinal".
+  // Quem tinha qualquer uma das duas visível passa a ver "Sinal"; chaves desconhecidas são descartadas.
+  function migrateCols(v) {
+    var known = COLS.map(function (c) { return c.k; }), out = [];
+    v.forEach(function (k) {
+      if (k === 'rx' || k === 'band') { k = 'sinal'; }
+      if (known.indexOf(k) !== -1 && out.indexOf(k) === -1) { out.push(k); }
+    });
+    return out;
+  }
   function loadCols() {
-    try { var v = JSON.parse(window.localStorage.getItem('rf.cols') || 'null'); if (Array.isArray(v)) { return v; } } catch (e) { /* sem storage */ }
+    try {
+      var v = JSON.parse(window.localStorage.getItem('rf.cols') || 'null');
+      if (Array.isArray(v)) {
+        var m = migrateCols(v);
+        if (JSON.stringify(m) !== JSON.stringify(v)) { try { window.localStorage.setItem('rf.cols', JSON.stringify(m)); } catch (e2) { /* sem storage */ } }
+        return m;
+      }
+    } catch (e) { /* sem storage ou valor corrompido: usa o padrão */ }
     return DEFAULT_COLS.slice();
   }
   function saveCols() { try { window.localStorage.setItem('rf.cols', JSON.stringify(state.cols)); } catch (e) { /* sem storage */ } }
@@ -103,8 +121,23 @@
       if (o.desatualizado) { td.appendChild(pill('unknown', 'Sem resposta')); td.appendChild(el('span', 'rf-muted', ' · último: ' + (STATUS[o.status] || o.status))); td.title = 'A OLT não respondeu na última coleta: este estado pode estar desatualizado.'; }
       else { td.appendChild(pill(o.status, STATUS[o.status] || o.status)); }
     }
-    else if (k === 'rx') { var bar=el('span','rf-signal'); var fill=el('span','rf-signal__fill rf-pill--'+o.rx_band); var v=o.rx_dbm,L=state.tree.limiares; var width=v===null?0:v<L.critico_dbm?Math.max(0,(v+32)/(L.critico_dbm+32))*100/3:v<L.atencao_dbm?100/3+(v-L.critico_dbm)/(L.atencao_dbm-L.critico_dbm)*100/3:200/3+(v-L.atencao_dbm)/(-8-L.atencao_dbm)*100/3; fill.style.width=Math.min(100,width)+'%'; bar.appendChild(fill); td.appendChild(bar);td.appendChild(el('span','',v===null?'sem leitura':v.toFixed(2)+' dBm')); }
-    else if (k === 'band') { td.appendChild(pill(o.rx_band, BAND[o.rx_band] || o.rx_band)); }
+    else if (k === 'sinal') {
+      // Barra (cor forte da faixa) + valor em dBm + palavra da faixa, nesta ordem, numa linha só.
+      var v = o.rx_dbm, L = state.tree.limiares, band = v === null ? 'unknown' : o.rx_band, wrap = el('span', 'rf-signal-cell');
+      var bar = el('span', 'rf-signal'), fill = el('span', 'rf-signal__fill rf-fill--' + band), width = 0;
+      if (v !== null) {
+        width = v < L.critico_dbm ? Math.max(0, (v + 32) / (L.critico_dbm + 32)) * 100 / 3
+          : v < L.atencao_dbm ? 100 / 3 + (v - L.critico_dbm) / (L.atencao_dbm - L.critico_dbm) * 100 / 3
+          : 200 / 3 + (v - L.atencao_dbm) / (-8 - L.atencao_dbm) * 100 / 3;
+        width = Math.max(4, Math.min(100, width));
+      }
+      fill.style.width = width + '%'; bar.appendChild(fill);
+      bar.setAttribute('role', 'img'); bar.setAttribute('aria-label', v === null ? 'Sem leitura de sinal' : 'Sinal ' + dbm(v) + ', ' + (BAND[o.rx_band] || o.rx_band));
+      wrap.appendChild(bar);
+      wrap.appendChild(el('span', 'rf-signal__val rf-signal__val--' + band, v === null ? 'sem leitura' : v.toFixed(2) + ' dBm'));
+      if (v !== null) { wrap.appendChild(pill(o.rx_band, BAND[o.rx_band] || o.rx_band)); td.dataset.sortValue = String(v); }
+      td.appendChild(wrap);
+    }
     else if (k === 'tx') { td.textContent = o.tx_dbm === null ? 'sem leitura' : o.tx_dbm.toFixed(2); }
     else if (k === 'temp') { td.textContent = o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1); }
     else if (k === 'dist') { td.textContent = o.distancia_m === null ? '—' : '≈ ' + (o.distancia_m / 1000).toFixed(2) + ' km'; if (o.distancia_origem) { td.title = o.distancia_origem; } }
@@ -131,7 +164,7 @@
     var f = filters(), head = $('rf-table').tHead, body = $('rf-table').tBodies[0], cols = COLS.filter(function (c) { return state.cols.indexOf(c.k) !== -1; });
     clear(head); clear(body);
     var hr = el('tr'); hr.appendChild(el('th', '', 'ONU'));
-    cols.forEach(function (c) { hr.appendChild(el('th', '', c.l)); });
+    cols.forEach(function (c) { var th = el('th', '', c.l); th.dataset.col = c.k; if (c.k === 'sinal') { th.dataset.sortKey = 'sort-value'; th.dataset.sortType = 'number'; } hr.appendChild(th); });
     head.appendChild(hr);
     var span = cols.length + 1, shown = 0;
     var groups = [], gi = {};
