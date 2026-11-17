@@ -164,9 +164,9 @@ async function boot(opts) {
   // Cursor do grafico
   const ov = t.q('#rf-p-chart .rf-overlay'), svg = t.q('#rf-p-chart svg'); svg.getBoundingClientRect = () => ({left: 0, width: 420, top: 0, height: 220});
   const move = x => ov.dispatchEvent(new t.w.MouseEvent('pointermove', {clientX: x, bubbles: true}));
-  move(38 + (310 * (parse('2026-11-10 20:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
+  move(38 + ((420 - 38 - 104) * (parse('2026-11-10 20:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
   const tip = t.q('#rf-p-chart .rf-tip'); ok(!tip.hidden && /10\/11 17:00 · -22,50 dBm$/.test(tip.textContent), 'cursor em horario de Brasilia (UTC 20:00 = 17:00): ' + tip.textContent);
-  move(38 + (310 * (parse('2026-11-12 10:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
+  move(38 + ((420 - 38 - 104) * (parse('2026-11-12 10:00:00') - parse('2026-11-06 12:00:00')) / (parse('2026-11-13 12:00:00') - parse('2026-11-06 12:00:00'))));
   ok(/em queda \(Sem aviso de energia\)/.test(tip.textContent), 'cursor dentro de uma queda em aberto mostra o motivo (' + tip.textContent + ')');
   move(38); ok(/sem leitura/.test(tip.textContent), 'cursor antes da primeira leitura: sem leitura'); ov.dispatchEvent(new t.w.MouseEvent('pointerleave', {bubbles: true})); ok(tip.hidden, 'cursor some ao sair');
 
@@ -330,6 +330,18 @@ async function boot(opts) {
   const rFar = await rulerOf(-20.0, -27.0, -14.0); ok(!collide(boxesOf(rFar)) && rFar.qa('.rf-ruler__label--below').every(l => l.dataset.row === '0'), 'rotulos distantes ficam na primeira linha');
   rr.errs.length + rEdge.errs.length + rEq.errs.length + rFar.errs.length === 0 || ok(false, 'erros de console na regua');
 
+  // CP-4: rotulos do grafico cabem no SVG (painel e modal ampliado) e rotulos proximos ficam separados na vertical
+  const chartLabels = (b, sel) => b.qa(sel + ' svg .rf-chart-label').map(l => { const vb = l.ownerSVGElement.getAttribute('viewBox').split(' ').map(Number); return {t: l.textContent, x: parseFloat(l.getAttribute('x')), y: parseFloat(l.getAttribute('y')), end: parseFloat(l.getAttribute('x')) + l.textContent.length * 6.6, W: vb[2], H: vb[3]}; });
+  const ch = await boot({sheet: () => { const sh = sheet(); sh.vizinhos.mediana_dbm = -20.4; sh.onu.baseline_dbm = -20.5; return sh; }}); ch.q('.rf-row--onu').click(); await wait(40);
+  const cl = chartLabels(ch, '#rf-p-chart');
+  ok(cl.length === 2 && cl.every(l => l.end <= l.W - 4) && cl.every(l => l.x < l.W), 'grafico do painel: rotulos "Ref." e "Vizinhos" cabem dentro do SVG: ' + JSON.stringify(cl.map(l => [l.t, Math.round(l.x), Math.round(l.end), l.W])));
+  ok(Math.abs(cl[0].y - cl[1].y) >= 14, 'rotulos de valores proximos (-20,5 / -20,4) separados na vertical: ' + cl.map(l => l.y.toFixed(1)).join(' / '));
+  ch.q('.rf-chartbar button').click(); await wait(20);
+  const cm = chartLabels(ch, '#rf-modal');
+  ok(cm.length === 2 && cm.every(l => l.end <= l.W - 4) && cm[0].W === 840, 'grafico ampliado (modal): rotulos cabem dentro do SVG: ' + JSON.stringify(cm.map(l => [l.t, Math.round(l.x), Math.round(l.end), l.W])));
+  const cf = await boot({sheet: () => { const sh = sheet(); sh.vizinhos.mediana_dbm = -26.0; sh.onu.baseline_dbm = -13.0; return sh; }}); cf.q('.rf-row--onu').click(); await wait(40);
+  const cfl = chartLabels(cf, '#rf-p-chart'); ok(cfl.every(l => l.end <= l.W - 4) && Math.abs(cfl[0].y - cfl[1].y) > 14, 'grafico: rotulos distantes continuam no lugar e dentro do SVG');
+
   // Erro 403 / falha de carga
   let f = await boot({status: () => 403});
   ok(f.q('#rf-summary').textContent === 'Acesso negado.', 'erro 403 mostrado, sem quebrar a pagina');
@@ -338,7 +350,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs, ch.errs, cf.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });

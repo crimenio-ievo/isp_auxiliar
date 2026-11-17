@@ -444,7 +444,8 @@
   /* ---------- gráfico ---------- */
   function drawChart(box, d, big) {
     clear(box);
-    var W = big ? 840 : 420, H = big ? 400 : 220, ml = 38, mr = 72, mt = 10, mb = 25, S = d.serie;
+    // mr reserva espaço à direita para "Vizinhos -20,5" / "Ref. -20,5" (antes 72 px: o texto começava em x=352 de 420 e era cortado).
+    var W = big ? 840 : 420, H = big ? 400 : 220, ml = 38, mr = big ? 124 : 104, mt = 10, mb = 25, S = d.serie;
     var t0 = parse(S.de), t1 = parse(S.ate), pts = S.pontos.map(function (p) { return { t: parse(p.t), s: p.t, v: p.rx }; });
     if (t1 <= t0) { t1 = t0 + 1000; }
     function X(t) { return ml + (Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0) * (W - ml - mr); }
@@ -480,8 +481,8 @@
     var referenceLines = [{v:d.onu.baseline_dbm, name:'Ref.', color:'#718096'}, {v:d.vizinhos.mediana_dbm, name:'Vizinhos', color:'#0f766e'}].filter(function (x) { return x.v !== null && x.v !== undefined; });
     referenceLines.forEach(function (x, i) {
       s.appendChild(svg('line', {x1:ml,x2:W-mr,y1:Y(x.v),y2:Y(x.v),stroke:x.color,'stroke-width':1.5,'stroke-dasharray':'4 3'}));
-      var y=Y(x.v); if (i && Math.abs(Y(referenceLines[0].v)-y)<14) y=Math.min(H-mb-2,y+15);
-      var label=svg('text',{x:W-mr+4,y:y+4,'font-size':12,fill:x.color}); label.textContent=x.name+' '+num(x.v,1); s.appendChild(label);
+      var y=Y(x.v); if (i && Math.abs(Y(referenceLines[0].v)-y)<14) { y = Y(referenceLines[0].v) + 15 <= H - mb - 2 ? Y(referenceLines[0].v) + 15 : Y(referenceLines[0].v) - 15; }
+      var label=svg('text',{x:W-mr+6,y:y+4,'font-size':12,fill:x.color,'class':'rf-chart-label'}); label.textContent=x.name+' '+num(x.v,1); s.appendChild(label);
     });
     var cur = svg('line', { x1: 0, x2: 0, y1: mt, y2: H - mb, stroke: '#0f766e', 'stroke-width': 1, visibility: 'hidden' }); s.appendChild(cur);
     var dot = svg('circle', { r: 4, fill: '#0f766e', visibility: 'hidden' }); s.appendChild(dot);
