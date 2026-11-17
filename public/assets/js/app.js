@@ -63,6 +63,7 @@ let hasSignatureStroke = false;
 let lastPoint = null;
 let activePointerId = null;
 let autosaveTimer = null;
+const localDraftSaves = new WeakMap();
 let autoGeoRequested = false;
 let mapInstance = null;
 let mapMarker = null;
@@ -250,6 +251,19 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
+function isDraftSecurityField(name) {
+    return /(?:csrf|token|password|senha|secret|credential|session|nonce)/i.test(name)
+        || ['draft_id', 'send_request_id', '__proto__', 'constructor', 'prototype'].includes(name);
+}
+
+function sanitizeLocalDraft(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return null;
+    }
+
+    return Object.fromEntries(Object.entries(payload).filter(([name]) => !isDraftSecurityField(name)));
+}
+
 function readDraftStorage(form) {
     const key = getDraftStorageKey(form);
 
@@ -259,7 +273,7 @@ function readDraftStorage(form) {
 
     try {
         const stored = window.localStorage.getItem(key);
-        return stored ? safeJsonParse(stored, null) : null;
+        return stored ? sanitizeLocalDraft(safeJsonParse(stored, null)) : null;
     } catch (error) {
         return null;
     }
@@ -269,15 +283,28 @@ function writeDraftStorage(form, payload) {
     const key = getDraftStorageKey(form);
 
     if (!key) {
-        return;
+        throw new Error('Rascunho local sem identificação.');
     }
 
     try {
-        window.localStorage.setItem(key, JSON.stringify(payload));
+        window.localStorage.setItem(key, JSON.stringify(sanitizeLocalDraft(payload)));
     } catch (error) {
-        // Se a quota do navegador estourar, o formulario continua funcionando
-        // com a sessao do servidor como fallback.
+        throw new Error('Não foi possível salvar o rascunho neste navegador: armazenamento cheio ou indisponível. Os dados continuam nesta página. Libere espaço ou reduza as fotos e tente novamente.');
     }
+}
+
+function showLocalDraftStatus(form, message, failed = false) {
+    let status = form.querySelector('[data-local-draft-status]');
+    if (!status) {
+        status = document.createElement('p');
+        status.setAttribute('data-local-draft-status', '');
+        status.setAttribute('tabindex', '-1');
+        form.prepend(status);
+    }
+    status.className = failed ? 'alert alert--error' : 'field-help';
+    status.setAttribute('role', failed ? 'alert' : 'status');
+    status.textContent = message;
+    return status;
 }
 
 function clearDraftStorageKeys(keys) {
@@ -487,7 +514,8 @@ function refreshPhotoQueue() {
     const items = getPhotoItems();
 
     if (photoCount) {
-        photoCount.textContent = `${items.length} foto${items.length === 1 ? '' : 's'} anexada${items.length === 1 ? '' : 's'}`;
+        const totalBytes = items.reduce((total, item) => total + item.file.size, 0);
+        photoCount.textContent = `${items.length} foto${items.length === 1 ? '' : 's'} anexada${items.length === 1 ? '' : 's'} — ${(totalBytes / 1048576).toFixed(2)} MB`;
         photoCount.dataset.tone = items.length > 0 ? 'success' : 'neutral';
     }
 
@@ -582,13 +610,18 @@ function wirePhotoPicker(button, input, multiple = true) {
             activeInput = nextInput;
             attachChangeHandler(nextInput);
 
+            fileInput.dataset.photoProcessing = '1';
             void (async () => {
-                const compressedFiles = await compressPhotoFiles(selectedFiles);
-                replaceFileInputFiles(fileInput, compressedFiles);
-                refreshPhotoQueue();
+                try {
+                    const compressedFiles = await compressPhotoFiles(selectedFiles);
+                    replaceFileInputFiles(fileInput, compressedFiles);
+                    refreshPhotoQueue();
 
-                if (fileInput.form) {
-                    scheduleDraftSave(fileInput.form);
+                    if (fileInput.form) {
+                        scheduleDraftSave(fileInput.form);
+                    }
+                } finally {
+                    delete fileInput.dataset.photoProcessing;
                 }
             })();
         });
@@ -606,7 +639,7 @@ function collectFormState(form) {
     const state = {};
 
     Array.from(form.elements).forEach((element) => {
-        if (!element.name || element.disabled) {
+        if (!element.name || element.disabled || isDraftSecurityField(element.name) || element.type === 'password') {
             return;
         }
 
@@ -679,14 +712,55 @@ async function collectFileState(form) {
 }
 
 async function saveDraftFromForm(form) {
-    const payload = collectFormState(form);
-    const files = await collectFileState(form);
+    const previous = localDraftSaves.get(form) || Promise.resolve();
+    const saving = previous.catch(() => {}).then(async () => {
+        try {
+            const files = await collectFileState(form);
+            const payload = collectFormState(form);
 
-    if (Object.keys(files).length > 0) {
-        payload.__files = files;
-    }
+            if (Object.keys(files).length > 0) {
+                payload.__files = files;
+            }
 
-    writeDraftStorage(form, payload);
+            writeDraftStorage(form, payload);
+            showLocalDraftStatus(form, 'Rascunho salvo neste navegador.');
+        } catch (error) {
+            showLocalDraftStatus(form, 'Falha ao salvar o rascunho local. Libere espaço ou reduza as fotos e tente novamente. Os dados continuam nesta página.', true);
+            throw error;
+        }
+    });
+    localDraftSaves.set(form, saving);
+    return saving;
+}
+
+function wireDraftSubmit(form) {
+    let pending = false;
+    let saved = false;
+    // Registrado depois dos validadores existentes; requestSubmit os executa novamente.
+    form.addEventListener('submit', async (event) => {
+        if (event.defaultPrevented || saved) {
+            return;
+        }
+        event.preventDefault();
+        if (pending) {
+            return;
+        }
+        pending = true;
+        const submitter = event.submitter;
+        try {
+            if (autosaveTimer) {
+                window.clearTimeout(autosaveTimer);
+            }
+            await saveDraftFromForm(form);
+            saved = true;
+            form.requestSubmit(submitter || undefined);
+        } catch (error) {
+            form.querySelector('[data-local-draft-status]')?.focus();
+        } finally {
+            saved = false;
+            pending = false;
+        }
+    });
 }
 
 function clearDraftStorageAndServer(form) {
@@ -759,7 +833,7 @@ async function restoreDraftToForm(form) {
     }
 
     Array.from(form.elements).forEach((element) => {
-        if (!element.name || element.disabled || element.type === 'file') {
+        if (!element.name || element.disabled || element.type === 'file' || element.type === 'password' || isDraftSecurityField(element.name)) {
             return;
         }
 
@@ -817,6 +891,28 @@ function scheduleDraftSave(form) {
     }, 150);
 }
 
+function getFormUploadSizeError(form) {
+    if (form.querySelector('[data-photo-processing="1"]')) {
+        return 'Aguarde a preparação das fotos antes de enviar.';
+    }
+
+    const postLimit = Number(form.dataset.postMaxBytes || 0);
+    const fileLimit = Number(form.dataset.uploadMaxBytes || 0);
+    // Reserva para cabeçalhos multipart, boundary e controles de envio.
+    let estimatedBytes = 65536;
+    for (const [name, value] of new FormData(form).entries()) {
+        const bytes = typeof value === 'string' ? new Blob([value]).size : value.size;
+        if (typeof value !== 'string' && fileLimit > 0 && bytes > fileLimit) {
+            return `Uma foto ultrapassa o limite por arquivo de ${(fileLimit / 1048576).toFixed(2)} MB. Reduza a foto antes de enviar.`;
+        }
+        estimatedBytes += bytes + new Blob([name]).size + 1024;
+    }
+    if (postLimit > 0 && estimatedBytes > postLimit) {
+        return `Envio maior que o limite: aproximadamente ${(estimatedBytes / 1048576).toFixed(2)} MB para um limite de ${(postLimit / 1048576).toFixed(2)} MB. Reduza o tamanho ou a quantidade de fotos.`;
+    }
+    return '';
+}
+
 function wireAutosave(form) {
     if (!form) {
         return;
@@ -838,7 +934,7 @@ function wireAutosave(form) {
 
         if (form.dataset.draftKey && form.dataset.draftKey.startsWith('client-acceptance')) {
             if (photoInput && photoInput.files && photoInput.files.length > 0) {
-                await saveDraftFromForm(form);
+                await saveDraftFromForm(form).catch(() => {});
             }
         }
     });
@@ -851,10 +947,6 @@ function wireAutosave(form) {
             window.location.href = buildAppUrl('/clientes/novo');
         });
     }
-
-    form.addEventListener('submit', () => {
-        saveDraftFromForm(form).catch(() => {});
-    });
 
     const focusFieldOnSubmit = (field) => {
         if (!field) {
@@ -884,6 +976,13 @@ function wireAutosave(form) {
             if (typeof form.reportValidity === 'function') {
                 form.reportValidity();
             }
+            return;
+        }
+
+        const sizeError = getFormUploadSizeError(form);
+        if (sizeError) {
+            event.preventDefault();
+            window.alert(sizeError);
             return;
         }
 
@@ -4336,3 +4435,6 @@ document.querySelectorAll('[data-network-search]').forEach((form) => {
     input.addEventListener('keydown', (event) => { if (event.key === 'Escape') { generation++; list.hidden = true; } });
     document.addEventListener('click', (event) => { if (!form.contains(event.target)) { generation++; list.hidden = true; } });
 });
+
+// Após os demais listeners para respeitar aceite, assinatura e validação de campos.
+autosaveForms.forEach((form) => wireDraftSubmit(form));
