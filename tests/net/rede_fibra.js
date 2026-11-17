@@ -342,6 +342,10 @@ async function boot(opts) {
   const cf = await boot({sheet: () => { const sh = sheet(); sh.vizinhos.mediana_dbm = -26.0; sh.onu.baseline_dbm = -13.0; return sh; }}); cf.q('.rf-row--onu').click(); await wait(40);
   const cfl = chartLabels(cf, '#rf-p-chart'); ok(cfl.every(l => l.end <= l.W - 4) && Math.abs(cfl[0].y - cfl[1].y) > 14, 'grafico: rotulos distantes continuam no lugar e dentro do SVG');
 
+  // CP-5: o seletor de periodo da ficha chama-se "Periodo"; a secao de quedas continua "Quedas"
+  const h3s = t.qa('#rf-p-body h3').map(x => x.textContent);
+  ok(h3s.indexOf('Período') !== -1 && h3s.indexOf('Quedas') !== -1 && h3s.indexOf('Período') < h3s.indexOf('Sinal e quedas') && t.q('#rf-p-body .rf-periods').parentNode.querySelector('h3').textContent === 'Período', 'ficha: seletor de periodo rotulado "Periodo"; secao de quedas segue "Quedas": ' + h3s.join('|'));
+
   // Erro 403 / falha de carga
   let f = await boot({status: () => 403});
   ok(f.q('#rf-summary').textContent === 'Acesso negado.', 'erro 403 mostrado, sem quebrar a pagina');

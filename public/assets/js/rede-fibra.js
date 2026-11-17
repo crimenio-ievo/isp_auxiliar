@@ -410,7 +410,7 @@
     row('Última leitura', fmtDT(o.rx_medido_em));
     body.appendChild(g);
 
-    var pr = el('div'); pr.appendChild(el('h3', '', 'Quedas'));
+    var pr = el('div'); pr.appendChild(el('h3', '', 'Período'));
     var per = el('div', 'rf-periods');
     [['1h', '1 h'], ['24h', '24 h'], ['7d', '1 semana'], ['custom', 'Personalizado']].forEach(function (p) {
       var b = el('button', state.period === p[0] ? 'is-on' : '', p[1]); b.type = 'button';
