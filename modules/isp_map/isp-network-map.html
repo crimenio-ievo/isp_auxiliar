@@ -2938,7 +2938,10 @@ function traceFollowStreet(ll, toDestination){
     if(trace!==t0) return;
     let pts = (data.pontos||[]).map(q=>[+q[0], +q[1]]).filter(q=>isFinite(q[0])&&isFinite(q[1]));
     if(toDestination) pts = pts.slice(0, -1);   // o destino é o próprio nó
-    if(!pts.length){ manual('A rota não trouxe pontos: use o modo manual.'); return; }
+    if(!pts.length){
+      if(toDestination){ const m = document.getElementById('tr-msg'); if(m) m.textContent = 'A rua segue praticamente em linha reta até o destino: não há pontos intermediários a acrescentar.'; toast('A rota é praticamente reta: nenhum ponto a acrescentar.', 4500); renderTracePanel(); return; }
+      manual('A rota não trouxe pontos: use o modo manual.'); return;
+    }
     pts.forEach(q=>trace.pts.push(q)); trace.sel = null; trace.dirty = true;
     renderAll(); renderTracePanel();
     const m = document.getElementById('tr-msg'); if(m) m.textContent = pts.length+' ponto(s) seguindo a rua. Ajuste o que precisar: são pontos comuns.';

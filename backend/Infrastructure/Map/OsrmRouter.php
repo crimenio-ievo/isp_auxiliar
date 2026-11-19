@@ -73,8 +73,24 @@ final class OsrmRouter
         return array_slice($simple, 1);
     }
 
+    /** curl quando existir (timeouts e limite de tamanho), senao file_get_contents; sem nenhum dos dois devolve null (modo manual). */
     private function fetch(string $url): ?string
     {
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            if ($ch === false) {
+                return null;
+            }
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 6, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS, CURLOPT_HTTPHEADER => ['Accept: application/json'], CURLOPT_USERAGENT => 'ISP-Auxiliar-Map',
+                CURLOPT_FAILONERROR => true, CURLOPT_MAXFILESIZE => 2_000_000,
+            ]);
+            $body = curl_exec($ch);
+            curl_close($ch);
+
+            return is_string($body) ? $body : null;
+        }
         $ctx = stream_context_create(['http' => ['timeout' => 6, 'ignore_errors' => false, 'header' => "Accept: application/json\r\nUser-Agent: ISP-Auxiliar-Map\r\n"]]);
         $body = @file_get_contents($url, false, $ctx, 0, 2_000_001);
 
