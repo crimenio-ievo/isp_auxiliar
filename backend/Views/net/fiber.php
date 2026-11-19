@@ -11,6 +11,7 @@ $e = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 ob_start();
 ?>
 <link rel="stylesheet" href="<?= $e(Url::asset('css/rede-fibra.css?v=' . $v('css/rede-fibra.css'))); ?>">
+<link rel="stylesheet" href="<?= $e(Url::asset('css/rede-cadastro.css?v=' . $v('css/rede-cadastro.css'))); ?>">
 <section class="page-header">
     <div>
         <p class="section-heading__eyebrow">Telemetria</p>
@@ -18,6 +19,7 @@ ob_start();
         <p class="page-description">OLT, PONs e ONUs lidas pela coleta automática. Somente leitura: nada aqui altera a rede.</p>
     </div>
 </section>
+<?php $netTab = 'fibra'; require __DIR__ . '/_tabs.php'; ?>
 
 <div class="rf" id="rf-app"
      data-api-tree="<?= $e(Url::to('/api/rede-fibra')); ?>"

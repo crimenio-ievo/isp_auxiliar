@@ -58,6 +58,22 @@ final class Env
         return $_ENV[$key] ?? $_SERVER[$key] ?? self::$loaded[$key] ?? $default;
     }
 
+    /**
+     * Somente os NOMES das variaveis carregadas do .env que comecam com o prefixo (nunca os valores).
+     *
+     * @return list<string>
+     */
+    public static function names(string $prefix): array
+    {
+        $out = array_values(array_filter(
+            array_map('strval', array_keys(self::$loaded)),
+            static fn (string $name): bool => str_starts_with($name, $prefix)
+        ));
+        sort($out);
+
+        return $out;
+    }
+
     public static function bool(string $key, bool $default = false): bool
     {
         $value = self::get($key);

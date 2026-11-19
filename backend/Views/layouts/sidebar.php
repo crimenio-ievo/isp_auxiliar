@@ -49,7 +49,7 @@ if ($canAccessContracts) {
 
 if ($canViewLogs) {
     $navigationItems[] = ['href' => '/mapa', 'label' => 'Mapa', 'icon' => 'mapa', 'match' => ['/mapa']];
-    $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede de fibra', 'icon' => 'fibra', 'match' => ['/rede-fibra']];
+    $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede', 'icon' => 'fibra', 'match' => ['/rede-fibra', '/rede-equipamentos', '/rede-ctos', '/rede-vinculos']];
 }
 
 if ($canManageSettings) {

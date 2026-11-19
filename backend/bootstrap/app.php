@@ -30,6 +30,8 @@ use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 use App\Infrastructure\MkAuth\TechnologyMapper;
+use App\Infrastructure\Net\NetConnectionTester;
+use App\Infrastructure\Net\NetDeviceLock;
 use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
 use App\Services\Clients\ClientCompletionValidator;
@@ -232,6 +234,8 @@ function bootstrapApplication(): Application
         $container->get(MkAuthTicketService::class),
         $container->get(FinancialTaskRepository::class)
     ));
+
+    $container->set(NetConnectionTester::class, new NetConnectionTester(new NetDeviceLock($rootPath . '/tmp')));
 
     $router = new Router();
     $registerRoutes = require __DIR__ . '/../routes.php';

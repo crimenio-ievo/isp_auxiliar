@@ -29,12 +29,12 @@ $labels = static function (string $html, string $class): array {
     return $m[1];
 };
 
-// Gestor: 4 fixos no mobile, Mais com Mapa, Rede de fibra, Configurações, Logs e Sair.
+// Gestor: 4 fixos no mobile, Mais com Mapa, Rede, Configurações, Logs e Sair.
 $gestor = $render(['is_manager' => true]);
 preg_match_all('#<a\s+class="app-nav__link(?![^"]*app-nav__link--mobile-hidden)[^"]*"[^>]*>.*?<span class="app-nav__link-label">([^<]+)</span>#s', $gestor, $fixed);
 $assert($fixed[1] === ['Home', 'Clientes', 'Contratos', 'Processos'], 'fixos do gestor: ' . implode(',', $fixed[1]));
 preg_match('#data-nav-more-panel.*?</div>#s', $gestor, $panel);
-$assert(str_contains($panel[0], '>Configurações<') && str_contains($panel[0], '>Logs<') && str_contains($panel[0], '>Mapa<') && str_contains($panel[0], '>Rede de fibra<') && str_contains($panel[0], '>Sair<') && substr_count($panel[0], '<a class="app-nav__more-item') === 5, 'painel Mais traz Mapa, Rede de fibra, Configurações, Logs e Sair');
+$assert(str_contains($panel[0], '>Configurações<') && str_contains($panel[0], '>Logs<') && str_contains($panel[0], '>Mapa<') && str_contains($panel[0], '>Rede<') && str_contains($panel[0], '>Sair<') && substr_count($panel[0], '<a class="app-nav__more-item') === 5, 'painel Mais traz Mapa, Rede, Configurações, Logs e Sair');
 $assert(str_contains($gestor, 'data-nav-more-toggle') && str_contains($gestor, 'aria-expanded="false"') && str_contains($gestor, 'aria-controls="app-nav-more-panel"'), 'botão Mais acessível');
 $assert(count($fixed[1]) <= 4, 'no máximo 4 fixos');
 

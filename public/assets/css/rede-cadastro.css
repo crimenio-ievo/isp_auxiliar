@@ -1,0 +1,44 @@
+/* Telas de cadastro da area Rede (equipamentos, CTOs, vinculos). Reaproveita as variaveis --rf-* de rede-fibra.css
+   (o container usa as classes "rf rc"). Todo texto dinamico entra por textContent no JS. */
+.rc-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.rc-tab { padding: 8px 14px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--text); text-decoration: none; font-weight: 700; font-size: 0.9rem; }
+.rc-tab:hover, .rc-tab:focus-visible { background: var(--surface-muted); }
+.rc-tab.is-active { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+.rc-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.rc-msg { margin: 0; padding: 10px 14px; border-radius: 12px; font-size: 0.9rem; font-weight: 600; background: var(--rf-ok-bg); color: var(--rf-ok-ink); }
+.rc-msg[data-tone="error"] { background: var(--rf-crit-bg); color: var(--rf-crit-ink); }
+.rc-msg[data-tone="warn"] { background: var(--rf-warn-bg); color: var(--rf-warn-ink); }
+.rc-form { padding: 16px; }
+.rc-form h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.rc-fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px 12px; margin: 0 0 12px; }
+.rc-fieldset legend { padding: 0 6px; font-size: 0.82rem; color: var(--muted); font-weight: 700; }
+.rc-radio { display: inline-flex; gap: 6px; align-items: center; margin-right: 16px; font-size: 0.9rem; }
+.rc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 8px 0; }
+.rc-grid .rf-field select, .rc-grid .rf-field input { min-width: 0; width: 100%; box-sizing: border-box; }
+.rc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.rc-planned { margin: 4px 0 0; padding: 8px 12px; border-radius: 10px; background: var(--rf-warn-bg); color: var(--rf-warn-ink); font-size: 0.86rem; }
+.rc-list { padding: 0; overflow: hidden; }
+.rc-tablewrap { height: auto; max-height: none; overflow: auto; }
+.rc-table td { vertical-align: middle; }
+.rc-table .rc-rowactions { display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-btn { padding: 5px 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text); font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; min-height: 32px; }
+.rc-btn:hover, .rc-btn:focus-visible { background: var(--surface-muted); }
+.rc-btn[disabled] { opacity: .55; cursor: not-allowed; }
+.rc-btn--danger { color: var(--rf-crit-ink); border-color: var(--rf-crit-fill); }
+.rc-test { margin: 6px 0 0; padding: 6px 10px; border-radius: 8px; background: var(--surface-muted); font-size: 0.82rem; white-space: normal; max-width: 420px; }
+.rc-test dt { font-weight: 800; }
+.rc-test dd { margin: 0 0 4px; overflow-wrap: anywhere; }
+.rc-confirm__box { max-width: 520px; padding: 18px; }
+.rc-confirm__box h2 { margin: 0 0 8px; }
+.rc .button--secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+@media (max-width: 720px) {
+  /* Celular: cada linha vira um cartao (rotulo vem de data-label, posto pelo JS). */
+  .rc-table, .rc-table tbody, .rc-table tr, .rc-table td { display: block; }
+  .rc-table thead { position: absolute; left: -9999px; }
+  .rc-table tr { padding: 10px 12px; border-bottom: 8px solid var(--surface-muted); }
+  .rc-table td { border: 0; padding: 4px 0; white-space: normal; }
+  .rc-table td::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .rc-table td[data-label="Ações"]::before { display: none; }
+  .rc-toolbar .button { width: 100%; }
+  .rc-tablewrap { overflow: visible; }
+}
