@@ -46,7 +46,8 @@ telemetria.
 - Aviso na tela: "A base do MkAuth lida por este servidor vai até DD/MM/AAAA (cliente/sessão mais recente)".
   Nova leitura SELECT-only `MkAuthDatabase::latestVisibleDate()` (maior `sis_cliente.data_ins` ou
   `radacct.acctstarttime`), exposta como `base_mkauth_ate` na API de sugestões.
-- **Fato (leitura real):** `data_ins` máximo 2026-10-08; `radacct` está **vazio** (0 linhas) neste clone, então
-  hoje não há sessão PPPoE para sugerir por MAC. A nota anterior falava em radacct até 2026-10-13: é
-  **hipótese não verificada** que o clone tenha sido recarregado desde então.
+- **Fato (leituras reais, SELECT, às ~16:00 UTC):** `data_ins` máximo 2026-10-08. Na primeira consulta `radacct`
+  tinha 0 linhas; minutos depois `latestVisibleDate()` devolveu 2026-11-19 (origem "sessão"). **Não verificado**
+  por quê (hipótese: o `radacct` está sendo recarregado/atualizado por outro processo). Conclusão: a data
+  mostrada depende do momento da leitura; confira a tela antes de confiar nas sugestões.
 - Testes: `NetBindingSmoke` (101) e `rede_vinculos.js` (39).
