@@ -8,7 +8,7 @@ const len=()=>q('[data-link-len]').textContent;
 (async()=>{
  await wait(300);
  await openLink(0); const l0=len(); ck('sem length_m: "≈ X km, linha reta" calculado', /^≈ 1,11 km, linha reta$/.test(l0), l0);
- await openLink(1); ck('com length_m: "1,50 km (informado)"', len()==='1,50 km (informado)', len());
+ await openLink(1); ck('com length_m: "1,50 km (manual)"', len()==='1,50 km (manual)', len());
  // arrastar a CTO-001 para ~2,2 km e reabrir o trecho
  const g=q('.mnode[data-node="n5"]'); const m=g.getAttribute('transform').match(/translate\(([-\d.e]+),([-\d.e]+)\)/); const x=+m[1], y=+m[2];
  ptr(g); await wait(20);   // seleciona

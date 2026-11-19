@@ -66,19 +66,18 @@ try {
     $dup = $post('createLink', ['link_type' => 'distribuicao', 'from_node_id' => $ctoA, 'to_node_id' => $ctoB]);
     $ok($dup[0] === 409, '4c. cabo duplicado entre os mesmos elementos e recusado (409)');
 
-    // 5. Pontos intermediarios do cabo: o servidor ignora/nao grava o traçado
-    $e = $post('updateLink', ['id' => $linkA, 'path_json' => '[[-20.852,-42.802],[-20.853,-42.803]]', 'path' => '[[-20.852,-42.802]]']);
-    $stored = $pdo->query("SELECT path_json FROM map_links WHERE id = {$linkA}")->fetchColumn();
-    if ($stored === null || $stored === false) {
-        $say('NAO EXISTE', '5. pontos intermediarios do cabo: nenhum campo grava o traçado (path_json fica NULL; o cabo e sempre linha reta entre os dois elementos)');
-    } else {
-        $say('FUNCIONA', '5. pontos intermediarios gravados');
-    }
+    // 5. Pontos intermediarios do cabo (feature/mapa-tracado): gravados em map_links.path_json pelo campo "path"
+    $e = $post('updateLink', ['id' => $linkA, 'path' => '{"pontos":[[-20.852,-42.802],[-20.853,-42.803]]}']);
+    $stored = json_decode((string) $pdo->query("SELECT path_json FROM map_links WHERE id = {$linkA}")->fetchColumn(), true);
+    $ok($e[0] === 200 && count($stored['pontos'] ?? []) === 2, '5. pontos intermediarios do cabo gravados em path_json (cabos sem traçado seguem como linha reta)');
+    $post('updateLink', ['id' => $linkA, 'path' => '']);
 
     // 6. Reserva tecnica: nao ha campo proprio; contorno = comprimento informado (rota + reserva) e anotacao em attrs
     $e = $post('updateLink', ['id' => $linkA, 'length_m' => '1050', 'attrs' => '{"reserva_tecnica_m":"50","cabo_nome":"CABO 12FO"}']);
     $row = $pdo->query("SELECT length_m, attrs_json FROM map_links WHERE id = {$linkA}")->fetch(PDO::FETCH_ASSOC);
-    $say('NAO EXISTE', '6. reserva tecnica como recurso proprio (campo/ícone/soma automatica) nao existe');
+    $e = $post('updateLink', ['id' => $linkA, 'path' => '{"reservas":[{"local":"CTO-A","m":30}]}']);
+    $ok($e[0] === 200 && (float) (json_decode((string) $pdo->query("SELECT path_json FROM map_links WHERE id = {$linkA}")->fetchColumn(), true)['reservas'][0]['m'] ?? 0) === 30.0, '6. reserva tecnica como recurso proprio (lista no cabo, em path_json)');
+    $post('updateLink', ['id' => $linkA, 'path' => '']);
     $ok($e[0] === 200 && (float) $row['length_m'] === 1050.0 && str_contains((string) $row['attrs_json'], 'reserva_tecnica_m'), '6b. contorno: comprimento informado (rota + reserva) e anotacao "reserva_tecnica_m" em attrs gravados');
 
     // 7. Splitter na CTO

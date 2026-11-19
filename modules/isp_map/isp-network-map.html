@@ -127,6 +127,15 @@ button{font-family:inherit;}
 .mhandle:hover{fill:#8be9e0;}
 .msnap{fill:none;stroke:#4fd1c5;stroke-width:3;}
 .mtemp{stroke:#4fd1c5;stroke-width:2.5;stroke-dasharray:5,4;fill:none;pointer-events:none;}
+.mtrace{fill:none;stroke:#4fd1c5;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
+.mvertex{fill:#fff;stroke:#0b6b63;stroke-width:2.5;cursor:grab;}
+.mvertex.sel{fill:#4fd1c5;stroke:#04211f;}
+.mmid{fill:#4fd1c5;fill-opacity:.55;stroke:#04211f;stroke-width:1.5;cursor:copy;}
+.mmid:hover{fill-opacity:1;}
+.trace-panel .btn{flex:1 1 100%;}
+.rs-row{display:flex;gap:6px;margin-bottom:6px;}
+.rs-row .rs-local{flex:1 1 auto;min-width:0;}
+.rs-row .rs-m{flex:0 0 84px;}
 .map-zoom{position:absolute;right:10px;bottom:36px;z-index:700;display:flex;flex-direction:column;gap:4px;}
 .map-zoom button{
   width:30px;height:30px;border-radius:5px;border:1px solid var(--border);
@@ -881,7 +890,7 @@ function applyTopology(data){
   rawLinks.forEach(r=>{
     const a = byDb[r.from_node_id], b = byDb[r.to_node_id]; if(!a || !b) return;
     const at = r.attrs_json||{};
-    const extra = Object.assign({}, at, {dbId:r.id, lifecycle:r.lifecycle||'ativo', label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, path:r.path_json,
+    const extra = Object.assign({}, at, {dbId:r.id, lifecycle:r.lifecycle||'ativo', label:r.label, medium:r.medium, lengthM:r.length_m, fiberCount:r.fiber_count, pathPts:normalizePath(r.path_json).pontos, reservas:normalizePath(r.path_json).reservas, folgaPct:normalizePath(r.path_json).folga_pct,
       fromPort:r.from_port_id ? 'p'+r.from_port_id : null, toPort:r.to_port_id ? 'p'+r.to_port_id : null,
       _attrs:Object.assign({}, at)});
     if(r.length_m!=null) extra.km = +(r.length_m/1000).toFixed(3);
@@ -1081,6 +1090,7 @@ const LIFECYCLE_LABEL = {projeto:'Projeto', ativo:'Ativo', desativado:'Desativad
 const lifecycleOf = x => (x && x.lifecycle) || 'ativo';
 
 /* ---- estado de edição/criação ---- */
+let trace = null;       // edição do traçado de um cabo (ver bloco TRAÇADO DO CABO)
 let mode = 'idle';     // idle | placing | linking-dest
 let placingType = null;
 let linkOrigin = null;
@@ -1163,9 +1173,18 @@ function renderAll(){
     const p1=toScreen(a.lat,a.lng), p2=toScreen(b.lat,b.lng);
     if(lcl==='projeto') opacity *= .6; else if(lcl==='desativado') opacity *= .45;
     const dash = lcl==='projeto' ? 'stroke-dasharray="3,4"' : (st.dash ? `stroke-dasharray="${st.dash}"` : '');
-    parts.push(`<line class="mlink-hit" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"/>`);
-    parts.push(`<line class="mlink" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${weight}" opacity="${opacity}" ${dash}/>`);
+    const tracing = trace && trace.linkId===l.id;
+    const mid = tracing ? trace.pts : (l.pathPts||[]);
+    if(!mid.length){   // cabo antigo / sem traçado: linha reta, exatamente como antes
+      parts.push(`<line class="mlink-hit" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"/>`);
+      parts.push(`<line class="mlink" data-link="${l.id}" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${color}" stroke-width="${weight}" opacity="${opacity}" ${dash}/>`);
+    } else {
+      const pts = [p1].concat(mid.map(q=>toScreen(q[0],q[1])), [p2]).map(q=>q.x.toFixed(1)+','+q.y.toFixed(1)).join(' ');
+      parts.push(`<polyline class="mlink-hit" data-link="${l.id}" points="${pts}"/>`);
+      parts.push(`<polyline class="mlink" data-link="${l.id}" points="${pts}" fill="none" stroke-linejoin="round" stroke="${color}" stroke-width="${weight}" opacity="${opacity}" ${dash}/>`);
+    }
   });
+  if(trace) renderTraceUnder(parts);
 
   // nós
   nodes.forEach(n=>{
@@ -1220,6 +1239,7 @@ function renderAll(){
       parts.push(`<circle class="mlinkpoint" cx="${pm.x}" cy="${pm.y}" r="6" fill="#4fd1c5" stroke="#0b0e13" stroke-width="2"/>`);
     }
   }
+  if(trace) renderTraceOver(parts);
   parts.push(`<g id="overlay-temp"></g>`);
   parts.push('</svg>');
   mapEl.innerHTML = parts.join('');
@@ -1227,6 +1247,7 @@ function renderAll(){
   renderSidebar();
   // comprimento calculado acompanha o arraste dos pontos
   document.querySelectorAll('[data-link-len]').forEach(el=>{ const x = linkById(el.getAttribute('data-link-len')); if(x) el.textContent = linkLengthText(x); });
+  document.querySelectorAll('[data-link-detail]').forEach(el=>{ const x = linkById(el.getAttribute('data-link-detail')); if(x) el.innerHTML = linkLengthDetailHtml(x); });
 }
 
 /* ---- interação (pointer events: funciona com mouse e toque) ---- */
@@ -1257,7 +1278,15 @@ mapEl.addEventListener('pointerdown', (e)=>{
   const nodeG  = t.closest ? t.closest('.mnode') : null;
   const linkEl = t.closest ? t.closest('.mlink-hit, .mlink') : null;
   const p = localPt(e);
-  if(handle){
+  const vtx = trace && t.closest ? t.closest('.mvertex') : null;
+  const midH = trace && t.closest ? t.closest('.mmid') : null;
+  if(vtx){
+    ptr = {kind:'vertex', idx:+vtx.getAttribute('data-vi'), x0:p.x, y0:p.y, moved:false};
+  } else if(midH){
+    ptr = {kind:'mid', idx:+midH.getAttribute('data-mi'), x0:p.x, y0:p.y, moved:false};
+  } else if(trace){
+    ptr = {kind:'pan', x0:p.x, y0:p.y, cx0:view.cx, cy0:view.cy, moved:false};   // em edição de traçado, nó/cabo não reagem
+  } else if(handle){
     ptr = {kind:'connect', originId:handle.getAttribute('data-handle'), x0:p.x, y0:p.y, moved:false, snap:null};
   } else if(nodeG){
     ptr = {kind:'node', id:nodeG.getAttribute('data-node'), x0:p.x, y0:p.y, moved:false};
@@ -1274,7 +1303,17 @@ mapEl.addEventListener('pointermove', (e)=>{
   const p = localPt(e);
   const dist = Math.hypot(p.x-ptr.x0, p.y-ptr.y0);
   if(dist>4) ptr.moved = true;
-  if(ptr.kind==='pan' && ptr.moved){
+  if(ptr.kind==='mid' && ptr.moved && trace){   // arrastar o "+" cria um ponto novo e passa a arrastá-lo
+    const ll0 = toLatLng(p.x,p.y);
+    trace.pts.splice(ptr.idx, 0, [ll0.lat, ll0.lng]);
+    trace.sel = ptr.idx; trace.dirty = true;
+    ptr = {kind:'vertex', idx:ptr.idx, x0:p.x, y0:p.y, moved:true, fresh:true};
+    renderAll(); renderTracePanel();
+  } else if(ptr.kind==='vertex' && ptr.moved && trace){
+    const ll1 = toLatLng(p.x,p.y);
+    trace.pts[ptr.idx] = [ll1.lat, ll1.lng]; trace.dirty = true; trace.sel = ptr.idx;
+    renderAll();
+  } else if(ptr.kind==='pan' && ptr.moved){
     mapEl.classList.add('panning');
     view.cx = ptr.cx0 - (p.x-ptr.x0)/view.scale;
     view.cy = ptr.cy0 - (p.y-ptr.y0)/view.scale;
@@ -1311,6 +1350,18 @@ mapEl.addEventListener('pointerup', (e)=>{
     drawTemp('');
     if(st.snap) openLinkTypeModal(nodeById(st.originId), nodeById(st.snap));
     else renderAll();
+    return;
+  }
+  if(trace && (st.kind==='vertex' || st.kind==='mid' || st.kind==='pan')){
+    if(st.kind==='vertex'){
+      if(!st.moved) trace.sel = (trace.sel===st.idx ? null : st.idx);
+      renderAll(); renderTracePanel();
+    } else if(st.kind==='mid' && !st.moved){
+      const m = traceMidpoint(st.idx); trace.pts.splice(st.idx, 0, m); trace.sel = st.idx; trace.dirty = true;
+      renderAll(); renderTracePanel();
+    } else if(st.kind==='pan' && !st.moved){
+      traceAddAt(toLatLng(p.x,p.y));
+    } else { renderAll(); }
     return;
   }
   if(st.moved){
@@ -1529,8 +1580,9 @@ function onLinkPointClick(linkId, ll){
 function openLinkPointPanel(l, pt){
   const a = nodeById(l.from), b = nodeById(l.to);
   const cab = cables.find(x=>x.linkId===l.id);
-  const dA = distanciaKm(a, {lat:pt.lat,lng:pt.lng});
-  const dB = distanciaKm({lat:pt.lat,lng:pt.lng}, b);
+  const al = (l.pathPts && l.pathPts.length) ? alongPath(l, pt) : null;   // cabo com traçado: distância ao longo do traçado
+  const dA = al ? al.fromA/1000 : distanciaKm(a, {lat:pt.lat,lng:pt.lng});
+  const dB = al ? al.toB/1000 : distanciaKm({lat:pt.lat,lng:pt.lng}, b);
   const panel = document.getElementById('panel-right');
   panel.classList.add('show');
   panel.innerHTML = `
@@ -1984,7 +2036,8 @@ function openLinkPanel(linkId){
       ${isPendingDetail(l) ? '<div class="cable-meta">Uma ponta é o próprio POP/torre: use "Editar trecho" para escolher o equipamento daquele site.</div>' : ''}
       ${fieldsHtml([
         {label:'Origem (envia) → Destino (recebe)', value:endpointLabel(a, l.fromPort)+' → '+endpointLabel(b, l.toPort), full:true},
-        {label:'Comprimento', value:`<span data-link-len="${l.id}">${escapeHtml(linkLengthText(l))}</span>`, full:true},
+        {label:'Comprimento', value:`<span data-link-len="${l.id}">${escapeHtml(linkLengthText(l))}</span><div data-link-detail="${l.id}" style="margin-top:6px">${linkLengthDetailHtml(l)}</div>`, full:true},
+        (l.reservas&&l.reservas.length) ? {label:'Reservas técnicas', value:l.reservas.map(r=>escapeHtml(r.local||'sem local')+' · '+fmtLength(+r.m)).join('<br>'), full:true} : null,
         (()=>{ const c=cables.find(cc=>cc.linkId===l.id); return c?{label:'Cabo físico', value:escapeHtml(c.nome)+' · '+c.tipo+' ('+c.totalFibras+' fibras)', full:true}:null; })(),
         l.freq ? {label:'Frequência', value:escapeHtml(l.freq)} : null,
         l.distancia ? {label:'Distância', value:escapeHtml(l.distancia)} : null,
@@ -1992,6 +2045,7 @@ function openLinkPanel(linkId){
       ])}
       <div class="action-row">
         <button class="btn" id="btn-edit-link" style="flex:1 1 100%;">Editar trecho</button>
+        ${l.medium==='radio'||l.type==='wireless' ? '' : '<button class="btn" id="btn-trace-link" style="flex:1 1 100%;">Editar traçado (pontos do cabo)</button>'}
         <button class="btn" id="btn-invert-link" style="flex:1 1 100%;">⇄ Inverter sentido</button>
         <button class="btn" id="btn-sangria" style="flex:1 1 100%;" disabled title="Disponível em breve">Inserir caixa neste trecho (sangria) — disponível em breve</button>
         <button class="btn btn-danger" id="btn-delete-link" style="flex:1 1 100%;">Excluir trecho</button>
@@ -2000,6 +2054,7 @@ function openLinkPanel(linkId){
   `;
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
   document.getElementById('btn-edit-link').addEventListener('click', ()=> openLinkEditModal(l));
+  const btnTrace = document.getElementById('btn-trace-link'); if(btnTrace) btnTrace.addEventListener('click', ()=> openTraceForLink(l));
   document.getElementById('btn-invert-link').addEventListener('click', ()=> invertLink(l));
   document.getElementById('btn-delete-link').addEventListener('click', ()=>{
     if(confirm('Excluir este trecho?')) deleteLinkRemote(l);
@@ -2308,12 +2363,18 @@ function setModeBanner(text){
   b.classList.add('show');
 }
 function clearMode(){
+  if(trace){ const t = trace; trace = null; if(typeof t.onCancel==='function') t.onCancel(); renderAll(); }
   mode='idle'; placingType=null; linkOrigin=null;
   document.getElementById('mode-banner').classList.remove('show');
   mapEl.classList.remove('crosshair');
 }
 document.getElementById('mode-banner-cancel').addEventListener('click', clearMode);
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') clearMode(); });
+document.addEventListener('keydown', (e)=>{
+  if(e.key==='Escape') clearMode();
+  const tag = (e.target && e.target.tagName) || '';
+  if(trace && (e.key==='Delete' || e.key==='Backspace') && !/INPUT|TEXTAREA|SELECT/.test(tag) && trace.sel!=null){ e.preventDefault(); traceRemove(trace.sel); }
+});
+mapEl.addEventListener('dblclick', (e)=>{ const v = trace && e.target.closest ? e.target.closest('.mvertex') : null; if(v) traceRemove(+v.getAttribute('data-vi')); });
 
 /* ============================================================
    MODAL — criar elemento
@@ -2515,19 +2576,233 @@ function distanciaKm(a,b){
   return 2*R*Math.asin(Math.sqrt(h));
 }
 
-/* Comprimento exibido: length_m se o usuário informou ("informado"); senão a linha reta calculada na hora
-   (não é gravada; recalcula ao arrastar os pontos). O traçado real (rota + reservas) fica para a 1H. */
+/* ============================================================
+   TRAÇADO DO CABO e DISTÂNCIA
+   Dados: map_links.path_json = {pontos:[[lat,lng]…], reservas:[{local,m}], folga_pct}. Os pontos são só os
+   INTERMEDIÁRIOS: as pontas vêm dos nós (mover uma CTO leva a ponta junto). Sem pontos = linha reta (cabo antigo).
+   Fórmula (a mesma de backend/Infrastructure/Map/MapPath.php):
+     traçado = soma haversine de [ponta A, …pontos, ponta B];  folga = traçado × folga% (não incide nas reservas);
+     total calculado = traçado + folga + reservas;  length_m preenchido = comprimento MANUAL e prevalece.
+   ============================================================ */
+const EARTH_M = 6371000;
+function normalizePath(raw){
+  let o = raw;
+  if(Array.isArray(o)) o = {pontos:o};
+  if(!o || typeof o!=='object') return {pontos:[], reservas:[], folga_pct:null};
+  const pontos = (Array.isArray(o.pontos)?o.pontos:[]).filter(q=>Array.isArray(q) && isFinite(+q[0]) && isFinite(+q[1])).map(q=>[+q[0], +q[1]]);
+  const reservas = (Array.isArray(o.reservas)?o.reservas:[]).filter(r=>r && isFinite(+r.m)).map(r=>({local:String(r.local||''), m:+r.m}));
+  const f = o.folga_pct;
+  return {pontos, reservas, folga_pct: (f===null||f===undefined||f==='') ? null : +f};
+}
+function havM(a, b){   // a, b: {lat,lng}
+  const rad=Math.PI/180, dLat=(b.lat-a.lat)*rad, dLng=(b.lng-a.lng)*rad;
+  const h=Math.sin(dLat/2)**2 + Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dLng/2)**2;
+  return 2*EARTH_M*Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function slackDefaultPct(){ const v = +mapDefaults['map.cable.slack_pct']; return isFinite(v) ? v : 0; }
+/* Comprimento de um cabo hipotético: a, b = nós; d = {pts, reservas, folgaPct, lengthM}. */
+function cableLengthOf(a, b, d){
+  if(!a || !b || a.lat==null || b.lat==null) return null;
+  const pts = d.pts || [];
+  const line = [{lat:a.lat,lng:a.lng}].concat(pts.map(q=>({lat:q[0],lng:q[1]})), [{lat:b.lat,lng:b.lng}]);
+  let traceM = 0; for(let i=1;i<line.length;i++) traceM += havM(line[i-1], line[i]);
+  const slackPct = (d.folgaPct===null || d.folgaPct===undefined) ? slackDefaultPct() : +d.folgaPct;
+  const slackM = traceM*slackPct/100;
+  const reservesM = (d.reservas||[]).reduce((t,r)=>t+(+r.m||0), 0);
+  const calcM = traceM+slackM+reservesM;
+  const manual = d.lengthM!==null && d.lengthM!==undefined && d.lengthM!=='';
+  return {traceM, slackPct, slackM, reservesM, calcM, manual, totalM: manual ? +d.lengthM : calcM, hasPath: pts.length>0, line};
+}
+function cableLength(l, ptsOverride){
+  return cableLengthOf(nodeById(l.from), nodeById(l.to), {pts: ptsOverride || l.pathPts, reservas:l.reservas, folgaPct:l.folgaPct, lengthM:l.lengthM});
+}
 function fmtLength(m){ return m>=1000 ? (m/1000).toFixed(2).replace('.',',')+' km' : Math.round(m)+' m'; }
 function linkLengthText(l){
-  if(l.lengthM!=null) return fmtLength(+l.lengthM)+' (informado)';
-  const a = nodeById(l.from), b = nodeById(l.to);
-  if(!a || !b || a.lat==null || b.lat==null) return '—';
-  return '≈ '+fmtLength(distanciaKm(a,b)*1000)+', linha reta';
+  const c = cableLength(l); if(!c) return '—';
+  if(c.manual) return fmtLength(c.totalM)+' (manual)';
+  if(c.hasPath || c.reservesM>0 || c.slackPct>0) return fmtLength(c.totalM)+' (traçado + folga + reservas)';
+  return '≈ '+fmtLength(c.traceM)+', linha reta';
+}
+/* Traçado, folga, reservas e total em separado (painel do trecho e do editor de traçado). */
+function lengthDetailHtml(c){
+  if(!c) return '—';
+  const rows = [
+    [c.hasPath ? 'Traçado' : 'Linha reta (sem traçado)', fmtLength(c.traceM)],
+    ['Folga '+String(c.slackPct).replace('.',',')+' %', '+ '+fmtLength(c.slackM)],
+    ['Reservas técnicas', '+ '+fmtLength(c.reservesM)],
+    [c.manual ? 'Total calculado' : 'Total', fmtLength(c.calcM)]
+  ];
+  let html = '<table class="len-detail" style="width:100%;border-collapse:collapse;font-size:12px">'+rows.map((r,i)=>
+    `<tr${i===3?' style="font-weight:700;border-top:1px solid var(--border,#2a3140)"':''}><td>${r[0]}</td><td style="text-align:right">${r[1]}</td></tr>`).join('')+'</table>';
+  if(c.manual) html += `<div style="margin-top:6px;font-weight:700">Comprimento: ${fmtLength(c.totalM)} <span class="lk-detail">manual</span></div><div class="cable-meta">O valor informado à mão prevalece sobre o calculado. Apague-o no editor do trecho para voltar ao calculado.</div>`;
+  return html;
+}
+function linkLengthDetailHtml(l){ return lengthDetailHtml(cableLength(l)); }
+function buildPathString(pts, reservas, folgaPct){
+  const hasF = folgaPct!==null && folgaPct!==undefined && folgaPct!=='' && isFinite(+folgaPct);
+  if(!(pts||[]).length && !(reservas||[]).length && !hasF) return '';
+  const o = {pontos:(pts||[]).map(q=>[+(+q[0]).toFixed(6), +(+q[1]).toFixed(6)]), reservas:(reservas||[]).map(r=>({local:r.local, m:+r.m}))};
+  if(hasF) o.folga_pct = +folgaPct;
+  return JSON.stringify(o);
+}
+/* Distância ao longo do traçado de um ponto clicado até as pontas (projeção local em metros). */
+function alongPath(l, ll){
+  const c = cableLength(l); if(!c) return null;
+  const kx = 111320*Math.cos(ll.lat*Math.PI/180), ky = 110540;
+  let best = {d:Infinity, along:0}, acc = 0;
+  for(let i=1;i<c.line.length;i++){
+    const A=c.line[i-1], B=c.line[i], segM = havM(A,B);
+    const ax=A.lng*kx, ay=A.lat*ky, bx=B.lng*kx, by=B.lat*ky, px=ll.lng*kx, py=ll.lat*ky;
+    const dx=bx-ax, dy=by-ay, len2=dx*dx+dy*dy;
+    const t = len2>0 ? Math.max(0, Math.min(1, ((px-ax)*dx+(py-ay)*dy)/len2)) : 0;
+    const dist = Math.hypot(px-(ax+t*dx), py-(ay+t*dy));
+    if(dist<best.d) best = {d:dist, along:acc+segM*t};
+    acc += segM;
+  }
+  return {fromA:best.along, toB:c.traceM-best.along};
+}
+
+/* ---- edição do traçado: arrastar, adicionar, remover pontos; desenhar clicando pela rota ----
+   trace = {linkId|null, from, to (ids dos nós), pts, sel, dirty, snap, routing, reservas, folgaPct, lengthM, title, onSave, onCancel}.
+   Enquanto a edição está aberta nada é gravado; "Salvar traçado" grava (cabo existente) ou devolve os pontos ao modal de novo trecho. */
+function startTrace(cfg){
+  closeModal();
+  selectedNodeId = null; pathHighlight = null; linkPoint = null;
+  trace = Object.assign({linkId:null, pts:[], sel:null, dirty:false, snap:false, routing:false, reservas:[], folgaPct:null, lengthM:null}, cfg);
+  trace.pts = trace.pts.map(q=>[q[0], q[1]]);
+  mode = 'tracing';
+  mapEl.classList.add('crosshair');
+  setModeBanner('Editando o traçado: clique no mapa para acrescentar pontos · arraste para mover · Esc cancela');
+  if(trace.linkId) selectedLinkId = trace.linkId;
+  renderAll(); renderTracePanel();
+}
+function endTrace(){   // sem chamar onCancel
+  trace = null; mode = 'idle';
+  document.getElementById('mode-banner').classList.remove('show');
+  mapEl.classList.remove('crosshair');
+}
+function traceEnds(){ return [nodeById(trace.from), nodeById(trace.to)]; }
+function traceLine(){ const [a,b] = traceEnds(); return [a].concat(trace.pts.map(q=>({lat:q[0],lng:q[1]})), [b]); }
+function traceMidpoint(i){   // ponto médio do segmento i (entre line[i] e line[i+1])
+  const L = traceLine(); return [(L[i].lat+L[i+1].lat)/2, (L[i].lng+L[i+1].lng)/2];
+}
+function traceAddAt(ll){
+  if(!trace) return;
+  if(trace.snap){ traceFollowStreet(ll); return; }
+  trace.pts.push([ll.lat, ll.lng]); trace.sel = trace.pts.length-1; trace.dirty = true;
+  renderAll(); renderTracePanel();
+}
+function traceRemove(i){
+  if(!trace || i==null || i<0 || i>=trace.pts.length) return;
+  trace.pts.splice(i,1); trace.sel = null; trace.dirty = true;
+  renderAll(); renderTracePanel();
+}
+function renderTraceUnder(parts){
+  if(trace.linkId) return;   // cabo existente: o próprio cabo já é desenhado com trace.pts
+  const pts = traceLine().map(q=>{ const sp = toScreen(q.lat,q.lng); return sp.x.toFixed(1)+','+sp.y.toFixed(1); }).join(' ');
+  parts.push(`<polyline class="mtrace" points="${pts}"/>`);
+}
+function renderTraceOver(parts){
+  const L = traceLine(), S = L.map(q=>toScreen(q.lat,q.lng));
+  for(let i=0;i<S.length-1;i++){
+    if(Math.hypot(S[i+1].x-S[i].x, S[i+1].y-S[i].y) < 28) continue;
+    parts.push(`<circle class="mmid" data-mi="${i}" cx="${((S[i].x+S[i+1].x)/2).toFixed(1)}" cy="${((S[i].y+S[i+1].y)/2).toFixed(1)}" r="5"><title>Clique ou arraste para criar um ponto aqui</title></circle>`);
+  }
+  trace.pts.forEach((q,i)=>{ const sp = toScreen(q[0],q[1]);
+    parts.push(`<circle class="mvertex${trace.sel===i?' sel':''}" data-vi="${i}" cx="${sp.x.toFixed(1)}" cy="${sp.y.toFixed(1)}" r="7"><title>Arraste para mover · duplo clique ou botão direito remove</title></circle>`); });
+}
+function renderTracePanel(){
+  if(!trace) return;
+  const [a,b] = traceEnds();
+  const c = cableLengthOf(a, b, {pts:trace.pts, reservas:trace.reservas, folgaPct:trace.folgaPct, lengthM:trace.lengthM});
+  const panel = document.getElementById('panel-right');
+  panel.classList.add('show');
+  panel.innerHTML = `
+    <div class="panel-head"><div class="panel-head-top"><div><div class="panel-type-tag">Traçado do cabo</div>
+      <div class="panel-title">${escapeHtml(trace.title||((a?a.name:'?')+' → '+(b?b.name:'?')))}</div></div></div></div>
+    <div class="panel-body trace-panel">
+      <div class="cable-meta">${trace.pts.length} ponto(s) intermediário(s). Clique no mapa para acrescentar ao fim; arraste um ponto para movê-lo; clique ou arraste o "+" de um segmento para criar um ponto no meio; duplo clique ou botão direito num ponto o remove.</div>
+      <div id="trace-len" data-trace-len>${lengthDetailHtml(c)}</div>
+      <div class="action-row">
+        <button class="btn${trace.snap?' btn-accent':''}" id="tr-snap">Seguir rua ao clicar: ${trace.snap?'ligado':'desligado'}</button>
+        <button class="btn" id="tr-route-end">Seguir rua até o destino</button>
+        <button class="btn" id="tr-remove" ${trace.sel==null?'disabled':''}>Remover ponto selecionado</button>
+        <button class="btn" id="tr-undo" ${trace.pts.length?'':'disabled'}>Desfazer último ponto</button>
+        <button class="btn" id="tr-clear" ${trace.pts.length?'':'disabled'}>Limpar traçado (linha reta)</button>
+        <button class="btn btn-accent" id="tr-save">${trace.linkId?'Salvar traçado':'Concluir traçado'}</button>
+        <button class="btn" id="tr-cancel">Cancelar</button>
+      </div>
+      <div class="cable-meta" id="tr-msg"></div>
+    </div>`;
+  document.getElementById('tr-snap').addEventListener('click', ()=>{ trace.snap = !trace.snap; renderTracePanel(); });
+  document.getElementById('tr-route-end').addEventListener('click', ()=>{ const [, bb] = traceEnds(); traceFollowStreet({lat:bb.lat, lng:bb.lng}, true); });
+  document.getElementById('tr-remove').addEventListener('click', ()=> traceRemove(trace.sel));
+  document.getElementById('tr-undo').addEventListener('click', ()=>{ trace.pts.pop(); trace.sel = null; trace.dirty = true; renderAll(); renderTracePanel(); });
+  document.getElementById('tr-clear').addEventListener('click', ()=>{ trace.pts = []; trace.sel = null; trace.dirty = true; renderAll(); renderTracePanel(); });
+  document.getElementById('tr-cancel').addEventListener('click', ()=> clearMode());
+  document.getElementById('tr-save').addEventListener('click', ()=>{ const t = trace; if(typeof t.onSave==='function') t.onSave(t.pts.map(q=>[q[0],q[1]]), t); });
+}
+/* Ponto de entrada do "Seguir rua" (etapa 3); sem serviço de rotas, cai no modo manual (ponto simples). */
+function traceFollowStreet(ll, toDestination){
+  if(!toDestination) trace.pts.push([ll.lat, ll.lng]), trace.sel = trace.pts.length-1, trace.dirty = true;
+  renderAll(); renderTracePanel();
+}
+function openTraceForLink(l){
+  if(!l.dbId){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }
+  startTrace({linkId:l.id, from:l.from, to:l.to, pts:l.pathPts||[], reservas:l.reservas||[], folgaPct:l.folgaPct, lengthM:l.lengthM, title:l.label||'Trecho',
+    onSave:(pts)=>{
+      mapPost('/links/editar', {id:l.dbId, path:buildPathString(pts, l.reservas, l.folgaPct)}).then(data=>{
+        endTrace();
+        loadNetwork(()=>{
+          const again = links.find(x=>x.dbId===l.dbId);
+          if(again) onLinkClick(again.id);
+          toastResult(pts.length ? 'Traçado salvo ('+pts.length+' ponto(s)).' : 'Traçado removido: o cabo voltou a ser linha reta.', data);
+        });
+      }).catch(err=> toast(err.message));
+    },
+    onCancel:()=>{ closePanel(); toast('Edição do traçado cancelada.'); }});
+}
+
+/* ---- editor de reservas técnicas + folga (usado no novo trecho e na edição) ---- */
+function reservaRowHtml(r){
+  return `<div class="rs-row"><input class="rs-local" type="text" maxlength="60" placeholder="Local (ex.: CTO-A, poste 12)" value="${escapeHtml(r.local||'')}"><input class="rs-m" type="number" min="0" max="10000" step="0.1" placeholder="m" value="${r.m!=null?escapeHtml(r.m):''}"><button type="button" class="btn btn-sm rs-del" title="Remover reserva">✕</button></div>`;
+}
+function reservasEditorHtml(reservas, folgaPct){
+  return `<div class="form-field"><label>Reservas técnicas (local e metros)</label>
+      <div id="f-rs-rows">${(reservas||[]).map(reservaRowHtml).join('')}</div>
+      <button type="button" class="btn btn-sm" id="f-rs-add">+ Reserva</button>
+      <div class="cable-meta">As reservas somam ao comprimento (laços/sobras de cabo) e ficam separadas do traçado.</div></div>
+    <div class="form-field"><label>Folga sobre o traçado (%)</label>
+      <input id="f-folga" type="number" min="0" max="100" step="0.1" value="${folgaPct!=null?escapeHtml(folgaPct):''}" placeholder="vazio = padrão da rede (${String(slackDefaultPct()).replace('.',',')} %)">
+      <div class="cable-meta">Cobre curvas e flechas que o traçado não mostra. Não incide sobre as reservas.</div></div>`;
+}
+function bindReservasEditor(){
+  const rows = document.getElementById('f-rs-rows');
+  document.getElementById('f-rs-add').addEventListener('click', ()=>{ rows.insertAdjacentHTML('beforeend', reservaRowHtml({local:'', m:null})); });
+  rows.addEventListener('click', (e)=>{ const b = e.target.closest ? e.target.closest('.rs-del') : null; if(b) b.parentNode.remove(); });
+}
+/* Lê o editor: {reservas, folgaPct} ou {error}. Linha vazia é ignorada. */
+function readReservasEditor(){
+  const reservas = [];
+  const rows = document.querySelectorAll('#f-rs-rows .rs-row');
+  for(const r of rows){
+    const local = r.querySelector('.rs-local').value.trim(), raw = r.querySelector('.rs-m').value.trim();
+    if(!local && raw==='') continue;
+    const m = Number(raw.replace(',','.'));
+    if(raw==='' || !isFinite(m) || m<0 || m>10000) return {error:'Reserva técnica: informe metros entre 0 e 10000'+(local?' ('+local+')':'')+'.'};
+    reservas.push({local, m:Math.round(m*100)/100});
+  }
+  const fr = document.getElementById('f-folga').value.trim().replace(',','.');
+  let folgaPct = null;
+  if(fr!==''){ folgaPct = Number(fr); if(!isFinite(folgaPct) || folgaPct<0 || folgaPct>100) return {error:'Folga: informe um valor entre 0 e 100 %.'}; }
+  return {reservas, folgaPct};
 }
 
 /* O cabo nasce aqui, no mapa: junto com o trecho definimos fibras, tipo
    construtivo e distância. O diagrama da caixa só consome o que existe. */
-function openLinkTypeModal(origin, dest){
+function openLinkTypeModal(origin, dest, preset){
+  preset = preset || {};
+  let pts = (preset.pts||[]).map(q=>[q[0],q[1]]);   // traçado desenhado no mapa (pontos intermediários)
   const km = distanciaKm(origin,dest);
   modalEl.innerHTML = `
     <div class="modal-head"><h3>Novo trecho</h3><button class="panel-close" id="modal-x">✕</button></div>
@@ -2538,6 +2813,13 @@ function openLinkTypeModal(origin, dest){
       ])}
       <div class="form-field"><button class="btn btn-sm" id="f-link-invert" type="button">⇄ Inverter sentido</button></div>
       <div id="f-link-ports"></div>
+      <div id="f-tracewrap">
+        <div class="form-field"><label>Traçado do cabo</label>
+          <div id="f-trace-info" class="cable-meta"></div>
+          <div class="action-row"><button class="btn btn-sm" id="f-trace-draw" type="button">Desenhar traçado no mapa</button><button class="btn btn-sm" id="f-trace-clear" type="button">Limpar (linha reta)</button></div>
+        </div>
+        ${reservasEditorHtml(preset.reservas, preset.folgaPct)}
+      </div>
       <div class="form-field"><label>Tipo de trecho</label>
         <select id="f-linktype">
           <option value="backbone">Fibra backbone</option>
@@ -2573,19 +2855,41 @@ function openLinkTypeModal(origin, dest){
   const selType=document.getElementById('f-linktype');
   const wrap=document.getElementById('f-cablewrap');
   const internal = sameSiteNodes(origin, dest);
+  const setVal = (id, v)=>{ const el = document.getElementById(id); if(el && v!=null && v!=='') el.value = v; };
+  setVal('f-linktype', preset.type); setVal('f-linklifecycle', preset.lifecycle); setVal('f-linkfo', preset.fo); setVal('f-linkconstr', preset.constr);
+  function traceInfo(){
+    const c = cableLengthOf(origin, dest, {pts});
+    document.getElementById('f-trace-info').textContent = pts.length ? pts.length+' ponto(s) · traçado de '+fmtLength(c.traceM)+' (linha reta seria '+fmtLength(distanciaKm(origin,dest)*1000)+')' : 'Sem traçado: linha reta de '+fmtLength(c.traceM)+'. Desenhe clicando pela rota para medir o cabo de verdade.';
+  }
+  traceInfo();
+  bindReservasEditor();
+  document.getElementById('f-trace-clear').addEventListener('click', ()=>{ pts = []; traceInfo(); });
   function atualizaCampos(){
     const fibra = ['backbone','distribuicao','drop'].includes(selType.value);
     wrap.style.display = fibra ? '' : 'none';
-    const keep = {from:(document.getElementById('f-port-from')||{}).value, to:(document.getElementById('f-port-to')||{}).value};
+    document.getElementById('f-tracewrap').style.display = selType.value==='wireless' ? 'none' : '';
+    const keep = {from:(document.getElementById('f-port-from')||{}).value || (atualizaCampos.first ? '' : preset.portFrom), to:(document.getElementById('f-port-to')||{}).value || (atualizaCampos.first ? '' : preset.portTo)};
+    atualizaCampos.first = true;
     document.getElementById('f-link-ports').innerHTML =
       portSelectHtml('f-port-from', origin, selType.value, internal, keep.from, null) + portSelectHtml('f-port-to', dest, selType.value, internal, keep.to, null);
   }
   selType.addEventListener('change', atualizaCampos); atualizaCampos();
+  const captureForm = (withPorts)=>{
+    const rs = readReservasEditor(); if(rs.error){ toast(rs.error); return null; }
+    return {type:selType.value, lifecycle:document.getElementById('f-linklifecycle').value, fo:document.getElementById('f-linkfo').value,
+      constr:document.getElementById('f-linkconstr').value, pts:pts, reservas:rs.reservas, folgaPct:rs.folgaPct,
+      portFrom: withPorts ? portFieldValue('f-port-from') : null, portTo: withPorts ? portFieldValue('f-port-to') : null};
+  };
   document.getElementById('f-link-invert').addEventListener('click', ()=>{
-    const t = selType.value;
-    openLinkTypeModal(dest, origin);
-    document.getElementById('f-linktype').value = t;
-    document.getElementById('f-linktype').dispatchEvent(new Event('change'));
+    const f = captureForm(false); if(!f) return;
+    f.pts = pts.slice().reverse();   // o traçado acompanha o sentido
+    openLinkTypeModal(dest, origin, f);
+  });
+  document.getElementById('f-trace-draw').addEventListener('click', ()=>{
+    const f = captureForm(true); if(!f) return;
+    startTrace({from:origin.id, to:dest.id, pts:pts, reservas:f.reservas, folgaPct:f.folgaPct, title:origin.name+' → '+dest.name,
+      onSave:(np)=>{ endTrace(); closePanel(); f.pts = np; openLinkTypeModal(origin, dest, f); },
+      onCancel:()=>{ closePanel(); openLinkTypeModal(origin, dest, f); }});
   });
 
   document.getElementById('modal-x').addEventListener('click', ()=>{ closeModal(); clearMode(); });
@@ -2600,6 +2904,10 @@ function openLinkTypeModal(origin, dest){
       from_port_id:portFieldValue('f-port-from'), to_port_id:portFieldValue('f-port-to')
     };
     const attrs = {};
+    const rs = type==='wireless' ? {reservas:[], folgaPct:null} : readReservasEditor();
+    if(rs.error){ toast(rs.error); return; }
+    const pathStr = type==='wireless' ? '' : buildPathString(pts, rs.reservas, rs.folgaPct);
+    if(pathStr) fields.path = pathStr;
     if(ehFibra){
       const fo = parseInt(document.getElementById('f-linkfo').value,10);
       fields.fiber_count = fo;
@@ -2612,7 +2920,9 @@ function openLinkTypeModal(origin, dest){
     mapPost('/links', fields).then(data=>{
       closeModal(); clearMode();
       loadNetwork(()=>{
-        toastResult(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ≈ ${fmtLength(km*1000)} em linha reta.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`, data);
+        const cl = cableLengthOf(origin, dest, {pts, reservas:rs.reservas, folgaPct:rs.folgaPct});
+        const lenTxt = pts.length || rs.reservas.length || (cl && cl.slackPct>0) ? fmtLength(cl.totalM)+' (traçado + folga + reservas)' : '≈ '+fmtLength(km*1000)+' em linha reta';
+        toastResult(ehFibra ? `Trecho salvo com cabo de ${fields.fiber_count} fibras · ${lenTxt}.` : `Trecho salvo entre "${origin.name}" e "${dest.name}".`, data);
         const again = nodes.find(x=>x.dbId===dest.dbId);
         if(again) onNodeClick(again.id);
       });
@@ -2637,8 +2947,9 @@ function openLinkEditModal(l){
         <select id="f-lk-status">${['normal','alerta','critico','offline'].map(v=>`<option value="${v}" ${l.status===v?'selected':''}>${STATUS_LABEL[v]}</option>`).join('')}</select>
       </div>
       <div class="form-field"><label>Situação</label><select id="f-lk-lifecycle">${Object.keys(LIFECYCLE_LABEL).map(k=>`<option value="${k}" ${lifecycleOf(l)===k?'selected':''}>${LIFECYCLE_LABEL[k]}</option>`).join('')}</select></div>
-      <div class="form-field"><label>Comprimento informado (metros)</label><input id="f-lk-len" type="number" min="0" step="0.01" value="${l.lengthM!=null?escapeHtml(l.lengthM):''}" placeholder="vazio = linha reta calculada">
-        <div class="cable-meta">Vazio: o mapa mostra a linha reta calculada na hora.</div></div>
+      <div class="form-field"><label>Comprimento manual (metros)</label><input id="f-lk-len" type="number" min="0" step="0.01" value="${l.lengthM!=null?escapeHtml(l.lengthM):''}" placeholder="vazio = calculado (traçado + folga + reservas)">
+        <div class="cable-meta">Se preencher, este valor prevalece e aparece marcado como "manual". Vazio: o mapa usa o traçado${(l.pathPts&&l.pathPts.length)?' ('+l.pathPts.length+' pontos)':' (linha reta, sem pontos)'} + folga + reservas. Para editar os pontos use "Editar traçado" no painel do trecho.</div></div>
+      ${l.type==='wireless' ? '' : reservasEditorHtml(l.reservas, l.folgaPct)}
       ${fibra ? `<div class="form-field"><label>Nº de fibras</label><input id="f-lk-fo" type="number" min="1" max="288" value="${l.fiberCount||''}"></div>
       <div class="form-field"><label>Tipo construtivo</label><select id="f-lk-constr"><option value="">—</option>${construtivos.map(c=>`<option ${l.cabo_construtivo===c?'selected':''}>${c}</option>`).join('')}</select></div>` : ''}
     </div>
@@ -2667,11 +2978,19 @@ function openLinkEditModal(l){
   selFrom.addEventListener('change', ()=>{ ends.from.sel = selFrom.value; ends.from.port = null; fillPorts(); });
   selTo.addEventListener('change', ()=>{ ends.to.sel = selTo.value; ends.to.port = null; fillPorts(); });
   document.getElementById('f-lk-invert').addEventListener('click', ()=>{ ends = {from:ends.to, to:ends.from}; fillEnds(); });
+  if(l.type!=='wireless') bindReservasEditor();
   document.getElementById('modal-save').addEventListener('click', ()=>{
     const attrs = Object.assign({}, l._attrs||{});
+    const rs = l.type==='wireless' ? {reservas:l.reservas||[], folgaPct:l.folgaPct} : readReservasEditor();
+    if(rs.error){ toast(rs.error); return; }
     const fields = {id:l.dbId, from_node_id:nodeById(ends.from.sel).dbId, to_node_id:nodeById(ends.to.sel).dbId,
       from_port_id:portFieldValue('f-lk-port-from'), to_port_id:portFieldValue('f-lk-port-to'), label:document.getElementById('f-lk-label').value.trim(),
       status:document.getElementById('f-lk-status').value, lifecycle:document.getElementById('f-lk-lifecycle').value, length_m:document.getElementById('f-lk-len').value.trim()};
+    // o servidor substitui o traçado inteiro: reenvia os pontos atuais junto com reservas e folga editadas
+    const nf = nodeById(ends.from.sel), of = nodeById(l.from), ot = nodeById(l.to);
+    const invertedEnds = nf && of && ot && nf.lat===ot.lat && nf.lng===ot.lng && !(of.lat===ot.lat && of.lng===ot.lng);
+    const keepPts = invertedEnds && (l.pathPts||[]).length ? l.pathPts.slice().reverse() : (l.pathPts||[]);
+    fields.path = buildPathString(keepPts, rs.reservas, rs.folgaPct);
     if(fibra){
       fields.fiber_count = document.getElementById('f-lk-fo').value.trim();
       const c = document.getElementById('f-lk-constr').value;
@@ -2740,7 +3059,9 @@ function toastResult(msg, data){
 function invertLink(l){
   const a = nodeById(l.from), b = nodeById(l.to);
   if(!l.dbId || !a || !b){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }
-  mapPost('/links/editar', {id:l.dbId, from_node_id:b.dbId, to_node_id:a.dbId}).then(data=>{
+  const inv = {id:l.dbId, from_node_id:b.dbId, to_node_id:a.dbId};
+  if((l.pathPts||[]).length) inv.path = buildPathString(l.pathPts.slice().reverse(), l.reservas, l.folgaPct);   // o traçado acompanha o sentido
+  mapPost('/links/editar', inv).then(data=>{
     loadNetwork(()=>{
       const again = links.find(x=>x.dbId===l.dbId);
       if(again) onLinkClick(again.id);
@@ -2870,6 +3191,7 @@ function ctxItemsLink(l, ll){
   });
   items.push({sep:true});
   items.push({label:'Editar trecho', onClick:()=> openLinkEditModal(l)});
+  if(l.type!=='wireless') items.push({label:'Editar traçado', onClick:()=> openTraceForLink(l)});
   items.push({label:'Excluir trecho', danger:true, onClick:()=>{
     if(confirm('Excluir este trecho?')) deleteLinkRemote(l);
   }});
@@ -2889,6 +3211,11 @@ function ctxItemsMapVazio(latlng){
 
 mapEl.addEventListener('contextmenu',(e)=>{
   e.preventDefault();   // nunca deixa o menu nativo aparecer sobre o mapa
+  if(trace){   // em edição de traçado: botão direito num ponto o remove; fora disso, não faz nada
+    const v = e.target.closest ? e.target.closest('.mvertex') : null;
+    if(v) traceRemove(+v.getAttribute('data-vi'));
+    return;
+  }
   // em modo de posicionamento/ligação, o botão direito cancela (padrão de editor)
   if(mode!=='idle'){ clearMode(); toast('Operação cancelada.'); return; }
 

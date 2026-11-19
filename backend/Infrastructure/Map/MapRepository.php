@@ -239,9 +239,9 @@ final class MapRepository
         $pdo = $this->database->pdo();
         $pdo->prepare(
             'INSERT INTO map_links (provider_id, link_type, medium, from_node_id, to_node_id, from_port_id, to_port_id, status, lifecycle, label, length_m,
-                    fiber_count, attrs_json, created_by_user_id, updated_by_user_id, created_at, updated_at)
+                    fiber_count, attrs_json, path_json, created_by_user_id, updated_by_user_id, created_at, updated_at)
              VALUES (:provider_id, :link_type, :medium, :from_node_id, :to_node_id, :from_port_id, :to_port_id, :status, :lifecycle, :label, :length_m,
-                    :fiber_count, :attrs_json,
+                    :fiber_count, :attrs_json, :path_json,
                     :user_id, :user_id2, NOW(), NOW())'
         )->execute([
             'provider_id' => $providerId,
@@ -257,6 +257,7 @@ final class MapRepository
             'length_m' => $fields['length_m'] ?? null,
             'fiber_count' => $fields['fiber_count'] ?? null,
             'attrs_json' => $fields['attrs_json'] ?? null,
+            'path_json' => $fields['path_json'] ?? null,
             'user_id' => $userId,
             'user_id2' => $userId,
         ]);
@@ -271,7 +272,7 @@ final class MapRepository
      */
     public function updateLink(int $providerId, int $linkId, ?int $userId, array $fields): void
     {
-        $allowed = ['from_node_id', 'to_node_id', 'from_port_id', 'to_port_id', 'status', 'lifecycle', 'label', 'length_m', 'fiber_count', 'attrs_json'];
+        $allowed = ['from_node_id', 'to_node_id', 'from_port_id', 'to_port_id', 'status', 'lifecycle', 'label', 'length_m', 'fiber_count', 'attrs_json', 'path_json'];
         $sets = [];
         $params = ['id' => $linkId, 'provider_id' => $providerId, 'user_id' => $userId];
         foreach ($allowed as $column) {

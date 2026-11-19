@@ -22,20 +22,30 @@ Criar, editar, mover e excluir site, OLT, CTO e splitter; portas geradas por cap
 fibras e comprimento; bloqueios de exclusão (CTO com cabo/filho, POP com equipamento), com mensagem; mover uma CTO
 não solta os cabos.
 
-## O que não existe e como contornar
+## Traçado do cabo, reservas e distância (feature/mapa-tracado)
+
+- **Traçado:** cabo existente → painel do trecho → *Editar traçado*. Clique no mapa para acrescentar pontos ao fim;
+  arraste um ponto para movê-lo; clique ou arraste o "+" de um segmento para criar um ponto no meio; duplo clique
+  ou botão direito num ponto o remove (ou clique no ponto e *Remover ponto selecionado*). Nada é gravado até
+  *Salvar traçado*; *Cancelar* ou Esc descarta. Cabo novo: no modal *Novo trecho*, *Desenhar traçado no mapa*.
+  Cabos antigos (sem traçado) continuam como linha reta.
+- **Pontos intermediários só:** as pontas são sempre os dois elementos; mover uma CTO leva a ponta do cabo junto, e
+  os pontos do meio ficam onde estão.
+- **Distância:** total = traçado + folga + reservas, mostrados em separado no painel do trecho.
+  - *Traçado*: soma das distâncias (haversine) ponta A → pontos → ponta B.
+  - *Folga %*: sobre o traçado (cobre curvas e flechas); por cabo (campo *Folga*), ou o padrão da rede
+    (`provider_settings` chave `map.cable.slack_pct`; sem valor = 0 %). **Não** incide sobre as reservas.
+  - *Reservas técnicas*: lista no cabo (local + metros), somada ao total (editor no *Editar trecho*).
+  - *Comprimento manual*: se preenchido em *Editar trecho*, **prevalece** e aparece marcado "manual"; o calculado
+    continua visível ao lado. Apague para voltar ao calculado.
+- **Onde fica gravado:** coluna `map_links.path_json` (já existia desde a migration 019; **sem migration nova**).
+
+## O que ainda não existe e como contornar
 
 | Falta | Contorno |
 |---|---|
-| **Pontos intermediários no cabo** (traçado curvo): o cabo é sempre uma reta entre os dois elementos; o servidor não grava o traçado. | Informe o **comprimento real** do cabo em *comprimento (m)*. A reta serve só como desenho. |
-| **Reserva técnica** como recurso próprio (marca, soma automática). | Some a reserva ao comprimento informado e anote em *atributos* (`{"reserva_tecnica_m":"50"}`); o servidor guarda. |
 | **Inserir caixa no meio do cabo** (sangria): botão desativado, "em breve". | Crie a caixa (CEO/CTO) como elemento e ligue os dois trechos. |
 | **Distância acumulada até a OLT**: "ainda não calculada". | Some os trechos manualmente. |
-
-## Distância ao mover pontos
-
-- Cabo **sem** comprimento informado: a tela recalcula a linha reta a partir das coordenadas (acompanha o ponto
-  movido; **lido no código**, não visto em tela).
-- Cabo **com** comprimento informado: o valor fica fixo; não muda ao mover. Corrija à mão se mudar o trajeto.
 
 ## Aviso importante: onde ficam os dados
 

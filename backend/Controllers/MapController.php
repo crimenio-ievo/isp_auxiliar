@@ -11,6 +11,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Url;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\Map\MapPath;
 use App\Infrastructure\Map\MapRepository;
 
 /**
@@ -101,7 +102,7 @@ final class MapController
      * max_clientes_padrao (mesmas faixas), que só preenchem PONs sem valor próprio. Vazio apaga o valor.
      * Padrões da rede ficam em provider_settings (chave => valor padrão abaixo) e vão em GET /api/mapa data.defaults.
      */
-    private const MAP_DEFAULTS = ['map.loss.fusion_db' => 0.1, 'map.loss.connector_db' => 0.5, 'map.atten.1490_db_km' => 0.30, 'map.onu.min_rx_dbm' => -27.0];
+    private const MAP_DEFAULTS = ['map.loss.fusion_db' => 0.1, 'map.loss.connector_db' => 0.5, 'map.atten.1490_db_km' => 0.30, 'map.onu.min_rx_dbm' => -27.0, 'map.cable.slack_pct' => 0.0];
     private const CTO_MAX_CAPACITY = 144;
 
     public function createNode(Request $request): Response
@@ -658,7 +659,7 @@ final class MapController
             }
             $id = $this->mapRepository->createLink($providerId, $userId, $fields);
             $link = $this->mapRepository->findLink($providerId, $id);
-            $this->audit($userId, $actor, 'map.link.create', $id, ['link' => $link], 'map_link');
+            $this->audit($userId, $actor, 'map.link.create', $id, ['link' => $this->linkForAudit($link)], 'map_link');
             $pdo->commit();
         } catch (\Throwable) {
             $pdo->rollBack();
@@ -667,6 +668,23 @@ final class MapController
         }
 
         return Response::json(['ok' => true, 'data' => ['link' => $link, 'warnings' => $warnings]], 200, ['Cache-Control' => 'private, no-store']);
+    }
+
+    /**
+     * Auditoria sem a lista de pontos (até 2000): fica só a contagem, as reservas e a folga.
+     *
+     * @param array<string, mixed>|null $link
+     * @return array<string, mixed>|null
+     */
+    private function linkForAudit(?array $link): ?array
+    {
+        if ($link === null || !is_array($link['path_json'] ?? null)) {
+            return $link;
+        }
+        $p = $link['path_json'];
+        $link['path_json'] = ['pontos' => count($p['pontos'] ?? []), 'reservas' => $p['reservas'] ?? [], 'folga_pct' => $p['folga_pct'] ?? null];
+
+        return $link;
     }
 
     public function updateLink(Request $request): Response
@@ -707,7 +725,7 @@ final class MapController
                 $this->mapRepository->updateLink($providerId, $id, $userId, $fields);
             }
             $after = $this->mapRepository->findLink($providerId, $id);
-            $this->audit($userId, $actor, 'map.link.update', $id, ['before' => $before, 'after' => $after], 'map_link');
+            $this->audit($userId, $actor, 'map.link.update', $id, ['before' => $this->linkForAudit($before), 'after' => $this->linkForAudit($after)], 'map_link');
             $pdo->commit();
         } catch (\Throwable) {
             $pdo->rollBack();
@@ -916,6 +934,17 @@ final class MapController
                 $errors[] = 'Número de fibras inválido (1 a 288).';
             } else {
                 $fields['fiber_count'] = (int) $raw;
+            }
+        }
+
+        // Traçado (map_links.path_json): pontos intermediários + reservas técnicas + folga %. Vazio apaga (volta à reta).
+        if ($has('path')) {
+            $pathErrors = [];
+            $path = MapPath::normalize($request->input('path'), $pathErrors);
+            if ($pathErrors !== []) {
+                array_push($errors, ...$pathErrors);
+            } else {
+                $fields['path_json'] = $path === null ? null : json_encode($path, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             }
         }
 
