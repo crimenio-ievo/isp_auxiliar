@@ -38,11 +38,11 @@ $assert(str_contains($panel[0], '>Configurações<') && str_contains($panel[0], 
 $assert(str_contains($gestor, 'data-nav-more-toggle') && str_contains($gestor, 'aria-expanded="false"') && str_contains($gestor, 'aria-controls="app-nav-more-panel"'), 'botão Mais acessível');
 $assert(count($fixed[1]) <= 4, 'no máximo 4 fixos');
 
-// Perfil enxuto: sem contratos/config/logs, o Mais existe só para o "Sair" (não há mais barra superior).
+// Perfil enxuto: sem contratos/config/logs, o Mais carrega o "Sair" e a lista de CTOs (somente leitura, desde o cadastro de rede).
 $basic = $render(['can_search_clients' => true]);
 $assert(str_contains($basic, 'data-nav-more-toggle') && str_contains($basic, 'data-nav-more-panel'), 'Mais sempre existe (carrega o Sair)');
 preg_match('#data-nav-more-panel.*?</div>#s', $basic, $basicPanel);
-$assert(str_contains($basicPanel[0], '>Sair<') && substr_count($basicPanel[0], 'app-nav__more-item') === 2, 'perfil enxuto: Mais só com Sair');
+$assert(str_contains($basicPanel[0], '>Sair<') && str_contains($basicPanel[0], '>CTOs<') && !str_contains($basicPanel[0], '>Rede<') && substr_count($basicPanel[0], 'app-nav__more-item') === 3, 'perfil enxuto: Mais com CTOs e Sair (sem a área Rede de gestor)');
 $assert(str_contains($gestor, 'app-nav__user') && str_contains($gestor, 'aria-label="Sair"'), 'desktop: usuário e sair na base da trilha');
 $assert(strpos($gestor, 'aria-label="Sair"') < strpos($gestor, 'title="Configurações"', strpos($gestor, 'app-nav__settings')), 'Sair fica acima de Configurações');
 
