@@ -36,3 +36,17 @@ telemetria.
   permissão continua 403; nenhum resultado do técnico aponta para `/rede-fibra`, `/rede-equipamentos`,
   `/rede-vinculos`, `/mapa` ou API) e `FeatureFlagsSmoke` (99; o topo do técnico tem a busca de rede só com a
   rede ligada).
+
+## 3c. /rede-vinculos: sugestões "média" confirmáveis, com motivo e data da base
+
+- **Fato:** a confiança "média" (até 16 no último octeto, candidato único) já vinha com os botões
+  Confirmar/Recusar. Agora cada sugestão mostra selo + motivo: "MAC −1 no último octeto" (alta),
+  "MAC +9 no último octeto (diferença maior que 1: confira antes de confirmar)" (média) e "ambígua ou distante:
+  só confirme com certeza" (baixa). Nada é vinculado sem o clique humano; o POST segue exigindo CSRF e gestor.
+- Aviso na tela: "A base do MkAuth lida por este servidor vai até DD/MM/AAAA (cliente/sessão mais recente)".
+  Nova leitura SELECT-only `MkAuthDatabase::latestVisibleDate()` (maior `sis_cliente.data_ins` ou
+  `radacct.acctstarttime`), exposta como `base_mkauth_ate` na API de sugestões.
+- **Fato (leitura real):** `data_ins` máximo 2026-10-08; `radacct` está **vazio** (0 linhas) neste clone, então
+  hoje não há sessão PPPoE para sugerir por MAC. A nota anterior falava em radacct até 2026-10-13: é
+  **hipótese não verificada** que o clone tenha sido recarregado desde então.
+- Testes: `NetBindingSmoke` (101) e `rede_vinculos.js` (39).

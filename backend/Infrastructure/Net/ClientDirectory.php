@@ -24,4 +24,7 @@ interface ClientDirectory
      * @return array<string,string> login em minusculas => nome
      */
     public function namesByLogins(array $logins): array;
+
+    /** @return array{data: ?string, origem: ?string} data AAAA-MM-DD do cliente/sessao mais recente que a integracao enxerga */
+    public function latestVisibleDate(): array;
 }

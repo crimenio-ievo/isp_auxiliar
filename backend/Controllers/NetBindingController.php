@@ -179,12 +179,13 @@ final class NetBindingController
             }
             $names = $this->mkauth->namesByLogins($logins);
             $result = $suggester->suggest($providerId, $mk['callers'], $names);
+            try { $base = $this->mkauth->latestVisibleDate(); } catch (\Throwable) { $base = ['data' => null, 'origem' => null]; }
         } catch (\Throwable) {
             return $this->fail('Não foi possível consultar o MkAuth agora.', 503);
         }
 
         return Response::json(['ok' => true, 'data' => $result + [
-            'janela_dias' => 30, 'radacct_referencia' => $mk['referencia'], 'janela_inicio' => $mk['inicio'],
+            'base_mkauth_ate' => $base['data'], 'base_mkauth_origem' => $base['origem'], 'janela_dias' => 30, 'radacct_referencia' => $mk['referencia'], 'janela_inicio' => $mk['inicio'],
             'regra' => 'MAC do PPPoE igual ao da ONU nos 5 primeiros octetos; diferença de até 1 no último octeto = alta, até 16 = média, demais = baixa',
         ]], 200, self::NO_STORE);
     }

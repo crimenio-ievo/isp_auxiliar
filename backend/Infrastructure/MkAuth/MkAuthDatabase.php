@@ -939,6 +939,25 @@ final class MkAuthDatabase implements ClientPlanReadRepository
     }
 
     /**
+     * SOMENTE LEITURA (SELECT): data mais recente que a integracao enxerga (cliente cadastrado ou sessao PPPoE).
+     *
+     * @return array{data: ?string, origem: ?string} data em AAAA-MM-DD
+     */
+    public function latestVisibleDate(): array
+    {
+        $client = $this->connection()->query('SELECT MAX(data_ins) FROM sis_cliente')->fetchColumn();
+        $session = $this->connection()->query('SELECT MAX(acctstarttime) FROM radacct')->fetchColumn();
+        $best = ['data' => null, 'origem' => null];
+        foreach (['cliente' => $client, 'sessao' => $session] as $origin => $value) {
+            if (is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}/', $value) === 1 && ($best['data'] === null || substr($value, 0, 10) > $best['data'])) {
+                $best = ['data' => substr($value, 0, 10), 'origem' => $origin];
+            }
+        }
+
+        return $best;
+    }
+
+    /**
      * SOMENTE LEITURA (SELECT): nome de cada login (chave em minusculas), em lotes.
      *
      * @param list<string> $logins

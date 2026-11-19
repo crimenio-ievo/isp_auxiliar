@@ -32,4 +32,9 @@ final class MkAuthClientDirectory implements ClientDirectory
     {
         return $this->mkauth->clientNamesByLogins($logins);
     }
+
+    public function latestVisibleDate(): array
+    {
+        return $this->mkauth->latestVisibleDate();
+    }
 }

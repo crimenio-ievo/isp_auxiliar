@@ -48,6 +48,7 @@ $directory = new class () implements ClientDirectory {
     public function find(string $login): ?array { $this->calls[] = 'find'; if ($this->down) { throw new RuntimeException('mkauth fora (detalhe-interno)'); }
         foreach ($this->clients as $l => $nm) { if (strcasecmp($l, $login) === 0) { return ['login' => $l, 'nome' => $nm]; } } return null; }
     public function recentCallerMacs(int $days): array { $this->calls[] = 'callers'; if ($this->down) { throw new RuntimeException('mkauth fora (detalhe-interno)'); } return ['referencia' => '2026-10-13 09:45:43', 'inicio' => '2026-09-13 09:45:43', 'callers' => $this->callers]; }
+    public function latestVisibleDate(): array { return ['data' => '2026-10-08', 'origem' => 'cliente']; }
     public function namesByLogins(array $logins): array { $o = []; foreach ($logins as $l) { if (isset($this->clients[strtolower($l)])) { $o[strtolower($l)] = $this->clients[strtolower($l)]; } } return $o; }
 };
 
@@ -226,7 +227,7 @@ try {
     $check($count('SELECT COUNT(*) FROM client_network_bindings WHERE ativo=1') === 0, 'antes de confirmar nada esta vinculado');
     $r = $get('suggestions');
     $j = $json($r);
-    $check($r->status() === 200 && $j['data']['sem_vinculo'] === 4 && count($j['data']['sugestoes']) === 3 && $j['data']['sem_candidato'] === 1 && $j['data']['caller_invalido'] === 1 && $j['data']['radacct_referencia'] === '2026-10-13 09:45:43' && $j['data']['janela_dias'] === 30, 'sugestoes: 4 ONUs sem vinculo (a removida nao entra), 3 com sugestao, 1 sem candidato');
+    $check($r->status() === 200 && $j['data']['sem_vinculo'] === 4 && count($j['data']['sugestoes']) === 3 && $j['data']['sem_candidato'] === 1 && $j['data']['caller_invalido'] === 1 && $j['data']['radacct_referencia'] === '2026-10-13 09:45:43' && $j['data']['janela_dias'] === 30 && $j['data']['base_mkauth_ate'] === '2026-10-08' && $j['data']['base_mkauth_origem'] === 'cliente', 'sugestoes: 4 ONUs sem vinculo (a removida nao entra), 3 com sugestao, 1 sem candidato');
     $s = array_column($j['data']['sugestoes'], null, array_column(array_column($j['data']['sugestoes'], 'onu'), 'id') === [1, 2, 4] ? null : null);
     $byOnu = [];
     foreach ($j['data']['sugestoes'] as $x) { $byOnu[$x['onu']['id']] = $x; }

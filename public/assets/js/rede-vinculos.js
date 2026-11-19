@@ -18,6 +18,12 @@
   }
   function fmtDT(s) { var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(s || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5] : null; }
   function macText(mac) { return String(mac).replace(/(..)(?=.)/g, '$1:'); }
+  function motivo(d, conf) {
+    var t = d === 0 ? 'MAC igual' : 'MAC ' + (d > 0 ? '+' : '−') + Math.abs(d);
+    if (conf === 'media') { return t + ' no último octeto (diferença maior que 1: confira antes de confirmar)'; }
+    if (conf === 'baixa') { return t + ' · ambígua ou distante: só confirme com certeza'; }
+    return t + ' no último octeto';
+  }
   function diffText(d) { return d === 0 ? 'MAC igual' : (d > 0 ? '+' : '') + d + ' no último octeto'; }
 
   function load() {
@@ -37,6 +43,10 @@
     var note = $('vc-note');
     note.textContent = 'Janela de ' + d.janela_dias + ' dias contada a partir do registro mais recente do radacct' + (ref ? ' (' + ref + ')' : ' (nenhuma sessão lida)') + '. Regra: ' + d.regra + '.';
     note.hidden = false;
+    var base = $('vc-base');
+    if (d.base_mkauth_ate) { var p = d.base_mkauth_ate.split('-'); base.textContent = 'A base do MkAuth lida por este servidor vai até ' + p[2] + '/' + p[1] + '/' + p[0] + (d.base_mkauth_origem === 'sessao' ? ' (sessão mais recente)' : ' (cliente mais recente)') + '. Clientes e sessões posteriores a essa data não aparecem aqui.'; }
+    else { base.textContent = 'Não foi possível determinar até que data vai a base do MkAuth lida por este servidor.'; }
+    base.hidden = false;
     $('vc-empty').hidden = d.sugestoes.length > 0;
     d.sugestoes.forEach(function (s) {
       var tr = el('tr'); tr.setAttribute('data-onu', s.onu.id);
@@ -50,8 +60,8 @@
         var row = el('div', 'rc-cand'); row.setAttribute('data-login', c.login);
         var who = el('a', null, c.nome || c.login); who.href = D.clientUrl + '?login=' + encodeURIComponent(c.login); row.appendChild(who);
         row.appendChild(el('span', 'rf-muted', c.login));
-        row.appendChild(el('span', 'rf-muted', diffText(c.distancia)));
         row.appendChild(el('span', 'rf-pill rc-conf--' + c.confianca, 'Confiança ' + (CONF[c.confianca] || c.confianca)));
+        row.appendChild(el('span', 'rf-muted rc-motivo', motivo(c.distancia, c.confianca)));
         if (c.vinculado) { row.appendChild(el('span', 'rc-chip', 'já tem vínculo (CTO)')); }
         var ok = el('button', 'rc-btn', 'Confirmar'); ok.type = 'button'; ok.addEventListener('click', function () { act(s, c, 'confirmar', row); });
         var no = el('button', 'rc-btn rc-btn--danger', 'Recusar'); no.type = 'button'; no.addEventListener('click', function () { act(s, c, 'recusar', row); });

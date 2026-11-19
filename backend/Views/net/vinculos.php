@@ -33,6 +33,7 @@ ob_start();
         <button type="button" class="button button--secondary" id="vc-reload">Atualizar sugestões</button>
     </div>
     <p class="rc-msg" id="vc-msg" role="status" aria-live="polite" hidden></p>
+    <p class="rc-planned" id="vc-base" role="status" hidden></p>
     <p class="rc-planned" id="vc-note" hidden></p>
     <section class="card rc-list" aria-label="ONUs sem vínculo">
         <div class="rf-tablewrap rc-tablewrap">

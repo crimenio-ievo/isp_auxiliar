@@ -91,18 +91,22 @@ const ficha={cto,pode_editar:true,vinculos_disponiveis:true,sem_porta:[],portas:
  // ---------------- vinculos de ONU ----------------
  {
   const data={sugestoes:[
-    {onu:{id:1,mac:'006D61AA0010',pon:1,onu_index:1,olt:'OLT-<b>1</b>'},candidatos:[{login:'joao',nome:'João Teste',distancia:1,confianca:'alta',vinculado:false}]},
+    {onu:{id:1,mac:'006D61AA0010',pon:1,onu_index:1,olt:'OLT-<b>1</b>'},candidatos:[{login:'joao',nome:'João Teste',distancia:1,confianca:'alta',vinculado:false},{login:'ana',nome:'Ana',distancia:9,confianca:'media',vinculado:false}]},
     {onu:{id:2,mac:'006D61BB0020',pon:1,onu_index:2,olt:'OLT-1'},candidatos:[{login:'maria',nome:null,distancia:9,confianca:'baixa',vinculado:true},{login:'pedro',nome:'Pedro',distancia:-8,confianca:'baixa',vinculado:false}]}],
-    sem_candidato:1,sem_vinculo:3,logins_com_sessao:591,caller_invalido:0,janela_dias:30,radacct_referencia:'2026-10-13 09:45:43',janela_inicio:'2026-09-13 09:45:43',regra:'MAC do PPPoE igual...'};
+    sem_candidato:1,sem_vinculo:3,logins_com_sessao:591,caller_invalido:0,janela_dias:30,base_mkauth_ate:'2026-10-08',base_mkauth_origem:'cliente',radacct_referencia:'2026-10-13 09:45:43',janela_inicio:'2026-09-13 09:45:43',regra:'MAC do PPPoE igual...'};
   let nextPost=null,listCalls=0;
   const t=boot('vinculos','edit','rede-vinculos.js',(u,o)=>{if(o&&o.method==='POST'){return nextPost;}listCalls++;return {status:200,body:{ok:true,data}};});
   const D=t.D;await wait(30);
   const rows=[...D.querySelectorAll('#vc-table tbody tr')];
   check(rows.length===2&&D.getElementById('vc-summary').textContent==='3 ONU(s) sem vínculo · 2 com sugestão · 1 sem candidato pelo MAC · 591 login(s) ativos com sessão','resumo');
   check(D.getElementById('vc-note').textContent.includes('13/10/2026 09:45')&&D.getElementById('vc-note').textContent.includes('30 dias'),'mostra a data de referencia do radacct e a janela');
-  check(rows[0].textContent.includes('OLT-<b>1</b> · PON 1')&&!rows[0].querySelector('b')&&rows[0].textContent.includes('00:6D:61:AA:00:10')&&rows[0].textContent.includes('+1 no último octeto')&&rows[0].textContent.includes('Confiança Alta')&&rows[0].querySelector('a[href="/clientes/detalhe?login=joao"]'),'sugestao: ONU, MAC, diferenca, confianca e link do cliente');
-  check(rows[1].textContent.includes('Confiança Baixa')&&rows[1].textContent.includes('-8 no último octeto')&&rows[1].textContent.includes('maria')&&rows[1].textContent.includes('já tem vínculo'),'ambigua: dois candidatos, "ja tem vinculo" marcado');
+  check(rows[0].textContent.includes('OLT-<b>1</b> · PON 1')&&!rows[0].querySelector('b')&&rows[0].textContent.includes('00:6D:61:AA:00:10')&&rows[0].textContent.includes('MAC +1 no último octeto')&&rows[0].textContent.includes('Confiança Alta')&&rows[0].querySelector('a[href="/clientes/detalhe?login=joao"]'),'sugestao: ONU, MAC, diferenca, confianca e link do cliente');
+  check(rows[1].textContent.includes('Confiança Baixa')&&rows[1].textContent.includes('MAC −8')&&rows[1].textContent.includes('maria')&&rows[1].textContent.includes('já tem vínculo'),'ambigua: dois candidatos, "ja tem vinculo" marcado');
   check(D.querySelector('a[href="/rede-fibra?onu=1"]'),'link para a ONU na /rede-fibra');
+  check(D.getElementById('vc-base').textContent.includes('A base do MkAuth lida por este servidor vai até 08/10/2026')&&!D.getElementById('vc-base').hidden,'aviso da data da base do MkAuth');
+  check(rows[1].textContent.includes('ambígua ou distante'),'motivo da confianca baixa');
+  const medRow=rows[0].querySelectorAll('.rc-cand')[1];
+  check(medRow.textContent.includes('Confiança Média')&&medRow.textContent.includes('MAC +9 no último octeto')&&medRow.textContent.includes('confira antes de confirmar')&&[...medRow.querySelectorAll('button')].map(x=>x.textContent).join('|')==='Confirmar|Recusar','media: selo, motivo (+9) e confirmavel como a alta');
   nextPost={status:200,body:{ok:true,message:'ONU vinculada a João Teste.'}};t.calls.length=0;
   rows[0].querySelector('.rc-cand button').click();await wait(40);
   let p=posts(t.calls)[0];check(p.u==='/api/rede-vinculos/onu'&&p.o.headers['X-CSRF-Token']==='TOKEN-TESTE'&&body(p).onu_id==='1'&&body(p).login==='joao'&&body(p).acao==='confirmar'&&body(p).confianca==='alta','confirmar envia onu, login, acao e confianca');
