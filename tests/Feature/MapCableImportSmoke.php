@@ -40,10 +40,16 @@ $mg = KmlCableReader::lines('<kml><Placemark><name>m</name><MultiGeometry><LineS
 $ok($mg['ok'] && count($mg['linhas']) === 2, 'leitor: MultiGeometry com 2 linhas vira 2 candidatos');
 $bad = KmlCableReader::lines('<kml><Placemark><LineString><coordinates>-42.8,-20.85 xx,yy -42.9,95 -42.81,-20.86</coordinates></LineString></Placemark></kml>');
 $ok($bad['ok'] && count($bad['linhas'][0]['pontos']) === 2, 'leitor: coordenadas inválidas/fora da faixa são descartadas');
-$zip = sys_get_temp_dir() . '/mci_' . getmypid() . '.kmz';
-$z = new ZipArchive(); $z->open($zip, ZipArchive::CREATE | ZipArchive::OVERWRITE); $z->addFromString('doc.kml', $kml); $z->close();
-$ok(count(KmlCableReader::lines((string) file_get_contents($zip))['linhas']) === 7, 'leitor: KMZ igual ao KML');
-unlink($zip);
+if (class_exists(ZipArchive::class)) {
+    $zip = sys_get_temp_dir() . '/mci_' . getmypid() . '.kmz';
+    $z = new ZipArchive(); $z->open($zip, ZipArchive::CREATE | ZipArchive::OVERWRITE); $z->addFromString('doc.kml', $kml); $z->close();
+    $ok(count(KmlCableReader::lines((string) file_get_contents($zip))['linhas']) === 7, 'leitor: KMZ igual ao KML');
+    unlink($zip);
+} else {
+    echo "SKIP KMZ (extensão zip ausente)\n";
+    $nz = KmlCableReader::lines("PK\x03\x04conteudo-de-um-kmz");
+    $ok(!$nz['ok'] && str_contains((string) $nz['erro'], 'Este servidor não lê KMZ'), 'sem zip: KMZ devolve a mensagem amigavel ("Este servidor não lê KMZ")');
+}
 
 // ---- controlador ----
 $schema = (new ScratchSchema($root, 'cabos'))->create();
