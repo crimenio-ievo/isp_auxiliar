@@ -6,6 +6,7 @@ if [[ ! -d tests/map/node_modules/jsdom ]]; then
   echo 'Instale as dependências: cd tests/map && npm ci'
   exit 1
 fi
+php tests/map/guard_real_db.php || exit $?
 passed=0
 failed=0
 run() {
