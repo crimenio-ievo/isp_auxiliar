@@ -38,6 +38,8 @@ não solta os cabos.
   - *Reservas técnicas*: lista no cabo (local + metros), somada ao total (editor no *Editar trecho*).
   - *Comprimento manual*: se preenchido em *Editar trecho*, **prevalece** e aparece marcado "manual"; o calculado
     continua visível ao lado. Apague para voltar ao calculado.
+- **Seguir rua:** no editor de traçado, liga um modo em que cada clique busca a rota pelas ruas e a transforma em pontos
+  editáveis. Depende de um serviço OSRM configurado (`docs/osrm-seguir-rua.md`); sem ele, a tela segue no modo manual.
 - **Onde fica gravado:** coluna `map_links.path_json` (já existia desde a migration 019; **sem migration nova**).
 
 ## O que ainda não existe e como contornar

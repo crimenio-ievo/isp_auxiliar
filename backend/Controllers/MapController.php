@@ -13,6 +13,7 @@ use App\Core\Url;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Map\MapPath;
 use App\Infrastructure\Map\MapRepository;
+use App\Infrastructure\Map\OsrmRouter;
 
 /**
  * ISP Map: serve o HTML de modules/isp_map/ (fora de public/), só para usuário autenticado com perfil
@@ -42,6 +43,7 @@ final class MapController
         try {
             $data = $this->mapRepository->topology($providerId);
             $data['defaults'] = $this->networkDefaults($providerId);
+            $data['routing'] = ['enabled' => $this->router($providerId)->enabled()];
         } catch (\Throwable) {
             return Response::json(['ok' => false, 'message' => 'Não foi possível ler o mapa.'], 500, ['Cache-Control' => 'private, no-store']);
         }
@@ -685,6 +687,50 @@ final class MapController
         $link['path_json'] = ['pontos' => count($p['pontos'] ?? []), 'reservas' => $p['reservas'] ?? [], 'folga_pct' => $p['folga_pct'] ?? null];
 
         return $link;
+    }
+
+    /** @var (callable(string): ?string)|null transporte HTTP trocável nos testes */
+    public $routeHttp = null;
+
+    private function router(int $providerId): OsrmRouter
+    {
+        $st = $this->mapRepository->settings($providerId, ['map.routing.osrm_url', 'map.routing.profile']);
+
+        return new OsrmRouter($st['map.routing.osrm_url'] ?? null, $st['map.routing.profile'] ?? 'driving', $this->routeHttp);
+    }
+
+    /** POST /api/mapa/rota: pontos seguindo a rua entre dois pontos (503 = serviço ausente/falhou: tela segue manual). */
+    public function route(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        $pt = static function (mixed $lat, mixed $lng): ?array {
+            if (!is_numeric($lat) || !is_numeric($lng) || abs((float) $lat) > 90 || abs((float) $lng) > 180) {
+                return null;
+            }
+
+            return [(float) $lat, (float) $lng];
+        };
+        $a = $pt($request->input('from_lat'), $request->input('from_lng'));
+        $b = $pt($request->input('to_lat'), $request->input('to_lng'));
+        if ($a === null || $b === null) {
+            return $this->fail('Pontos inválidos.', 422);
+        }
+        if (MapPath::haversine($a, $b) > 20000) {
+            return $this->fail('Trecho longo demais para seguir a rua de uma vez (máximo 20 km); use pontos intermediários.', 422);
+        }
+        $router = $this->router($guard[0]);
+        if (!$router->enabled()) {
+            return $this->fail('Serviço de rotas não configurado: desenhe os pontos à mão.', 503);
+        }
+        $pts = $router->route($a, $b);
+        if ($pts === null) {
+            return $this->fail('O serviço de rotas não respondeu: desenhe os pontos à mão.', 503);
+        }
+
+        return Response::json(['ok' => true, 'data' => ['pontos' => $pts]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
     public function updateLink(Request $request): Response

@@ -2742,10 +2742,35 @@ function renderTracePanel(){
   document.getElementById('tr-cancel').addEventListener('click', ()=> clearMode());
   document.getElementById('tr-save').addEventListener('click', ()=>{ const t = trace; if(typeof t.onSave==='function') t.onSave(t.pts.map(q=>[q[0],q[1]]), t); });
 }
-/* Ponto de entrada do "Seguir rua" (etapa 3); sem serviço de rotas, cai no modo manual (ponto simples). */
+/* "Seguir rua": pede ao servidor (proxy do OSRM configurado) a rota entre o último ponto e o clique; o resultado
+   vira pontos comuns, editáveis. Sem serviço configurado ou com falha, a tela segue no modo manual (ponto simples). */
+let routeBusy = false;
 function traceFollowStreet(ll, toDestination){
-  if(!toDestination) trace.pts.push([ll.lat, ll.lng]), trace.sel = trace.pts.length-1, trace.dirty = true;
-  renderAll(); renderTracePanel();
+  const [a] = traceEnds();
+  const last = trace.pts.length ? {lat:trace.pts[trace.pts.length-1][0], lng:trace.pts[trace.pts.length-1][1]} : {lat:a.lat, lng:a.lng};
+  const manual = (why)=>{
+    if(!toDestination){ trace.pts.push([ll.lat, ll.lng]); trace.sel = trace.pts.length-1; trace.dirty = true; }
+    renderAll(); renderTracePanel();
+    const m = document.getElementById('tr-msg'); if(m && why) m.textContent = why;
+    if(why) toast(why, 4500);
+  };
+  if(routeBusy){ toast('Aguarde a rota anterior terminar.'); return; }
+  routeBusy = true;
+  const t0 = trace;
+  mapPost('/rota', {from_lat:last.lat, from_lng:last.lng, to_lat:ll.lat, to_lng:ll.lng}).then(data=>{
+    routeBusy = false;
+    if(trace!==t0) return;
+    let pts = (data.pontos||[]).map(q=>[+q[0], +q[1]]).filter(q=>isFinite(q[0])&&isFinite(q[1]));
+    if(toDestination) pts = pts.slice(0, -1);   // o destino é o próprio nó
+    if(!pts.length){ manual('A rota não trouxe pontos: use o modo manual.'); return; }
+    pts.forEach(q=>trace.pts.push(q)); trace.sel = null; trace.dirty = true;
+    renderAll(); renderTracePanel();
+    const m = document.getElementById('tr-msg'); if(m) m.textContent = pts.length+' ponto(s) seguindo a rua. Ajuste o que precisar: são pontos comuns.';
+  }).catch(err=>{
+    routeBusy = false;
+    if(trace!==t0) return;
+    manual((err && err.message ? err.message : 'Serviço de rotas indisponível.') + (toDestination ? '' : ' Ponto adicionado em linha reta.'));
+  });
 }
 function openTraceForLink(l){
   if(!l.dbId){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }

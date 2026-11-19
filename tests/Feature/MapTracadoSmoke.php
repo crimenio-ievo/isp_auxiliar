@@ -137,6 +137,35 @@ try {
     $pid = (int) $pdo->query('SELECT id FROM providers LIMIT 1')->fetchColumn();
     $pdo->prepare("INSERT INTO provider_settings (provider_id, setting_key, setting_value, updated_at) VALUES (?, 'map.cable.slack_pct', '8', NOW())")->execute([$pid]);
     $ok((float) ($get()['defaults']['map.cable.slack_pct'] ?? -1) === 8.0, 'padrão de folga lido de provider_settings (8 %)');
+
+    // ---- Seguir rua (OSRM): sem serviço = 503 manual; com serviço (transporte falso) = pontos simplificados ----
+    $rota = static fn (array $f = []): array => $post('route', $f + ['from_lat' => '-20.85', 'from_lng' => '-42.80', 'to_lat' => '-20.86', 'to_lng' => '-42.81']);
+    $ok(($get()['routing']['enabled'] ?? null) === false, 'rotas: serviço desativado por padrão (URL vazia)');
+    $r = $rota();
+    $ok($r[0] === 503 && str_contains((string) ($r[1]['message'] ?? ''), 'não configurado'), 'rotas: sem URL = 503 e mensagem para seguir no modo manual');
+    $pdo->prepare("INSERT INTO provider_settings (provider_id, setting_key, setting_value, updated_at) VALUES (?, 'map.routing.osrm_url', 'http://127.0.0.1:5000/', NOW())")->execute([$pid]);
+    $ok(($get()['routing']['enabled'] ?? null) === true, 'rotas: habilitado com URL configurada');
+    $asked = [];
+    $coords = [];
+    for ($i = 0; $i <= 50; $i++) {
+        $coords[] = [-42.80 - $i * 0.0002, -20.85 - $i * 0.0002 + (($i % 2) * 0.00001)];
+    }
+    $coords[] = [-42.81, -20.86];
+    $ctl->routeHttp = static function (string $url) use (&$asked, $coords): ?string { $asked[] = $url; return json_encode(['code' => 'Ok', 'routes' => [['geometry' => ['coordinates' => $coords]]]]); };
+    $r = $rota();
+    $pts = $r[1]['data']['pontos'] ?? [];
+    $ok($r[0] === 200 && count($pts) >= 1 && count($pts) < 52 && $pts[count($pts) - 1] === [-20.86, -42.81], 'rotas: devolve [lat,lng] simplificados, terminando no destino');
+    $ok(count($asked) === 1 && str_starts_with($asked[0], 'http://127.0.0.1:5000/route/v1/driving/-42.800000,-20.850000;-42.810000,-20.860000?') && str_contains($asked[0], 'geometries=geojson'), 'rotas: URL no formato OSRM (lon,lat) sem barra dupla');
+    $ctl->routeHttp = static fn (string $u): ?string => null;
+    $ok($rota()[0] === 503, 'rotas: serviço fora do ar = 503 (tela segue manual)');
+    $ctl->routeHttp = static fn (string $u): ?string => '{"code":"NoRoute"}';
+    $ok($rota()[0] === 503, 'rotas: NoRoute = 503');
+    $ctl->routeHttp = static fn (string $u): ?string => 'lixo';
+    $ok($rota()[0] === 503, 'rotas: resposta inválida = 503');
+    $ok($rota(['to_lat' => '95'])[0] === 422 && $rota(['from_lat' => 'x'])[0] === 422, 'rotas: coordenadas inválidas = 422');
+    $ok($rota(['to_lat' => '-21.5'])[0] === 422, 'rotas: trecho acima de 20 km = 422');
+    $ok($post('route', ['from_lat' => '1', 'from_lng' => '1', 'to_lat' => '1', 'to_lng' => '1.1'], false)[0] === 419, 'rotas: sem CSRF = 419');
+    $ok(\App\Infrastructure\Map\OsrmRouter::validBase('file:///etc/passwd') === null && \App\Infrastructure\Map\OsrmRouter::validBase('http://x y') === null && \App\Infrastructure\Map\OsrmRouter::validBase('') === null && \App\Infrastructure\Map\OsrmRouter::validBase('https://osrm.local:5000/') === 'https://osrm.local:5000', 'rotas: só http(s) é aceito como URL do serviço');
 } finally {
     $schema->drop();
 }
