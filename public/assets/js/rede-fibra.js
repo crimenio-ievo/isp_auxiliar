@@ -16,8 +16,10 @@
     { k: 'temp', l: 'Temp. (°C)' }, { k: 'dist', l: 'Distância' }, { k: 'cliente', l: 'Cliente' }, { k: 'cto', l: 'CTO' },
     { k: 'quedas', l: 'Quedas 24 h' }, { k: 'mac', l: 'MAC' }
   ];
-  // Cliente e CTO vêm do vínculo ONU↔cliente↔CTO (client_network_bindings) e continuam ocultas por padrão (decisão anterior do usuário), ligáveis em Colunas.
-  var DEFAULT_COLS = ['status', 'sinal', 'dist', 'quedas', 'mac'];
+  // Cliente e CTO vêm do vínculo ONU↔cliente↔CTO (client_network_bindings) e são visíveis por padrão (decisão do usuário, 2026-11-19).
+  var DEFAULT_COLS = ['status', 'sinal', 'dist', 'cliente', 'cto', 'quedas', 'mac'];
+  // Marca que a preferência salva já passou pela migração única "mostrar Cliente e CTO"; depois disso a escolha do usuário é respeitada.
+  var VINC_FLAG = 'rf.cols.vinc';
   var COUNT_LABEL = { ok: 'normal', atencao: 'atenção', critico: 'crítico', offline: 'offline' };
   var BAND = { ok: 'Normal', atencao: 'Atenção', critico: 'Crítico', saturado: 'Saturado', unknown: 'Sem leitura' };
   var TYPE_LABEL = { olt: 'OLT', switch: 'Switch', router: 'Roteador', radio: 'Rádio', server: 'Servidor', other: 'Equipamento' };
@@ -42,6 +44,11 @@
       var v = JSON.parse(window.localStorage.getItem('rf.cols') || 'null');
       if (Array.isArray(v)) {
         var m = migrateCols(v);
+        if (window.localStorage.getItem(VINC_FLAG) !== '1') {
+          // Migração única: quem salvou a preferência quando Cliente/CTO eram ocultas passa a vê-las uma vez.
+          ['cliente', 'cto'].forEach(function (k) { if (m.indexOf(k) === -1) { m.push(k); } });
+          try { window.localStorage.setItem(VINC_FLAG, '1'); } catch (e3) { /* sem storage */ }
+        }
         if (JSON.stringify(m) !== JSON.stringify(v)) { try { window.localStorage.setItem('rf.cols', JSON.stringify(m)); } catch (e2) { /* sem storage */ } }
         return m;
       }
@@ -91,7 +98,7 @@
     saveSort(); renderTree();
     var again = document.querySelector('#rf-table th[data-col="' + k + '"] .rf-sort'); if (again) { again.focus(); }
   }
-  function saveCols() { try { window.localStorage.setItem('rf.cols', JSON.stringify(state.cols)); } catch (e) { /* sem storage */ } }
+  function saveCols() { try { window.localStorage.setItem('rf.cols', JSON.stringify(state.cols)); window.localStorage.setItem(VINC_FLAG, '1'); } catch (e) { /* sem storage */ } }
 
   function el(tag, cls, text) { var n = document.createElement(tag); if (cls) { n.className = cls; } if (text !== undefined && text !== null) { n.textContent = text; } return n; }
   function svg(tag, attrs) { var n = document.createElementNS(NS, tag); Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); }); return n; }

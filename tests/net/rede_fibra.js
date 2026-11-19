@@ -84,9 +84,9 @@ async function boot(opts) {
   ok(t.q('.rf-row--site').nextElementSibling.classList.contains('rf-row--eqp') && t.qa('.rf-row--eqp')[0].nextElementSibling.classList.contains('rf-row--pon'), 'ordem: site > equipamento > PON > ONU');
   ok(t.q('.rf-row--eqp').textContent.indexOf('OLT-<b>X</b>') !== -1 && !t.q('.rf-row--eqp b'), 'nome do equipamento como texto, sem HTML');
   const heads = t.qa('#rf-table thead th').map(x => x.textContent);
-  ok(heads.join('|') === 'ONU|Estado|Sinal|Distância|Quedas 24 h|MAC', 'colunas padrao: ' + heads.join('|'));
+  ok(heads.join('|') === 'ONU|Estado|Sinal|Distância|Cliente|CTO|Quedas 24 h|MAC', 'colunas padrao (Cliente e CTO visiveis): ' + heads.join('|'));
   const row1 = t.qa('.rf-row--onu')[0].textContent;
-  ok(row1.indexOf('-20,00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada e MAC (Cliente/CTO ficam ocultas por padrao)');
+  ok(row1.indexOf('-20,00') !== -1 && row1.indexOf('≈ 22.64 km') !== -1 && row1.indexOf('00:2E:C7:00:00:01') !== -1, 'linha da ONU: sinal, distancia estimada e MAC');
   ok(t.qa('.rf-row--onu')[3].textContent.indexOf('sem leitura') !== -1, 'ONU sem leitura de sinal');
   ok(!/simulad|fict[ií]c|fake/i.test(t.d.body.textContent), 'nenhum texto de dado simulado');
   let linked = await boot({url:'http://localhost/rede-fibra?onu=2'});
@@ -273,8 +273,8 @@ async function boot(opts) {
   const c3 = rows0[3].querySelectorAll('td')[2], f3 = c3.querySelector('.rf-signal__fill');
   ok(f3.style.width === '0%' && c3.textContent === 'sem leitura' && !c3.querySelector('.rf-pill') && !c3.hasAttribute('data-sort-value'), 'ONU sem leitura: barra vazia e "sem leitura", sem pilula nem valor de ordenacao');
   ok(rows0[0].querySelectorAll('td')[2].dataset.sortValue === '-20' && rows0[1].querySelectorAll('td')[2].dataset.sortValue === '-26' && tcs.q('#rf-table thead th[data-col="sinal"]').dataset.sortType === 'number', 'coluna Sinal pronta para ordenar pelo valor numerico (data-sort-value), nao pela palavra');
-  ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Faixa' || x.textContent === 'Sinal (dBm)') && tcs.qa('.rf-row--onu').every(r => r.querySelectorAll('td').length === 6), 'sem colunas Faixa/Sinal (dBm) separadas');
-  ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Cliente' || x.textContent === 'CTO'), 'Cliente e CTO ocultas por padrao');
+  ok(!tcs.qa('#rf-table thead th').some(x => x.textContent === 'Faixa' || x.textContent === 'Sinal (dBm)') && tcs.qa('.rf-row--onu').every(r => r.querySelectorAll('td').length === 8), 'sem colunas Faixa/Sinal (dBm) separadas');
+  ok(tcs.qa('#rf-table thead th').filter(x => x.textContent === 'Cliente' || x.textContent === 'CTO').length === 2, 'Cliente e CTO visiveis por padrao');
   // CP-1 (offline) e CP-2 (ordenacao)
   const cOff = rows0[2].querySelectorAll('td')[2], fOff = cOff.querySelector('.rf-signal__fill');
   ok(cOff.textContent === 'último: -21,00 dBm' && !cOff.querySelector('.rf-pill') && fOff.className.indexOf('rf-fill--unknown') !== -1 && fOff.style.width === '0%' && cOff.querySelector('.rf-signal__val').classList.contains('rf-signal__val--stale') && !cOff.hasAttribute('data-sort-value'), 'ONU offline: barra cinza (sem preenchimento de faixa), "último: -21,00 dBm" apagado, sem pilula e sem valor de ordenacao');
@@ -304,16 +304,28 @@ async function boot(opts) {
   const sh = await boot({tree: sortTree, storage: {'rf.sort': '{"k":"sinal","d":"asc"}', 'rf.cols': JSON.stringify(['status', 'mac'])}});
   ok(order(sh) === '1|2|3|4|5', 'ordenacao por coluna oculta e ignorada');
   // Migracao da preferencia salva
-  const mig = async (saved) => { const b = await boot({storage: {'rf.cols': saved}}); return {heads: b.qa('#rf-table thead th').map(x => x.textContent).join('|'), stored: b.w.localStorage.getItem('rf.cols'), errs: b.errs}; };
+  const mig = async (saved, extra) => { const b = await boot({storage: Object.assign({'rf.cols': saved, 'rf.cols.vinc': '1'}, extra || {})}); return {heads: b.qa('#rf-table thead th').map(x => x.textContent).join('|'), stored: b.w.localStorage.getItem('rf.cols'), errs: b.errs}; };
   const mg1 = await mig(JSON.stringify(['status', 'rx', 'band', 'dist', 'cliente', 'cto', 'quedas', 'mac']));
   ok(mg1.heads === 'ONU|Estado|Sinal|Distância|Cliente|CTO|Quedas 24 h|MAC' && mg1.stored === JSON.stringify(['status', 'sinal', 'dist', 'cliente', 'cto', 'quedas', 'mac']) && mg1.errs.length === 0, 'migracao: rx+band viram uma coluna Sinal (preferencia de Cliente/CTO mantida) e a preferencia e regravada: ' + mg1.heads);
   const mg2 = await mig(JSON.stringify(['status', 'band', 'mac']));
   ok(mg2.heads === 'ONU|Estado|Sinal|MAC', 'migracao: quem tinha so Faixa visivel passa a ver Sinal');
   const mg3 = await mig(JSON.stringify(['status', 'mac']));
   ok(mg3.heads === 'ONU|Estado|MAC', 'migracao: quem nao tinha Sinal nem Faixa continua sem Sinal');
-  const mg4 = await mig('{isso nao e json'); ok(mg4.heads === 'ONU|Estado|Sinal|Distância|Quedas 24 h|MAC' && mg4.errs.length === 0, 'preferencia corrompida: usa o padrao sem erro');
+  const mg4 = await mig('{isso nao e json'); ok(mg4.heads === 'ONU|Estado|Sinal|Distância|Cliente|CTO|Quedas 24 h|MAC' && mg4.errs.length === 0, 'preferencia corrompida: usa o padrao sem erro');
   const mg5 = await mig(JSON.stringify(['status', 'rx', 'xyz', 'sinal'])); ok(mg5.heads === 'ONU|Estado|Sinal', 'migracao: chave desconhecida descartada e sem Sinal duplicado');
   const mgnew = await mig(JSON.stringify(['status', 'sinal', 'cliente'])); ok(mgnew.heads === 'ONU|Estado|Sinal|Cliente', 'preferencia ja no formato novo permanece');
+  // Migracao unica "mostrar Cliente e CTO" (decisao do usuario, 2026-11-19): preferencia salva sem a marca rf.cols.vinc
+  const vm = await boot({storage: {'rf.cols': JSON.stringify(['status', 'sinal', 'mac'])}});
+  ok(vm.qa('#rf-table thead th').map(x => x.textContent).join('|') === 'ONU|Estado|Sinal|Cliente|CTO|MAC' && vm.w.localStorage.getItem('rf.cols') === JSON.stringify(['status', 'sinal', 'mac', 'cliente', 'cto']) && vm.w.localStorage.getItem('rf.cols.vinc') === '1' && vm.errs.length === 0, 'migracao unica: preferencia antiga sem Cliente/CTO passa a mostra-las e grava a marca');
+  const vmBoxes = vm.qa('#rf-cols-list input'), vmCli = vmBoxes[5]; vmCli.checked = false; vm.ev(vmCli, 'change');
+  ok(JSON.parse(vm.w.localStorage.getItem('rf.cols')).indexOf('cliente') === -1, 'depois da migracao o usuario pode ocultar Cliente de novo');
+  const vm2 = await boot({storage: {'rf.cols': vm.w.localStorage.getItem('rf.cols'), 'rf.cols.vinc': vm.w.localStorage.getItem('rf.cols.vinc')}});
+  ok(vm2.qa('#rf-table thead th').map(x => x.textContent).join('|') === 'ONU|Estado|Sinal|CTO|MAC', 'escolha posterior respeitada: Cliente continua oculta na proxima visita');
+  const vm3 = await boot({storage: {'rf.cols': JSON.stringify(['status', 'rx', 'cto'])}});
+  ok(vm3.qa('#rf-table thead th').map(x => x.textContent).join('|') === 'ONU|Estado|Sinal|Cliente|CTO' && vm3.w.localStorage.getItem('rf.cols') === JSON.stringify(['status', 'sinal', 'cto', 'cliente']), 'migracao unica combinada com a antiga (rx vira Sinal) e sem CTO duplicada');
+  const vm4 = await boot(); const vm4b = vm4.qa('#rf-cols-list input'); vm4b[6].checked = false; vm4.ev(vm4b[6], 'change');
+  const vm5 = await boot({storage: {'rf.cols': vm4.w.localStorage.getItem('rf.cols'), 'rf.cols.vinc': vm4.w.localStorage.getItem('rf.cols.vinc')}});
+  ok(vm4.w.localStorage.getItem('rf.cols.vinc') === '1' && vm5.qa('#rf-table thead th').every(x => x.textContent !== 'CTO'), 'sem preferencia anterior: ocultar CTO grava a marca e a escolha e respeitada (sem reaparecer)');
 
   // CP-3: escala da regua nas posicoes reais e rotulos sem sobreposicao
   const rulerOf = async (now, med, ref) => { const sh = sheet(); sh.onu.rx_dbm = now; sh.vizinhos.mediana_dbm = med; sh.onu.baseline_dbm = ref; const b = await boot({sheet: () => sh}); b.q('.rf-row--onu').click(); await wait(40); return b; };
