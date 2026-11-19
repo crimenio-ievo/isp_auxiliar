@@ -5,6 +5,9 @@
   var app = document.getElementById('rf-app');
   if (!app) { return; }
   var API = { tree: app.dataset.apiTree, onu: app.dataset.apiOnu, events: app.dataset.apiEvents };
+  var URLS = { client: app.dataset.clientUrl || '', cto: app.dataset.ctoUrl || '' };
+  function clientLink(c) { var a = el('a', '', c.nome || c.login); a.href = URLS.client + '?login=' + encodeURIComponent(c.login); a.title = 'Abrir o perfil do cliente'; a.addEventListener('click', function (e) { e.stopPropagation(); }); return a; }
+  function ctoLink(c, text) { var a = el('a', '', text || c.nome); a.href = URLS.cto + '?id=' + encodeURIComponent(c.id); a.title = 'Abrir a ficha da CTO'; a.addEventListener('click', function (e) { e.stopPropagation(); }); return a; }
   var $ = function (id) { return document.getElementById(id); };
   var NS = 'http://www.w3.org/2000/svg';
   var YMIN = -30, YMAX = -12;
@@ -13,7 +16,7 @@
     { k: 'temp', l: 'Temp. (°C)' }, { k: 'dist', l: 'Distância' }, { k: 'cliente', l: 'Cliente' }, { k: 'cto', l: 'CTO' },
     { k: 'quedas', l: 'Quedas 24 h' }, { k: 'mac', l: 'MAC' }
   ];
-  // Cliente e CTO ficam ocultas por padrão: ainda não existe o vínculo ONU↔cliente↔CTO (continuam no seletor de colunas).
+  // Cliente e CTO vêm do vínculo ONU↔cliente↔CTO (client_network_bindings) e continuam ocultas por padrão (decisão anterior do usuário), ligáveis em Colunas.
   var DEFAULT_COLS = ['status', 'sinal', 'dist', 'quedas', 'mac'];
   var COUNT_LABEL = { ok: 'normal', atencao: 'atenção', critico: 'crítico', offline: 'offline' };
   var BAND = { ok: 'Normal', atencao: 'Atenção', critico: 'Crítico', saturado: 'Saturado', unknown: 'Sem leitura' };
@@ -190,8 +193,11 @@
     else if (k === 'tx') { td.textContent = o.tx_dbm === null ? 'sem leitura' : o.tx_dbm.toFixed(2); }
     else if (k === 'temp') { td.textContent = o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1); }
     else if (k === 'dist') { td.textContent = o.distancia_m === null ? '—' : '≈ ' + (o.distancia_m / 1000).toFixed(2) + ' km'; if (o.distancia_origem) { td.title = o.distancia_origem; } }
-    else if (k === 'cliente') { td.textContent = o.cliente === null ? 'sem vínculo' : String(o.cliente); if (o.cliente === null) { td.className = 'rf-muted'; } }
-    else if (k === 'cto') { td.textContent = o.cto === null ? 'ainda não lido' : String(o.cto); if (o.cto === null) { td.className = 'rf-muted'; } }
+    else if (k === 'cliente') { if (o.cliente === null) { td.textContent = 'sem vínculo'; td.className = 'rf-muted'; } else { td.appendChild(clientLink(o.cliente)); } }
+    else if (k === 'cto') {
+      if (o.cto === null) { td.textContent = state.tree.fontes.cto ? 'sem CTO' : 'ainda não lido'; td.className = 'rf-muted'; }
+      else { td.appendChild(ctoLink(o.cto, o.cto.nome + (o.cto.porta ? ' · ' + o.cto.porta : ''))); }
+    }
     else if (k === 'quedas') { td.textContent = o.quedas_24h > 0 ? String(o.quedas_24h) : '0'; if (o.quedas_24h > 0) { td.appendChild(el('span', 'rf-muted', ' · ' + fmtDT(o.ultima_queda_em))); } }
     else if (k === 'mac') { td.textContent = o.mac; }
     return td;
@@ -268,14 +274,34 @@
           ptd.appendChild(pb); ptd.appendChild(el('span', 'rf-muted', '  · ' + r.p.online + ' online de ' + r.p.total + ' ONU(s)'));
           decorateGroup(ptr,ptd,pk,r.p.onus,{kind:'pon',pon:r.p,device:d}); ptr.appendChild(ptd); body.appendChild(ptr);
           if (state.collapsed[pk]) { return; }
-          sortOnus(r.onus, cols).forEach(function (o) {
-            var otr = el('tr', 'rf-row rf-row--onu' + (state.selected === o.id ? ' is-selected' : '')); otr.tabIndex = 0; otr.dataset.onu = String(o.id);
-            otr.appendChild(el('td', '', 'ONU ' + o.onu_index));
-            cols.forEach(function (c) { otr.appendChild(cell(o, c.k)); });
-            var open = function () { state.group=null; openSheet(o.id); };
-            otr.addEventListener('click', open);
-            otr.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
-            body.appendChild(otr); shown++;
+          // Nível CTO entre PON e ONU (só quando há vínculos disponíveis): ONUs sem vínculo ficam em "sem CTO".
+          var sorted = sortOnus(r.onus, cols), withCto = !!state.tree.fontes.cto, buckets = [];
+          if (withCto) {
+            var bi = {};
+            sorted.forEach(function (o) { var id = o.cto ? o.cto.id : 0; if (bi[id] === undefined) { bi[id] = buckets.length; buckets.push({ id: id, cto: o.cto, onus: [] }); } buckets[bi[id]].onus.push(o); });
+            buckets.sort(function (a, b) { return a.id === 0 ? 1 : b.id === 0 ? -1 : String(a.cto.nome).localeCompare(String(b.cto.nome), 'pt-BR'); });
+          } else { buckets.push({ id: -1, cto: null, onus: sorted }); }
+          buckets.forEach(function (bk) {
+            var ck = pk + 'c' + bk.id;
+            if (withCto) {
+              var ctr = el('tr', 'rf-row rf-row--cto'), ctd = el('td'); ctd.colSpan = span;
+              var cb = el('button', 'rf-toggle', bk.cto ? 'CTO' : 'sem CTO'); cb.type = 'button'; cb.setAttribute('aria-expanded', String(!state.collapsed[ck]));
+              cb.addEventListener('click', function (e) { e.stopPropagation(); state.collapsed[ck] = !state.collapsed[ck]; renderTree(); });
+              ctd.appendChild(cb);
+              if (bk.cto) { ctd.appendChild(document.createTextNode(' ')); ctd.appendChild(ctoLink(bk.cto)); }
+              ctd.appendChild(el('span', 'rf-muted', '  · ' + bk.onus.length + ' ONU(s)'));
+              ctr.appendChild(ctd); body.appendChild(ctr);
+              if (state.collapsed[ck]) { return; }
+            }
+            bk.onus.forEach(function (o) {
+              var otr = el('tr', 'rf-row rf-row--onu' + (withCto ? ' rf-row--onu-c' : '') + (state.selected === o.id ? ' is-selected' : '')); otr.tabIndex = 0; otr.dataset.onu = String(o.id);
+              otr.appendChild(el('td', '', 'ONU ' + o.onu_index));
+              cols.forEach(function (c) { otr.appendChild(cell(o, c.k)); });
+              var open = function () { state.group=null; openSheet(o.id); };
+              otr.addEventListener('click', open);
+              otr.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+              body.appendChild(otr); shown++;
+            });
           });
         });
       });
@@ -287,7 +313,7 @@
     renderHealth();
     var notes = [];
     if (!state.tree.fontes.quedas_log) { notes.push('Quedas do log da OLT ainda não importadas: as quedas abaixo vêm só da coleta (hora aproximada, sem motivo).'); }
-    notes.push('Cliente vinculado e CTO ainda não são lidos (sem vínculo cadastrado).');
+    if (!state.tree.fontes.vinculo_cliente) { notes.push('Cliente vinculado e CTO ainda não são lidos (a tabela de vínculos ainda não existe neste ambiente).'); }
     $('rf-note').textContent = notes.join(' '); $('rf-note').hidden = false;
   }
   /* Aviso de saúde da coleta (vem do servidor: ok, atrasada, falha ou sem_leitura). Não afirma a causa. */
@@ -406,7 +432,9 @@
     row('Mediana dos vizinhos', d.vizinhos.mediana_dbm === null ? 'sem vizinhos com leitura' : dbm(d.vizinhos.mediana_dbm) + ' (' + d.vizinhos.quantidade + ' ONUs' + (d.vizinhos.diferenca_db === null ? '' : ', diferença ' + (d.vizinhos.diferenca_db > 0 ? '+' : '') + num(d.vizinhos.diferenca_db, 2) + ' dB') + ')');
     row('Tx da ONU', dbm(o.tx_dbm)); row('Temperatura', o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1) + ' °C');
     row('Distância', o.distancia_m === null ? '—' : '≈ ' + num(o.distancia_m / 1000, 2) + ' km (estimada pelo RTT)');
-    row('Sinal recebido na OLT', d.onu.olt_rx_texto); row('Cliente', d.cliente_texto); row('CTO', d.cto_texto);
+    row('Sinal recebido na OLT', d.onu.olt_rx_texto);
+    g.appendChild(el('dt', '', 'Cliente')); var ddc = el('dd'); if (d.cliente) { ddc.appendChild(clientLink(d.cliente)); } else { ddc.textContent = d.cliente_texto; } g.appendChild(ddc);
+    g.appendChild(el('dt', '', 'CTO')); var ddt = el('dd'); if (d.cto) { ddt.appendChild(ctoLink(d.cto, d.cto_texto)); } else { ddt.textContent = d.cto_texto; } g.appendChild(ddt);
     row('Última leitura', fmtDT(o.rx_medido_em));
     body.appendChild(g);
 

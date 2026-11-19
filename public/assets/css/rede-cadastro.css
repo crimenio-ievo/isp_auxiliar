@@ -67,3 +67,15 @@
   .rc-table--static td::before { display: none; }
   #ct-preview .rc-tablewrap { overflow: auto; }
 }
+
+/* Ficha da CTO / vinculos */
+.rc-results { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.rc-result { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; font-size: 0.9rem; }
+.rc-result:hover, .rc-result:focus-visible { background: var(--surface-muted); outline: 2px solid var(--primary); outline-offset: -2px; }
+.rc-chip { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--rf-warn-bg); color: var(--rf-warn-ink); font-size: 0.76rem; font-weight: 700; }
+.rc-conf--alta { background: var(--rf-online-bg); color: var(--rf-online-ink); }
+.rc-conf--media { background: var(--rf-warn-bg); color: var(--rf-warn-ink); }
+.rc-conf--baixa { background: var(--rf-none-bg); color: var(--rf-none-ink); }
+.rc-cands { display: grid; gap: 8px; }
+.rc-cand { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 6px 0; }
+.rc-cand + .rc-cand { border-top: 1px solid var(--border); }

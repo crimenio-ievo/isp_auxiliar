@@ -171,9 +171,9 @@ final class MapController
             return Response::json([
                 'ok' => false,
                 'message' => ($before['node_type'] === 'splitter' ? 'Não é possível trocar a razão do splitter: ' : 'Não é possível reduzir as portas: ') . implode(', ', array_map(
-                    static fn (array $b): string => $b['label'] . ' (ligação #' . $b['link_id'] . ')',
+                    static fn (array $b): string => $b['label'] . (isset($b['cliente']) ? ' (cliente ' . $b['cliente'] . ')' : ' (ligação #' . $b['link_id'] . ')'),
                     $portChanges['busy']
-                )) . ' estão em uso. Remova as ligações antes.',
+                )) . ' estão em uso. Remova as ligações e os vínculos de cliente antes.',
                 'busy_ports' => $portChanges['busy'],
             ], 409, ['Cache-Control' => 'private, no-store']);
         }
@@ -212,11 +212,12 @@ final class MapController
         }
 
         $blockers = $this->mapRepository->deleteBlockers($providerId, $id);
-        if ($blockers['children'] !== [] || $blockers['links'] !== []) {
+        if ($blockers['children'] !== [] || $blockers['links'] !== [] || $blockers['clients'] !== []) {
             return Response::json([
                 'ok' => false,
                 'message' => 'Não é possível excluir "' . $node['name'] . '": ' . count($blockers['children']) . ' elemento(s) filho(s) e '
-                    . count($blockers['links']) . ' ligação(ões) dependem dele.',
+                    . count($blockers['links']) . ' ligação(ões) dependem dele'
+                    . ($blockers['clients'] !== [] ? ' e ' . count($blockers['clients']) . ' cliente(s) estão vinculados a ele' : '') . '.',
                 'blockers' => $blockers,
             ], 409, ['Cache-Control' => 'private, no-store']);
         }
@@ -504,6 +505,8 @@ final class MapController
                     $using = $this->mapRepository->linkUsingPort($providerId, (int) $port['id']);
                     if ($using !== null) {
                         $out['busy'][] = ['id' => $port['id'], 'label' => $port['label'], 'link_id' => $using['id']];
+                    } elseif (($client = $this->mapRepository->activeBindingOnPort($providerId, (int) $port['id'])) !== null) {
+                        $out['busy'][] = ['id' => $port['id'], 'label' => $port['label'], 'link_id' => null, 'cliente' => $client['mkauth_login']];
                     }
                     $out['remove'][] = $port;
                 }
@@ -1268,7 +1271,7 @@ final class MapController
 
         $focus = $request->query('no');
         $config = json_encode(
-            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
+            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'ctoFicha' => Url::to('/rede-ctos/ficha'), 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
             JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
         );
         $html = preg_replace('#</head>#i', '<script>window.ISP_MAP=' . $config . ';</script></head>', $html, 1) ?? $html;

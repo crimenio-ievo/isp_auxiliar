@@ -33,7 +33,7 @@ const posts=c=>c.filter(x=>x.o&&x.o.method==='POST');
   check(D.querySelectorAll('#ct-table tbody tr').length===3,'tecnico ve as 3 CTOs');
   check(!D.getElementById('ct-form')&&!D.getElementById('ct-new')&&!D.getElementById('ct-import-open'),'tecnico: sem formulario, nova CTO nem importar');
   const btns=[...D.querySelectorAll('#ct-table tbody button')];check(btns.length===0,'tecnico: sem Editar/Excluir');
-  check([...D.querySelectorAll('#ct-table tbody a')].every(a=>/^\/mapa\?no=\d+$/.test(a.getAttribute('href'))),'tecnico: "Ver no mapa" com ?no=ID');
+  check([...D.querySelectorAll('#ct-table tbody a')].every(a=>/^\/(mapa\?no|rede-ctos\/ficha\?id)=\d+$/.test(a.getAttribute('href')))&&D.querySelectorAll('#ct-table tbody a').length===6,'tecnico: so links "Ficha" e "Ver no mapa" (?id= / ?no=)');
   check(D.querySelectorAll('.rc-tab').length===1&&D.querySelector('.rc-tab').textContent==='CTOs','tecnico: so a aba CTOs');
   D.getElementById('ct-filter').value='pop';D.getElementById('ct-filter').dispatchEvent(new t.w.Event('input'));
   check(D.querySelectorAll('#ct-table tbody tr').length===1&&D.getElementById('ct-summary').textContent.includes('1 na busca'),'filtro por origem');
@@ -51,7 +51,7 @@ const posts=c=>c.filter(x=>x.o&&x.o.method==='POST');
  check(rows()[2].textContent.includes('1')&&!rows()[2].textContent.includes('ainda não lido'),'cliente vinculado mostrado quando existe');
  check(rows()[1].classList.contains('rc-focus'),'?cto=2 destaca a linha');
  check(D.getElementById('ct-summary').textContent==='3 CTO(s) · 5 de 32 portas ocupadas','resumo');
- check(btn(rows()[0],'Ver no mapa').getAttribute('href')==='/mapa?no=1','ver no mapa');
+ check(btn(rows()[0],'Ver no mapa').getAttribute('href')==='/mapa?no=1'&&btn(rows()[0],'Ficha').getAttribute('href')==='/rede-ctos/ficha?id=1','ver no mapa e ficha');
  // formulario e coordenadas
  D.getElementById('ct-new').click();const f=D.getElementById('ct-form');
  check(!D.getElementById('ct-form-card').hidden&&D.getElementById('ct-form-title').textContent==='Nova CTO','abre formulario');

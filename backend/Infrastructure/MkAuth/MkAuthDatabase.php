@@ -907,6 +907,59 @@ final class MkAuthDatabase implements ClientPlanReadRepository
         return (int) $this->connection()->lastInsertId();
     }
 
+    /**
+     * SOMENTE LEITURA (SELECT): ultimo caller-id (callingstationid) de cada login ativo com sessao na janela de $days dias,
+     * contada a partir do registro MAIS RECENTE do radacct (o clone de teste pode estar parado). Usado so para sugerir
+     * vinculos ONU<->cliente pelo MAC; nada e gravado.
+     *
+     * @return array{referencia: ?string, inicio: ?string, callers: array<string, string>}
+     */
+    public function recentCallerMacs(int $days = 30): array
+    {
+        $days = max(1, min(365, $days));
+        $reference = $this->connection()->query('SELECT MAX(acctstarttime) FROM radacct')->fetchColumn();
+        if (!is_string($reference) || $reference === '') {
+            return ['referencia' => null, 'inicio' => null, 'callers' => []];
+        }
+        $from = date('Y-m-d H:i:s', (int) strtotime($reference) - $days * 86400);
+        $rows = $this->fetchAll(
+            "SELECT r.username, r.callingstationid
+               FROM radacct r
+               JOIN (SELECT username, MAX(radacctid) AS id FROM radacct WHERE acctstarttime >= :f GROUP BY username) x ON x.id = r.radacctid
+               JOIN sis_cliente c ON c.login = r.username
+              WHERE LOWER(TRIM(c.cli_ativado)) IN ('s','sim')",
+            ['f' => $from]
+        );
+        $callers = [];
+        foreach ($rows as $row) {
+            $callers[(string) $row['username']] = (string) $row['callingstationid'];
+        }
+
+        return ['referencia' => $reference, 'inicio' => $from, 'callers' => $callers];
+    }
+
+    /**
+     * SOMENTE LEITURA (SELECT): nome de cada login (chave em minusculas), em lotes.
+     *
+     * @param list<string> $logins
+     * @return array<string, string>
+     */
+    public function clientNamesByLogins(array $logins): array
+    {
+        $logins = array_values(array_unique(array_filter(array_map(static fn ($l): string => trim((string) $l), $logins), static fn (string $l): bool => $l !== '')));
+        $out = [];
+        foreach (array_chunk($logins, 200) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $statement = $this->connection()->prepare("SELECT login, nome FROM sis_cliente WHERE login IN ({$marks})");
+            $statement->execute($chunk);
+            foreach ($statement->fetchAll() as $row) {
+                $out[strtolower((string) $row['login'])] = trim((string) $row['nome']);
+            }
+        }
+
+        return $out;
+    }
+
     private function connection(): PDO
     {
         if ($this->pdo instanceof PDO) {

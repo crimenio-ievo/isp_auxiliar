@@ -36,6 +36,7 @@ final class NetFiberReader
         $limits = $this->limits($providerId, $store);
         $reader = $this->outageReader($logAvailable);
         $period = $reader->period('24h');
+        $bindings = new NetBindingRepository($this->pdo);
 
         $sql = 'SELECT d.id, d.map_node_id, d.enabled, d.status_interval_s, n.name, n.node_type, n.parent_node_id, n.attrs_json, d.mgmt_host,
                        st.name AS site_name, st.node_type AS site_type, pr.technology, ps.last_attempt_at, ps.last_success_at, ps.last_result
@@ -62,8 +63,11 @@ final class NetFiberReader
             foreach ($p->fetchAll(PDO::FETCH_ASSOC) as $port) {
                 $pons[(int) $port['port_num']] = ['pon_index' => (int) $port['port_num'], 'label' => (string) ($port['label'] ?: 'PON ' . $port['port_num']), 'onus' => []];
             }
-            foreach ($this->onuRows($id) as $r) {
+            $deviceRows = $this->onuRows($id);
+            $links = $bindings->forOnus($providerId, array_map(static fn (array $r): int => (int) $r['id'], $deviceRows));
+            foreach ($deviceRows as $r) {
                 $onu = $this->onuItem($r, $limits, $now);
+                $this->applyBinding($onu, $links[$onu['id']] ?? null);
                 $onu['quedas_24h'] = $down[$onu['id']]['n'] ?? 0;
                 $onu['ultima_queda_em'] = $down[$onu['id']]['last'] ?? null;
                 $pi = (int) $r['pon_index'];
@@ -76,7 +80,7 @@ final class NetFiberReader
                 }
                 $sum['sem_sinal'] += $onu['rx_dbm'] === null ? 1 : 0;
                 $sum['quedas_24h'] += $onu['quedas_24h'] > 0 ? 1 : 0;
-                $sum['sem_vinculo']++; // não há tabela de vínculo ONU->cliente ainda
+                $sum['sem_vinculo'] += $onu['cliente'] === null ? 1 : 0;
                 $sum['sem_resposta'] += $onu['desatualizado'] ? 1 : 0;
             }
             ksort($pons);
@@ -102,7 +106,7 @@ final class NetFiberReader
             'dispositivos' => $devices,
             'resumo' => $sum,
             'limiares' => $limits,
-            'fontes' => ['quedas_poll' => true, 'quedas_log' => $logAvailable, 'vinculo_cliente' => false, 'cto' => false, 'sinal_na_olt' => false],
+            'fontes' => ['quedas_poll' => true, 'quedas_log' => $logAvailable, 'vinculo_cliente' => $bindings->available(), 'cto' => $bindings->available(), 'sinal_na_olt' => false],
         ];
     }
 
@@ -186,6 +190,8 @@ final class NetFiberReader
         $store = new PdoNetStore($this->pdo);
         $limits = $this->limits($providerId, $store);
         $onu = $this->onuItem($row, $limits, $now);
+        $bindings = new NetBindingRepository($this->pdo);
+        $this->applyBinding($onu, $bindings->forOnus($providerId, [$onuId])[$onuId] ?? null);
         $deviceId = (int) $row['device_id'];
 
         // Mediana dos vizinhos da PON (outras ONUs online com leitura), sem a própria ONU.
@@ -233,9 +239,23 @@ final class NetFiberReader
             'estavel_texto' => $rep['totals']['quedas'] === 0 ? 'Sem queda registrada no período (estável).' : null,
             'limiares' => $limits,
             'fontes' => ['quedas_poll' => true, 'quedas_log' => $logAvailable],
-            'cliente' => null, 'cliente_texto' => 'sem vínculo',
-            'cto' => null, 'cto_texto' => 'ainda não lido',
+            'cliente' => $onu['cliente'],
+            'cliente_texto' => $onu['cliente'] === null ? 'sem vínculo' : ($onu['cliente']['nome'] ?? $onu['cliente']['login']),
+            'cto' => $onu['cto'],
+            'cto_texto' => $onu['cto'] === null ? ($bindings->available() ? 'sem CTO' : 'ainda não lido') : $onu['cto']['nome'] . ($onu['cto']['porta'] !== null ? ' · ' . $onu['cto']['porta'] : ''),
         ];
+    }
+
+    /**
+     * Preenche cliente/CTO da ONU a partir do vinculo ativo (client_network_bindings). Sem vinculo: null.
+     *
+     * @param array<string,mixed> $onu
+     * @param array<string,mixed>|null $b
+     */
+    private function applyBinding(array &$onu, ?array $b): void
+    {
+        $onu['cliente'] = $b === null ? null : ['login' => (string) $b['mkauth_login'], 'nome' => $b['cliente_nome'] === null ? null : (string) $b['cliente_nome']];
+        $onu['cto'] = $b === null || $b['cto_node_id'] === null ? null : ['id' => (int) $b['cto_node_id'], 'nome' => (string) $b['cto_nome'], 'porta' => $b['porta_rotulo'] === null ? null : (string) $b['porta_rotulo']];
     }
 
     /** @return array<string,mixed> */

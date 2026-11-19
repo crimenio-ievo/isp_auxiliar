@@ -30,6 +30,8 @@ use App\Infrastructure\MkAuth\MkAuthClient;
 use App\Infrastructure\MkAuth\MkAuthTicketService;
 use App\Infrastructure\MkAuth\MkAuthWriteGuard;
 use App\Infrastructure\MkAuth\TechnologyMapper;
+use App\Infrastructure\Net\ClientDirectory;
+use App\Infrastructure\Net\MkAuthClientDirectory;
 use App\Infrastructure\Net\NetConnectionTester;
 use App\Infrastructure\Net\NetDeviceLock;
 use App\Infrastructure\Processes\OperationalProcessRepository;
@@ -235,6 +237,7 @@ function bootstrapApplication(): Application
         $container->get(FinancialTaskRepository::class)
     ));
 
+    $container->set(ClientDirectory::class, new MkAuthClientDirectory($container->get(MkAuthDatabase::class)));
     $container->set(NetConnectionTester::class, new NetConnectionTester(new NetDeviceLock($rootPath . '/tmp')));
 
     $router = new Router();

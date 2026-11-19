@@ -24,7 +24,9 @@ ob_start();
 <div class="rf" id="rf-app"
      data-api-tree="<?= $e(Url::to('/api/rede-fibra')); ?>"
      data-api-onu="<?= $e(Url::to('/api/rede-fibra/onu')); ?>"
-     data-api-events="<?= $e(Url::to('/api/rede-fibra/eventos')); ?>">
+     data-api-events="<?= $e(Url::to('/api/rede-fibra/eventos')); ?>"
+     data-client-url="<?= $e(Url::to('/clientes/detalhe')); ?>"
+     data-cto-url="<?= $e(Url::to('/rede-ctos/ficha')); ?>">
 
     <section class="card rf-filters" aria-label="Filtros">
         <label class="rf-field"><span>Site</span><select id="rf-f-site"><option value="">Todos</option></select></label>

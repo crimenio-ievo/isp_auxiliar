@@ -29,6 +29,7 @@ ob_start();
      data-api-delete="<?= $e(Url::to('/api/rede-ctos/excluir')); ?>"
      data-api-import="<?= $e(Url::to('/api/rede-ctos/importar')); ?>"
      data-map-url="<?= $e(Url::to('/mapa')); ?>"
+     data-ficha-url="<?= $e(Url::to('/rede-ctos/ficha')); ?>"
      data-can-edit="<?= $canEdit ? '1' : '0'; ?>"
      data-focus="<?= $e((string) ($focusCto ?? '')); ?>"
      data-csrf="<?= $e((string) ($csrf ?? '')); ?>">

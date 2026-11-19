@@ -168,12 +168,12 @@ try {
     $check($r->status() === 200 && $link['link_type'] === 'backbone' && (int) $link['from_node_id'] === 42 && (int) $link['from_port_id'] === $pon1 && $link['to_port_id'] !== null, 'origem PON cria backbone OLT/PON -> primeira porta livre da CTO');
     $check($post('save', ['nome' => 'CTO-PON2', 'coordenadas' => '-20.78, -42.68', 'capacidade' => '8', 'origem' => "pon:$pon1"])->status() === 422, 'PON ja ligada nao pode ser origem de outra CTO');
     $row = array_values(array_filter($json($get('list'))['data']['ctos'], static fn (array $c): bool => $c['nome'] === 'CTO-PON'))[0];
-    $check($row['origem'] === 'OLT-T · PON 1' && $row['portas'] === ['total' => 8, 'ocupadas' => 1, 'livres' => 7, 'em_ligacao' => 1, 'com_cliente' => 0] && $row['capacidade'] === 8 && $row['clientes'] === null, 'lista: origem OLT · PON, portas 1 ocupada/7 livres, clientes "ainda nao lido" (null)');
+    $check($row['origem'] === 'OLT-T · PON 1' && $row['portas'] === ['total' => 8, 'ocupadas' => 1, 'livres' => 7, 'indisponiveis' => 0, 'em_ligacao' => 1, 'com_cliente' => 0] && $row['capacidade'] === 8 && $row['clientes'] === 0, 'lista: origem OLT · PON, portas 1 ocupada/7 livres, 0 clientes (tabela de vinculos existe)');
     $rowSite = array_values(array_filter($json($get('list'))['data']['ctos'], static fn (array $c): bool => $c['nome'] === 'CTO-SITE'))[0];
     $check($rowSite['origem'] === 'POP-T', 'origem pelo site');
     $d = $json($get('list'))['data'];
     $check(!in_array('CTO-DE-OUTRO', array_column(array_filter($d['ctos'], static fn (array $c): bool => $c['id'] === 70), 'nome'), true) && count(array_filter($d['ctos'], static fn (array $c): bool => $c['id'] === 70)) === 0, 'lista nao traz CTO de outro provedor');
-    $check($d['origens']['pons'][0]['livre'] === false && $d['origens']['pons'][1]['livre'] === true && $d['origens']['sites'][0]['nome'] === 'POP-T' && $d['vinculos_disponiveis'] === false, 'opcoes de origem (PON 1 usada, PON 2 livre) e vinculos ainda indisponiveis');
+    $check($d['origens']['pons'][0]['livre'] === false && $d['origens']['pons'][1]['livre'] === true && $d['origens']['sites'][0]['nome'] === 'POP-T' && $d['vinculos_disponiveis'] === true, 'opcoes de origem (PON 1 usada, PON 2 livre) e vinculos disponiveis');
     $check($post('save', ['id' => (string) $ctoPon, 'origem' => 'site:8'] + $ok + ['nome' => 'CTO-PON'])->status() === 422, 'origem so em CTO sem ligacoes');
 
     // --- Editar ---

@@ -131,10 +131,27 @@ try {
     $s = $t['resumo'];
     $check($s['onus'] === 6 && $s['online'] === 5 && $s['offline'] === 1 && $s['atencao'] === 1 && $s['critico'] === 1 && $s['sem_sinal'] === 1 && $s['quedas_24h'] === 2 && $s['sem_vinculo'] === 6, 'resumo');
     $check($t['limiares'] === ['saturado_dbm' => -8.0, 'atencao_dbm' => -25.0, 'critico_dbm' => -27.0, 'desvio_db' => 3.0], 'limiares atuais (atencao < -25, critico < -27)');
-    $check($t['fontes']['quedas_log'] === true && $t['fontes']['vinculo_cliente'] === false && $t['fontes']['cto'] === false && $t['fontes']['sinal_na_olt'] === false, 'fontes: o que ainda nao existe');
+    $check($t['fontes']['quedas_log'] === true && $t['fontes']['vinculo_cliente'] === true && $t['fontes']['cto'] === true && $t['fontes']['sinal_na_olt'] === false, 'fontes: vinculos existem (migration 045); sinal na OLT ainda nao');
     $json = json_encode($t);
     $check(!str_contains((string) $json, '002EC7000008') && !str_contains((string) $json, 'OLT-OUTRO'), 'isolamento por provedor');
     $check($reader->tree($providerId, 2)['dispositivos'] === [] && count($reader->tree($providerId, 3)['dispositivos']) === 1, 'filtro por equipamento: de outro provedor vazio, do proprio 1');
+
+    // Vinculos (migration 045): cliente e CTO reais na arvore e na ficha; ONU sem vinculo continua null; outro provedor nao vaza.
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,cto_node_id,onu_id,origem,ativo,created_at,updated_at) VALUES ($providerId,'joao','Joao Teste',45,1,'sugestao_mac',1,NOW(),NOW())");
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,onu_id,origem,ativo,created_at,updated_at) VALUES ($providerId,'maria','Maria Teste',3,'manual',1,NOW(),NOW())");
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,onu_id,origem,ativo,created_at,updated_at) VALUES ($other,'zed','Zed Outro',8,'manual',1,NOW(),NOW())");
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,onu_id,origem,ativo,desativado_em,created_at,updated_at) VALUES ($providerId,'antigo','Antigo',2,'manual',0,NOW(),NOW(),NOW())");
+    $tb = $reader->tree($providerId);
+    $po = $tb['dispositivos'][0]['pons'][0]['onus'];
+    $check($po[0]['cliente'] === ['login' => 'joao', 'nome' => 'Joao Teste'] && $po[0]['cto'] === ['id' => 45, 'nome' => 'CTO-TESTE', 'porta' => null], 'ONU vinculada: cliente e CTO reais na arvore');
+    $check($po[1]['cliente'] === null && $po[1]['cto'] === null, 'vinculo inativo nao conta');
+    $check($po[2]['cliente'] === ['login' => 'maria', 'nome' => 'Maria Teste'] && $po[2]['cto'] === null, 'cliente sem CTO: cto null');
+    $check($tb['resumo']['sem_vinculo'] === 4, 'resumo: sem_vinculo conta so ONUs sem cliente (6 - 2)');
+    $check(!str_contains((string) json_encode($tb), 'zed') && !str_contains((string) json_encode($tb), 'Zed'), 'vinculo de outro provedor nao aparece');
+    $f1 = $reader->sheet($providerId, 1); $f2 = $reader->sheet($providerId, 2); $f3 = $reader->sheet($providerId, 3);
+    $check($f1['cliente_texto'] === 'Joao Teste' && $f1['cto_texto'] === 'CTO-TESTE' && $f1['cliente']['login'] === 'joao' && $f1['cto']['id'] === 45 && $f1['onu']['cliente']['login'] === 'joao', 'ficha da ONU vinculada');
+    $check($f2['cliente_texto'] === 'sem vínculo' && $f2['cto_texto'] === 'sem CTO' && $f3['cliente_texto'] === 'Maria Teste' && $f3['cto_texto'] === 'sem CTO', 'ficha: "sem vinculo" e "sem CTO"');
+    $pdo->exec('DELETE FROM client_network_bindings');
 
     // Contrato de chaves da API (o fixture do jsdom em tests/net/rede_fibra.js usa as mesmas listas).
     $sortKeys = static function (string $csv): string { $x = explode(',', $csv); sort($x); return implode(',', $x); };
@@ -156,7 +173,7 @@ try {
     $pts = $f['serie']['pontos'];
     $check(count($pts) === 5 && $pts[0]['rx'] === -19.0 && $pts[0]['anterior'] === true && $pts[0]['t'] === $f['periodo']['from'] && end($pts)['rx'] === -20.0 && array_column($pts, 't') === (function ($c) { sort($c); return $c; })(array_column($pts, 't')), 'serie inclui anterior na borda e amostras do periodo');
     $check(count($f['quedas']) === 1 && $f['quedas'][0]['reason'] === 'Queda de energia (Dying Gasp)' && $f['quedas'][0]['duration_s'] === 600 && $f['estavel'] === false && $f['estavel_texto'] === null, 'ficha: queda do periodo com motivo e duracao');
-    $check($f['cliente'] === null && $f['cliente_texto'] === 'sem vínculo' && $f['cto'] === null && $f['cto_texto'] === 'ainda não lido', 'ficha: cliente e CTO');
+    $check($f['cliente'] === null && $f['cliente_texto'] === 'sem vínculo' && $f['cto'] === null && $f['cto_texto'] === 'sem CTO', 'ficha: sem vinculo = cliente null e "sem CTO"');
     $check(!str_contains(strtolower((string) json_encode($f)), 'fibra'), 'nunca afirma fibra');
     $f1 = $reader->sheet($providerId, 1, '1h');
     $check($f1['serie']['de'] === $f1['periodo']['from'] && $f1['serie']['ate'] === $f1['periodo']['to'] && ($f1['serie']['pontos'][0]['anterior'] ?? false) === true && $f1['serie']['pontos'][0]['t'] === $f1['periodo']['from'], 'serie de 1h inclui anterior na borda');

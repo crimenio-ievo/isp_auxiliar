@@ -1853,6 +1853,12 @@ function renderCeoBody(n){
   `;
 }
 
+/* Ficha da CTO (portas e clientes vinculados) nas telas de rede; so existe quando o servidor informa a URL. */
+function ctoFichaLink(n){
+  const base = (window.ISP_MAP || {}).ctoFicha;
+  if(!base || !n.dbId) return '';
+  return `<div class="section-title">Clientes e portas</div><a class="btn btn-sm" id="btn-cto-ficha" href="${escapeHtml(base)}?id=${n.dbId}">Abrir a ficha da CTO</a>`;
+}
 function renderCTOBody(n){
   const originLink = n.parentLink ? linkById(n.parentLink) : null;
   const origin = originLink ? nodeById(originLink.from) : null;
@@ -1871,6 +1877,7 @@ function renderCTOBody(n){
       {label:'Potência de entrada', value:(Number.isFinite(Number(n.powerIn))&&n.powerIn!==null&&n.powerIn!==''?Number(n.powerIn).toFixed(1):'—')+' dBm'},
       {label:'Clientes', value:clientCount}
     ])}
+    ${ctoFichaLink(n)}
     ${(mCalc||mMed) ? `
     <div class="section-title">Potência — esperada × medida</div>
     <div class="field-grid">

@@ -28,15 +28,31 @@ final class NetCtoRepository
             return [];
         }
 
+        // Por porta: em ligacao do mapa, com cliente ativo ou indisponivel (defeito/reservada). Livre = nenhuma das tres.
+        $boundPorts = [];
+        if ($this->bindingsAvailable()) {
+            $st = $this->pdo->prepare('SELECT cto_port_id FROM client_network_bindings WHERE provider_id = ? AND ativo = 1 AND cto_port_id IS NOT NULL');
+            $st->execute([$providerId]);
+            $boundPorts = array_flip(array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+        }
         $ports = [];
         $st = $this->pdo->prepare(
-            "SELECT p.node_id, COUNT(*) AS total,
-                    SUM(EXISTS(SELECT 1 FROM map_links l WHERE l.provider_id = p.provider_id AND (l.from_port_id = p.id OR l.to_port_id = p.id))) AS em_ligacao
-               FROM map_ports p WHERE p.provider_id = ? AND p.port_role = 'fo' AND p.node_id IN (SELECT id FROM map_nodes WHERE provider_id = ? AND node_type = 'cto') GROUP BY p.node_id"
+            "SELECT p.id, p.node_id, p.status,
+                    EXISTS(SELECT 1 FROM map_links l WHERE l.provider_id = p.provider_id AND (l.from_port_id = p.id OR l.to_port_id = p.id)) AS em_ligacao
+               FROM map_ports p WHERE p.provider_id = ? AND p.port_role = 'fo' AND p.node_id IN (SELECT id FROM map_nodes WHERE provider_id = ? AND node_type = 'cto')"
         );
         $st->execute([$providerId, $providerId]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $ports[(int) $r['node_id']] = ['total' => (int) $r['total'], 'em_ligacao' => (int) $r['em_ligacao']];
+            $nid = (int) $r['node_id'];
+            $ports[$nid] ??= ['total' => 0, 'em_ligacao' => 0, 'com_cliente' => 0, 'indisponiveis' => 0];
+            $ports[$nid]['total']++;
+            if ((int) $r['em_ligacao'] === 1) {
+                $ports[$nid]['em_ligacao']++;
+            } elseif (isset($boundPorts[(int) $r['id']])) {
+                $ports[$nid]['com_cliente']++;
+            } elseif ($r['status'] !== 'livre') {
+                $ports[$nid]['indisponiveis']++;
+            }
         }
         $clients = $this->clientPorts($providerId);
         $origins = $this->origins($providerId);
@@ -48,16 +64,17 @@ final class NetCtoRepository
             $attrs = is_array($attrs) ? $attrs : [];
             $total = $ports[$id]['total'] ?? 0;
             $linked = $ports[$id]['em_ligacao'] ?? 0;
-            $clientPorts = $clients['portas'][$id] ?? 0;
+            $clientPorts = $ports[$id]['com_cliente'] ?? 0;
+            $unavailable = $ports[$id]['indisponiveis'] ?? 0;
             $capacity = isset($attrs['capacity']) && is_numeric($attrs['capacity']) ? (int) $attrs['capacity'] : $total;
-            $used = min($total, $linked + $clientPorts);
+            $used = $linked + $clientPorts;
             $out[] = [
                 'id' => $id,
                 'nome' => (string) $n['name'],
                 'lat' => $n['lat'] === null ? null : (float) $n['lat'],
                 'lng' => $n['lng'] === null ? null : (float) $n['lng'],
                 'capacidade' => $capacity,
-                'portas' => ['total' => $total, 'ocupadas' => $used, 'livres' => max(0, $total - $used), 'em_ligacao' => $linked, 'com_cliente' => $clientPorts],
+                'portas' => ['total' => $total, 'ocupadas' => $used, 'livres' => max(0, $total - $used - $unavailable), 'indisponiveis' => $unavailable, 'em_ligacao' => $linked, 'com_cliente' => $clientPorts],
                 'clientes' => $clients['disponivel'] ? ($clients['clientes'][$id] ?? 0) : null,
                 'origem' => $origins[$id] ?? null,
                 'observacao' => $n['notes'] === null ? '' : (string) $n['notes'],
@@ -66,6 +83,17 @@ final class NetCtoRepository
         }
 
         return $out;
+    }
+
+    private function bindingsAvailable(): bool
+    {
+        try {
+            $this->pdo->query('SELECT id FROM client_network_bindings LIMIT 0');
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /** @return array<string,mixed>|null */

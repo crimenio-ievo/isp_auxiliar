@@ -136,7 +136,7 @@ final class MapRepository
     /**
      * O que impede a exclusão: nós filhos e ligações que usam o nó.
      *
-     * @return array{children: list<array<string, mixed>>, links: list<array<string, mixed>>}
+     * @return array{children: list<array<string, mixed>>, links: list<array<string, mixed>>, clients: list<array<string, mixed>>}
      */
     public function deleteBlockers(int $providerId, int $nodeId): array
     {
@@ -145,6 +145,7 @@ final class MapRepository
         return [
             'children' => $this->fetch($pdo, 'SELECT id, name FROM map_nodes WHERE provider_id = :p AND parent_node_id = :n ORDER BY id', ['p' => $providerId, 'n' => $nodeId]),
             'links' => $this->fetch($pdo, 'SELECT id, label FROM map_links WHERE provider_id = :p AND (from_node_id = :n OR to_node_id = :n2) ORDER BY id', ['p' => $providerId, 'n' => $nodeId, 'n2' => $nodeId]),
+            'clients' => $this->activeBindings($providerId, $nodeId),
         ];
     }
 
@@ -156,8 +157,44 @@ final class MapRepository
         return $this->fetch($this->database->pdo(), 'SELECT * FROM map_ports WHERE provider_id = :p AND node_id = :n ORDER BY id', ['p' => $providerId, 'n' => $nodeId]);
     }
 
+    /**
+     * Clientes com vinculo ATIVO na CTO (client_network_bindings, quando a tabela existe).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function activeBindings(int $providerId, int $nodeId): array
+    {
+        try {
+            return $this->fetch($this->database->pdo(), 'SELECT id, mkauth_login FROM client_network_bindings WHERE provider_id = :p AND cto_node_id = :n AND ativo = 1 ORDER BY id', ['p' => $providerId, 'n' => $nodeId]);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Vinculo ativo na porta (client_network_bindings, quando a tabela existe).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function activeBindingOnPort(int $providerId, int $portId): ?array
+    {
+        try {
+            $rows = $this->fetch($this->database->pdo(), 'SELECT id, mkauth_login, cliente_nome FROM client_network_bindings WHERE provider_id = :p AND cto_port_id = :n AND ativo = 1 LIMIT 1', ['p' => $providerId, 'n' => $portId]);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $rows === [] ? null : $rows[0];
+    }
+
     public function deleteNode(int $providerId, int $nodeId): void
     {
+        // Historico (vinculos desativados) nao pode travar a exclusao da CTO: a trilha fica em audit_logs.
+        try {
+            $this->database->pdo()->prepare('DELETE FROM client_network_bindings WHERE provider_id = :p AND cto_node_id = :n AND ativo = 0')->execute(['p' => $providerId, 'n' => $nodeId]);
+        } catch (\Throwable) {
+            // tabela ainda nao existe neste ambiente
+        }
         $this->database->pdo()
             ->prepare('DELETE FROM map_nodes WHERE id = :id AND provider_id = :provider_id')
             ->execute(['id' => $nodeId, 'provider_id' => $providerId]);
@@ -318,6 +355,11 @@ final class MapRepository
 
     public function deletePort(int $providerId, int $portId): void
     {
+        try {
+            $this->database->pdo()->prepare('UPDATE client_network_bindings SET cto_port_id = NULL WHERE provider_id = :p AND cto_port_id = :id AND ativo = 0')->execute(['id' => $portId, 'p' => $providerId]);
+        } catch (\Throwable) {
+            // tabela ainda nao existe neste ambiente
+        }
         $this->database->pdo()
             ->prepare('DELETE FROM map_ports WHERE id = :id AND provider_id = :p')
             ->execute(['id' => $portId, 'p' => $providerId]);

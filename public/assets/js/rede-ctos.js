@@ -78,6 +78,7 @@
       }
       add(el('td', c.clientes === null ? 'rf-muted' : null, c.clientes === null ? 'ainda não lido' : c.clientes));
       var act = add(el('td')), box = el('div', 'rc-rowactions');
+      var fi = el('a', 'rc-btn', 'Ficha'); fi.href = app.dataset.fichaUrl + '?id=' + c.id; box.appendChild(fi);
       var map = el('a', 'rc-btn', 'Ver no mapa'); map.href = app.dataset.mapUrl + '?no=' + c.id; box.appendChild(map);
       if (CAN_EDIT) {
         var ed = el('button', 'rc-btn', 'Editar'); ed.type = 'button'; ed.addEventListener('click', function () { openForm(c); }); box.appendChild(ed);

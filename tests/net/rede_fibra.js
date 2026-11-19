@@ -352,9 +352,34 @@ async function boot(opts) {
   let g = await boot({status: u => u.indexOf('/onu') !== -1 ? 404 : 0}); g.q('.rf-row--onu').click(); await wait(30);
   ok(g.q('#rf-p-body .rf-note').textContent === 'Acesso negado.' && g.q('#rf-p-title').textContent === 'ONU', 'erro ao abrir a ficha mostra aviso');
 
+  // Vinculos (migration 045): nivel CTO entre PON e ONU, Cliente e CTO reais com link.
+  const vt = await boot({storage: {'rf.cols': JSON.stringify(['status', 'cliente', 'cto'])}, tree: (tr) => {
+    tr.fontes.cto = true; tr.fontes.vinculo_cliente = true; tr.resumo.sem_vinculo = 2;
+    const on = tr.dispositivos[0].pons[0].onus;
+    on[0].cliente = {login: 'joao', nome: 'João <b>Teste</b>'}; on[0].cto = {id: 5, nome: 'CTO-5', porta: 'Porta 3'};
+    on[1].cliente = {login: 'maria', nome: null}; on[1].cto = {id: 5, nome: 'CTO-5', porta: 'Porta 4'};
+    return tr; }});
+  const vrows = vt.qa('.rf-row--pon, .rf-row--cto, .rf-row--onu').map(x => x.className.replace(/rf-row |is-selected/g, '').trim().split(' ')[0]);
+  ok(vrows.join(',') === 'rf-row--pon,rf-row--cto,rf-row--onu,rf-row--onu,rf-row--cto,rf-row--onu,rf-row--pon,rf-row--cto,rf-row--onu,rf-row--pon', 'arvore com nivel CTO: PON > CTO > ONU e "sem CTO" no fim de cada PON: ' + vrows.join(','));
+  const vcto = vt.qa('.rf-row--cto');
+  ok(vcto[0].textContent.indexOf('CTO CTO-5') === 0 && vcto[0].textContent.indexOf('2 ONU(s)') !== -1 && vcto[1].textContent.indexOf('sem CTO') === 0 && vcto[1].textContent.indexOf('1 ONU(s)') !== -1, 'linhas de CTO: nome e contagem; "sem CTO" para as demais');
+  ok(vcto[0].querySelector('a').getAttribute('href') === '/rede-ctos/ficha?id=5', 'CTO com link para a ficha');
+  ok(vt.qa('.rf-row--onu')[0].classList.contains('rf-row--onu-c'), 'ONU sob CTO recuada');
+  const vo = vt.qa('.rf-row--onu')[0];
+  ok(vo.querySelector('a[href="/clientes/detalhe?login=joao"]') && vo.querySelector('a[href="/clientes/detalhe?login=joao"]').textContent === 'João <b>Teste</b>' && !vo.querySelector('b'), 'Cliente: nome como texto, com link para o perfil');
+  ok(vo.querySelector('a[href="/rede-ctos/ficha?id=5"]').textContent === 'CTO-5 · Porta 3', 'coluna CTO: nome e porta com link para a ficha');
+  ok(vt.qa('.rf-row--onu')[1].querySelector('a[href="/clientes/detalhe?login=maria"]').textContent === 'maria', 'sem nome: mostra o login');
+  ok(vt.qa('.rf-row--onu')[2].textContent.indexOf('sem vínculo') !== -1 && vt.qa('.rf-row--onu')[2].textContent.indexOf('sem CTO') !== -1, 'ONU sem vinculo: "sem vinculo" e "sem CTO"');
+  vcto[0].querySelector('.rf-toggle').click();
+  ok(vt.qa('.rf-row--onu').length === 2 && vt.qa('.rf-row--cto')[0].querySelector('.rf-toggle').getAttribute('aria-expanded') === 'false', 'recolher a CTO esconde as suas ONUs');
+  ok(vt.q('#rf-note').textContent.indexOf('ainda não são lidos') === -1, 'aviso de "vinculo ainda nao lido" some quando ha vinculos');
+  ok(t.qa('.rf-row--cto').length === 0 && t.q('#rf-note').textContent.indexOf('ainda não são lidos') !== -1, 'sem a tabela de vinculos: arvore como antes e aviso mantido');
+  const sv = sheet({cliente: {login: 'joao', nome: 'João'}, cliente_texto: 'João', cto: {id: 5, nome: 'CTO-5', porta: 'Porta 3'}, cto_texto: 'CTO-5 · Porta 3'});
+  ok(keys(sv) === K2(K.sheet), 'ficha com vinculo mantem as mesmas chaves da API');
+
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs, ch.errs, cf.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(vt.errs, t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs, ch.errs, cf.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });

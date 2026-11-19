@@ -155,3 +155,9 @@
 .rf-table th[aria-sort="descending"] .rf-sort::after { content: '▼'; opacity: 1; color: var(--text); }
 .rf-sort:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
 .rf-signal__val--stale { font-weight: 600; color: var(--rf-none-ink); }
+
+/* Nivel CTO entre PON e ONU */
+.rf-row--cto td { background: #f2f7f5; font-weight: 700; border-top: 1px solid var(--border); }
+.rf-row--cto td:first-child { padding-left: 58px; }
+.rf-row--cto a, .rf-row--onu a, .rf-grid a { color: var(--primary); font-weight: 700; }
+.rf-row--onu-c td:first-child { padding-left: 74px; }

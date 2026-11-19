@@ -12,6 +12,7 @@ $netTabs = [
     'fibra' => ['/rede-fibra', 'Rede de fibra'],
     'equipamentos' => ['/rede-equipamentos', 'Equipamentos'],
     'ctos' => ['/rede-ctos', 'CTOs'],
+    'vinculos' => ['/rede-vinculos', 'Vínculos'],
 ];
 // Tecnico (somente leitura) so enxerga a aba de CTOs.
 if (!empty($netTabsOnly)) {
