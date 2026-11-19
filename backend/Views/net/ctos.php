@@ -39,7 +39,7 @@ ob_start();
         <div class="rc-actions rc-actions--inline">
             <label class="rf-field rc-search"><span class="visually-hidden">Filtrar</span><input type="search" id="ct-filter" placeholder="Filtrar por nome ou origem" autocomplete="off"></label>
             <?php if ($canEdit): ?>
-                <button type="button" class="button button--secondary" id="ct-import-open">Importar CSV</button>
+                <button type="button" class="button button--secondary" id="ct-import-open">Importar CSV / KML / KMZ</button>
                 <button type="button" class="button" id="ct-new">Nova CTO</button>
             <?php endif; ?>
         </div>
@@ -69,11 +69,11 @@ ob_start();
         </form>
     </section>
 
-    <section class="card rc-form" id="ct-import-card" aria-label="Importar CTOs por CSV" hidden>
-        <h2>Importar CTOs por CSV</h2>
-        <p class="rf-muted">Colunas: <strong>nome, lat, lng, capacidade, observacao</strong> (cabeçalho opcional; separador vírgula ou ponto e vírgula). Nada é gravado antes de você confirmar a prévia; a gravação é tudo ou nada.</p>
+    <section class="card rc-form" id="ct-import-card" aria-label="Importar CTOs por CSV, KML ou KMZ" hidden>
+        <h2>Importar CTOs por CSV, KML ou KMZ</h2>
+        <p class="rf-muted">CSV: colunas <strong>nome, lat, lng, capacidade, observacao</strong> (cabeçalho opcional; separador vírgula ou ponto e vírgula). KML/KMZ (Google My Maps ou Earth): cada ponto vira uma CTO (nome, coordenadas, descrição; capacidade se houver um dado "capacidade"); linhas e polígonos são ignorados. Nada é gravado antes de você confirmar a prévia; a gravação é tudo ou nada.</p>
         <div class="rc-actions">
-            <input type="file" id="ct-file" accept=".csv,text/csv,text/plain">
+            <input type="file" id="ct-file" accept=".csv,.kml,.kmz,text/csv,text/plain,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz">
             <button type="button" class="button" id="ct-analyze" disabled>Analisar arquivo</button>
             <button type="button" class="button button--secondary" id="ct-import-cancel">Fechar</button>
         </div>

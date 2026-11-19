@@ -100,3 +100,14 @@ momento deste commit as duas migrations ainda **não** estão aplicadas no banco
   Nós sem modelo no catálogo só são relatados.
 - Testes: `NetCatalogSmoke` (62), `NetDeviceCadastroSmoke` (104) e `rede_equipamentos.js` (35) ajustados.
 - Achado: o teste jsdom pegou um bug da própria tela (select de tipo vazio ao criar); corrigido.
+
+### CP-0 e CP-3
+- **CP-0:** `docs/modelo-equipamentos.md` (catálogo × equipamento físico × nó × credencial × telemetria; uma origem
+  por dado; como estoque, ONUs de cliente e rádios encaixam sem mudar tabelas).
+- **CP-3:** importação de CTOs por **KML/KMZ** em `/rede-ctos` (`KmlCtoReader` + o mesmo endpoint
+  `/api/rede-ctos/importar`, campo `kml_b64`). O KML vira o CSV intermediário e passa pela **mesma** prévia e
+  validação (nome, coordenadas, capacidade, duplicado, < 15 m, tudo-ou-nada). Pontos viram CTO; linhas e
+  polígonos são contados como ignorados. Segurança: sem DOCTYPE/entidades (XXE), sem rede, limite de 2 MB
+  (e 5 MB descompactado no KMZ). Teste: `NetKmlImportSmoke` (25), `rede_ctos.js` (53). **Não verificado:** um
+  KMZ real exportado do Google My Maps/Earth (só KML/KMZ gerados nos testes); capacidade lida só do dado
+  estendido "capacidade"/"capacity"/"portas".

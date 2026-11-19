@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>CTOs de exemplo</name>
+    <Folder>
+      <name>Centro</name>
+      <Placemark>
+        <name>CTO-KML-01</name>
+        <description><![CDATA[<b>Poste 12</b><br>Rua A &amp; B]]></description>
+        <ExtendedData><Data name="capacidade"><value>8</value></Data></ExtendedData>
+        <Point><coordinates>-42.8023600,-20.8455534,0</coordinates></Point>
+      </Placemark>
+      <Placemark>
+        <name>CTO-KML-02</name>
+        <Point><coordinates>-42.8100,-20.8500</coordinates></Point>
+      </Placemark>
+      <Placemark>
+        <name>Cabo principal</name>
+        <LineString><coordinates>-42.80,-20.84,0 -42.81,-20.85,0</coordinates></LineString>
+      </Placemark>
+    </Folder>
+  </Document>
+</kml>

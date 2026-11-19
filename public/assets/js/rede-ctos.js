@@ -8,7 +8,7 @@
   var CSRF = app.dataset.csrf || '';
   var CAN_EDIT = app.dataset.canEdit === '1';
   var $ = function (id) { return document.getElementById(id); };
-  var state = { data: null, filter: '', focus: app.dataset.focus || '', csv: '', analysis: null, confirm: null };
+  var state = { data: null, filter: '', focus: app.dataset.focus || '', csv: '', kml: '', analysis: null, confirm: null };
   var LABELS = ['Nome', 'Origem', 'Coordenadas', 'Capacidade', 'Portas', 'Clientes', 'Ações'];
 
   function el(tag, cls, text) {
@@ -182,14 +182,25 @@
   $('ct-import-cancel').addEventListener('click', function () { $('ct-import-card').hidden = true; });
   $('ct-file').addEventListener('change', function () {
     var file = $('ct-file').files && $('ct-file').files[0];
-    $('ct-analyze').disabled = !file; state.csv = '';
+    $('ct-analyze').disabled = !file; state.csv = ''; state.kml = '';
     if (!file) { return; }
+    if (/\.(kml|kmz)$/i.test(file.name)) {
+      // KML/KMZ: envia os bytes em base64; o servidor extrai os pontos e aplica a mesma previa e validacao do CSV.
+      var rb = new FileReader();
+      rb.onload = function () {
+        var bytes = new Uint8Array(rb.result), bin = '', i;
+        for (i = 0; i < bytes.length; i += 8192) { bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)); }
+        state.kml = window.btoa(bin);
+      };
+      rb.readAsArrayBuffer(file); return;
+    }
     var done = function (text) { state.csv = text; };
     if (file.text) { file.text().then(done); } else { var r = new FileReader(); r.onload = function () { done(String(r.result)); }; r.readAsText(file); }
   });
+  function importFields(extra) { var f = state.kml ? { kml_b64: state.kml } : { csv: state.csv }; Object.keys(extra || {}).forEach(function (k) { f[k] = extra[k]; }); return f; }
   $('ct-analyze').addEventListener('click', function () {
-    if (!state.csv) { say('Escolha um arquivo CSV.', 'warn'); return; }
-    post(API.imp, { csv: state.csv }).then(function (j) {
+    if (!state.csv && !state.kml) { say('Escolha um arquivo CSV, KML ou KMZ.', 'warn'); return; }
+    post(API.imp, importFields()).then(function (j) {
       if (!j.ok) { say(j.message || 'Não foi possível analisar.', 'error'); return; }
       say(''); state.analysis = j.data; renderPreview();
     });
@@ -210,7 +221,7 @@
       tr.appendChild(cb); tb.appendChild(tr);
     });
     var s = a.resumo;
-    $('ct-preview-summary').textContent = s.total + ' linha(s): ' + s.ok + ' pronta(s), ' + s.proximo + ' muito perto de outra CTO, ' + s.duplicado + ' com nome duplicado, ' + s.erro + ' com erro. Nada foi gravado ainda.';
+    $('ct-preview-summary').textContent = s.total + ' linha(s): ' + s.ok + ' pronta(s), ' + s.proximo + ' muito perto de outra CTO, ' + s.duplicado + ' com nome duplicado, ' + s.erro + ' com erro. Nada foi gravado ainda.' + (a.ignorados_sem_ponto ? ' ' + a.ignorados_sem_ponto + ' elemento(s) do KML que não são pontos (linhas, polígonos) foram ignorados.' : '');
     $('ct-preview').hidden = false; $('ct-report').hidden = true; updateConfirm();
   }
   function forced() { return Array.prototype.map.call(document.querySelectorAll('#ct-preview-table [data-force]:checked'), function (i) { return i.getAttribute('data-force'); }); }
@@ -218,7 +229,7 @@
   $('ct-confirm').addEventListener('click', function () {
     var f = forced(), n = state.analysis.resumo.ok + f.length;
     ask('Importar ' + n + ' CTO(s)?', 'As CTOs serão gravadas no mapa numa única transação (tudo ou nada), com as portas criadas pela capacidade.', 'Sim, importar', function () {
-      post(API.imp, { csv: state.csv, confirmar: '1', forcar: f.join(',') }).then(function (j) {
+      post(API.imp, importFields({ confirmar: '1', forcar: f.join(',') })).then(function (j) {
         if (!j.ok) { say(j.message || 'Não foi possível importar.', 'error'); return; }
         say(j.message); renderReport(j.data.relatorio); $('ct-preview').hidden = true; return load();
       });

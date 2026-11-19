@@ -16,6 +16,7 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Map\MapRepository;
 use App\Infrastructure\Net\Coordinates;
 use App\Infrastructure\Net\CtoCsvImporter;
+use App\Infrastructure\Net\KmlCtoReader;
 use App\Infrastructure\Net\NetCtoRepository;
 use App\Services\Net\MapNodeGateway;
 
@@ -253,10 +254,30 @@ final class NetCtoController
         [$providerId, $userId, $actor] = $guard;
         $repo = $this->repo();
         $existing = array_map(static fn (array $c): array => ['nome' => $c['nome'], 'lat' => $c['lat'], 'lng' => $c['lng']], $repo->list($providerId));
-        $analysis = CtoCsvImporter::analyze((string) $request->input('csv', ''), $existing);
+        // CSV (texto) ou KML/KMZ (kml_b64 = bytes em base64): o KML vira o mesmo CSV e segue a mesma previa e validacao.
+        $csv = (string) $request->input('csv', '');
+        $origin = 'csv';
+        $ignoredNonPoints = 0;
+        $kmlB64 = (string) $request->input('kml_b64', '');
+        if ($kmlB64 !== '') {
+            $bytes = strlen($kmlB64) > (int) (KmlCtoReader::MAX_BYTES * 4 / 3) + 8 ? false : base64_decode($kmlB64, true);
+            if ($bytes === false) {
+                return $this->fail('Arquivo KML/KMZ inválido ou grande demais (máximo 2 MB).', 422);
+            }
+            $kml = KmlCtoReader::toCsv($bytes);
+            if (!$kml['ok']) {
+                return $this->fail((string) $kml['erro'], 422);
+            }
+            $csv = $kml['csv'];
+            $origin = 'kml';
+            $ignoredNonPoints = $kml['ignorados'];
+        }
+        $analysis = CtoCsvImporter::analyze($csv, $existing);
         if (!$analysis['ok']) {
             return $this->fail((string) $analysis['erro'], 422);
         }
+        $analysis['origem'] = $origin;
+        $analysis['ignorados_sem_ponto'] = $ignoredNonPoints;
         if ((string) $request->input('confirmar', '') !== '1') {
             return Response::json(['ok' => true, 'message' => 'Prévia: nada foi gravado.', 'data' => ['previa' => true] + $analysis], 200, self::NO_STORE);
         }
@@ -295,7 +316,7 @@ final class NetCtoController
             'criadas' => $created,
             'ignoradas' => array_map(static fn (array $r): array => ['linha' => $r['linha'], 'nome' => $r['nome'], 'status' => $r['status'], 'motivo' => implode(' ', $r['mensagens'])], $ignored),
         ];
-        $this->audit($userId, $actor, 'net.cto.import', 0, ['criadas' => count($created), 'ignoradas' => count($ignored), 'ids' => array_column($created, 'id')]);
+        $this->audit($userId, $actor, 'net.cto.import', 0, ['origem' => $origin, 'criadas' => count($created), 'ignoradas' => count($ignored), 'ids' => array_column($created, 'id')]);
 
         return Response::json(['ok' => true, 'message' => count($created) . ' CTO(s) importada(s); ' . count($ignored) . ' linha(s) ignorada(s).', 'data' => ['previa' => false, 'relatorio' => $report]], 200, self::NO_STORE);
     }
