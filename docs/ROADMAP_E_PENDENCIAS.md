@@ -102,3 +102,8 @@ Blocos da Home com estado de rede (depende de telemetria): vermelho = desconecta
 - **Etapa 7 visual:** capturas locais 100/125% e estilo computado de hidden passaram em Chromium headless com fixtures de teste. Paths e limites no handoff 7; painel de grupo não implementado/capturado porque mockup obrigatório ausente.
 - **Etapa 7 encerrada:** import idempotente de 92 ocorrências concluído; CP-A e CP-C implementados, CP-B pulado por mockup ausente. Auditorias de caminho e integração documentadas, sem merge. Capturas 100/125% de teste e hidden validados. Final isolada: Feature 48/48, mapa 25/25, net e busca global sem falhas. Schemas temporários removidos; detalhes/limites no handoff 7.
 - **Etapa 8 CP-B:** referência alternativa validada (“protótipo funcional”), copiada/versionada no caminho aprovado. Barras/contagens, clique de grupo separado da seta, painéis reais e cabeçalho ONU/ONT implementados, sem migration e sem credential_ref. Feature 48/48, mapa 25/25, net verde; comparações headless 100/125 fora do Git. Handoff: `docs/handoff-telemetria-8.md`.
+
+## Cadastro de rede (feature/cadastro-rede, 2026-11-19, só .89)
+
+- Entregue: `/rede-equipamentos`, `/rede-ctos` (+ ficha e CSV), `/rede-vinculos`, vínculos cliente↔CTO/ONU (migration 045), busca global de rede, flags `feature.map`/`feature.net`, `net_tick.php --all`. Detalhes, decisões e lista "PARA O USUÁRIO": `docs/handoff-cadastro-rede.md`.
+- Pendente: trocar o cron para `--all`; perfis V-SOL e HA7308VX; aprovar identidade de OLT pela tela; levar ao .86 (migrations 019–021, 030–034, 045; flags; `APP_ENVIRONMENT=production`).

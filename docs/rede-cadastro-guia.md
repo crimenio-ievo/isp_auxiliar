@@ -62,3 +62,6 @@ Verificado no navegador (Playwright, `main`, sessão fictícia de gestor, banco 
 ## Não verificado
 - Acesso real do navegador do usuário (URL usada, cache) — só reproduzi com um navegador de teste.
 - O comportamento do `radacct` ao vivo: o clone .88 está parado desde 2026-10-13.
+
+## Atualização (fim da rodada, 2026-11-19)
+As lacunas 1–6 acima foram tratadas em `feature/cadastro-rede`; ver `docs/handoff-cadastro-rede.md`. Como cadastrar agora: **Rede → Equipamentos** (OLT e coleta), **Rede → CTOs** (cadastro rápido, CSV, ficha), **Rede → Vínculos** (ONU ↔ cliente por sugestão do MAC). Flags: `feature.map`/`feature.net` (padrão ligado em teste, desligado em produção).
