@@ -31,6 +31,21 @@
 .rc-confirm__box { max-width: 520px; padding: 18px; }
 .rc-confirm__box h2 { margin: 0 0 8px; }
 .rc .button--secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+/* CTOs */
+.rc-actions--inline { margin-top: 0; align-items: center; }
+.rc-search input { min-width: 220px; }
+.rc-wide { grid-column: span 2; }
+.rc-geo { align-content: end; }
+.rc-hint { margin: 2px 0 8px; font-size: 0.84rem; color: var(--muted); }
+.rc-hint[data-tone="ok"] { color: var(--rf-online-ink); }
+.rc-hint[data-tone="error"] { color: var(--rf-crit-ink); font-weight: 600; }
+.rc textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border); border-radius: 10px; font: inherit; color: var(--text); }
+.rc-focus td { background: var(--primary-soft); }
+.rc-ports { display: block; white-space: nowrap; }
+.rc-bar { width: 120px; height: 8px; margin-top: 4px; border-radius: 4px; }
+.rc-detail { white-space: normal; min-width: 220px; max-width: 420px; font-size: 0.82rem; color: var(--muted); }
+.rc-table--static td { white-space: normal; }
+#ct-report ul { margin: 4px 0 0 18px; padding: 0; font-size: 0.88rem; }
 @media (max-width: 720px) {
   /* Celular: cada linha vira um cartao (rotulo vem de data-label, posto pelo JS). */
   .rc-table, .rc-table tbody, .rc-table tr, .rc-table td { display: block; }
@@ -40,5 +55,15 @@
   .rc-table td::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
   .rc-table td[data-label="Ações"]::before { display: none; }
   .rc-toolbar .button { width: 100%; }
+  .rc-wide { grid-column: auto; }
+  .rc-actions--inline { width: 100%; }
+  .rc-search, .rc-search input { width: 100%; }
   .rc-tablewrap { overflow: visible; }
+  .rc-table--static { display: table; }
+  .rc-table--static thead { position: static; }
+  .rc-table--static tbody { display: table-row-group; }
+  .rc-table--static tr { display: table-row; border: 0; padding: 0; }
+  .rc-table--static td, .rc-table--static th { display: table-cell; }
+  .rc-table--static td::before { display: none; }
+  #ct-preview .rc-tablewrap { overflow: auto; }
 }

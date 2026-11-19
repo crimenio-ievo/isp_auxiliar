@@ -50,6 +50,9 @@ if ($canAccessContracts) {
 if ($canViewLogs) {
     $navigationItems[] = ['href' => '/mapa', 'label' => 'Mapa', 'icon' => 'mapa', 'match' => ['/mapa']];
     $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede', 'icon' => 'fibra', 'match' => ['/rede-fibra', '/rede-equipamentos', '/rede-ctos', '/rede-vinculos']];
+} elseif (AccessControl::can($access, 'clients.view')) {
+    // Tecnico: so a lista de CTOs (somente leitura).
+    $navigationItems[] = ['href' => '/rede-ctos', 'label' => 'CTOs', 'icon' => 'fibra', 'match' => ['/rede-ctos']];
 }
 
 if ($canManageSettings) {

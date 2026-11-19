@@ -11,7 +11,12 @@ $netTab = $netTab ?? '';
 $netTabs = [
     'fibra' => ['/rede-fibra', 'Rede de fibra'],
     'equipamentos' => ['/rede-equipamentos', 'Equipamentos'],
+    'ctos' => ['/rede-ctos', 'CTOs'],
 ];
+// Tecnico (somente leitura) so enxerga a aba de CTOs.
+if (!empty($netTabsOnly)) {
+    $netTabs = array_intersect_key($netTabs, array_flip($netTabsOnly));
+}
 ?>
 <nav class="rc-tabs" aria-label="Rede">
     <?php foreach ($netTabs as $key => [$href, $label]): ?>

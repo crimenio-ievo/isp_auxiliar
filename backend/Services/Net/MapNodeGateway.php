@@ -47,6 +47,29 @@ final class MapNodeGateway
     }
 
     /**
+     * Cria uma ligacao (mesmas regras de POST /api/mapa/links).
+     *
+     * @param array<string, scalar|null> $fields link_type, from_node_id, to_node_id, from_port_id, to_port_id, label...
+     * @return array{ok: bool, status: int, message: string, link: ?array<string, mixed>}
+     */
+    public function createLink(array $fields): array
+    {
+        $body = array_filter($fields, static fn ($v): bool => $v !== null);
+        $body['_csrf'] = Csrf::token('map');
+        $response = $this->map->createLink(new Request('POST', '/api/mapa/links', '', [], $body));
+        $decoded = json_decode($response->body(), true);
+        $decoded = is_array($decoded) ? $decoded : [];
+        $link = $decoded['data']['link'] ?? null;
+
+        return [
+            'ok' => ($decoded['ok'] ?? false) === true && $response->status() === 200,
+            'status' => $response->status(),
+            'message' => (string) ($decoded['message'] ?? ''),
+            'link' => is_array($link) ? $link : null,
+        ];
+    }
+
+    /**
      * @param array<string, scalar|null> $fields
      * @return array{ok: bool, status: int, message: string, node: ?array<string, mixed>}
      */

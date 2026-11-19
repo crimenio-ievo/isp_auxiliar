@@ -900,6 +900,20 @@ function resetTopology(){
   nodes = []; ports = []; links = []; cables = []; fiberStrands = []; splitters = []; connections = []; measurements = [];
   selectedNodeId = null; selectedLinkId = null; pathHighlight = null;
 }
+/* "Ver no mapa" das telas de rede: /mapa?no=ID centra e abre o painel do nó, uma única vez por carregamento da página. */
+let focusDone = false;
+function focusRequestedNode(){
+  const want = (window.ISP_MAP || {}).focus;
+  if(focusDone || !want) return;
+  focusDone = true;
+  const n = nodes.find(x=>x.dbId===want);
+  if(!n || typeof n.lat!=='number' || typeof n.lng!=='number') return;
+  measureMap();
+  view.cx = lngToWorldX(n.lng); view.cy = latToWorldY(n.lat);
+  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.max(view.scale, 256*Math.pow(2,16))));
+  renderAll();
+  onNodeClick(n.id);
+}
 /* Recarrega a topologia do servidor (fonte da verdade). onDone(): chamado após aplicar com sucesso. */
 function loadNetwork(onDone){
   const cfg = window.ISP_MAP || {};
@@ -917,6 +931,7 @@ function loadNetwork(onDone){
       resetTopology();
       closePanel();
       applyTopology(body.data);
+      focusRequestedNode();
       if(typeof onDone==='function') onDone();
     })
     .catch(err=>{

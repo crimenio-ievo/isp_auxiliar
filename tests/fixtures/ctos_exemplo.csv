@@ -1,0 +1,10 @@
+nome,lat,lng,capacidade,observacao
+CTO-EX-01,-20.8501000,-42.8001000,16,Poste da praça
+CTO-EX-02,"-20,8502500","-42,8003000",8,
+CTO-EX-03,-20.8510000,-42.8010000,,sem capacidade informada
+CTO-001,-20.8600000,-42.8100000,16,nome que já existe no mapa de teste
+CTO-EX-05,-20.8501050,-42.8001050,16,fica a poucos metros da CTO-EX-01
+CTO-EX-06,95,-42.8,16,latitude fora da faixa
+CTO-EX-07,-20.87,-42.81,999,capacidade inválida
+,-20.88,-42.82,16,sem nome
+cto-ex-02,-20.89,-42.83,16,nome repetido no arquivo (maiúsculas/minúsculas)

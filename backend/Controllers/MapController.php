@@ -120,14 +120,24 @@ final class MapController
         }
 
         $pdo = $this->mapRepository->pdo();
-        $pdo->beginTransaction();
+        // Chamada de dentro de uma transação maior (importação em lote de CTOs): não abre outra e deixa o erro subir
+        // para quem abriu desfazer tudo. Pelo mapa (sem transação aberta) o comportamento é o de sempre.
+        $own = !$pdo->inTransaction();
+        if ($own) {
+            $pdo->beginTransaction();
+        }
         try {
             $id = $this->mapRepository->createNode($providerId, $userId, $fields);
             $node = $this->mapRepository->findNode($providerId, $id);
             $this->audit($userId, $actor, 'map.node.create', $id, ['node' => $node]);
             $this->applyPortChanges($providerId, $userId, $actor, $node, $this->planPortChanges($providerId, $node, $portPlan));
-            $pdo->commit();
-        } catch (\Throwable) {
+            if ($own) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if (!$own) {
+                throw $e;
+            }
             $pdo->rollBack();
 
             return $this->fail('Não foi possível salvar o elemento.', 500);
@@ -1256,8 +1266,9 @@ final class MapController
             return Response::html('Mapa indisponível.', 404);
         }
 
+        $focus = $request->query('no');
         $config = json_encode(
-            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa')],
+            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
             JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
         );
         $html = preg_replace('#</head>#i', '<script>window.ISP_MAP=' . $config . ';</script></head>', $html, 1) ?? $html;
