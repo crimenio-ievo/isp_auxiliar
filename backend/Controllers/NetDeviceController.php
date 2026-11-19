@@ -16,6 +16,7 @@ use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Map\MapRepository;
 use App\Infrastructure\Net\DeviceProfile;
+use App\Infrastructure\Net\NetCollectorSwitch;
 use App\Infrastructure\Net\NetConnectionTester;
 use App\Infrastructure\Net\NetCredentialRepository;
 use App\Infrastructure\Net\NetEquipmentRepository;
@@ -89,6 +90,7 @@ final class NetDeviceController
                 'credenciais_banco' => $this->credentials !== null && $this->credentials->available() ? array_map(static fn (array $c): array => ['id' => $c['id'], 'nome' => $c['nome'], 'tipo' => $c['tipo']], $this->credentials->list($providerId)) : [],
                 'modelos' => $catalog->available() ? array_map(static fn (array $m): array => ['id' => $m['id'], 'rotulo' => $m['fabricante'] . ' ' . $m['modelo'], 'tipo' => $m['tipo'], 'portas' => $m['portas'], 'perfil_padrao' => $m['perfil_padrao']], array_values(array_filter($catalog->models($providerId), static fn (array $m): bool => $m['tipo'] === 'olt'))) : [],
                 'sites' => $registry->sites($providerId),
+                'coletor_servidor' => NetCollectorSwitch::enabled(),
                 'padroes' => ['intervalo_status_s' => NetDeviceRegistry::STATUS_INTERVAL_DEFAULT, 'intervalo_potencia_s' => NetDeviceRegistry::POWER_INTERVAL_DEFAULT],
                 'limites' => ['status_s' => NetDeviceRegistry::STATUS_INTERVAL_RANGE, 'potencia_s' => NetDeviceRegistry::POWER_INTERVAL_RANGE],
             ]], 200, self::NO_STORE);
@@ -371,6 +373,9 @@ final class NetDeviceController
         $device = ($id = $this->idOrNull((string) $request->input('device_id', ''))) === null ? null : $registry->findDevice($providerId, $id);
         if ($device === null) {
             return $this->fail('Equipamento não encontrado.', 404);
+        }
+        if (!NetCollectorSwitch::enabled()) {
+            return $this->fail('Teste bloqueado: ' . NetCollectorSwitch::MESSAGE . '.', 409);
         }
         $left = $registry->testCooldownLeft($providerId, (int) $device['id']);
         if ($left > 0) {

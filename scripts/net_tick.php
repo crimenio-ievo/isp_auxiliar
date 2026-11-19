@@ -3,6 +3,7 @@
 declare(strict_types=1);
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Net\NetCliOptions;
+use App\Infrastructure\Net\NetCollectorSwitch;
 use App\Infrastructure\Net\NetDeviceLock;
 use App\Infrastructure\Net\NetTick;
 use App\Infrastructure\Net\NetTickAll;
@@ -22,7 +23,14 @@ try {
     $id=$all ? 0 : NetCliOptions::positive($opts,'device',true);
 } catch(InvalidArgumentException $e) { fwrite(STDERR,"Uso: php scripts/net_tick.php --device=ID|--all [--dry-run] [--force-status] [--force-power]\n"); exit(1); }
 try {
-    $app=bootstrapApplication(); $pdo=(new Database($app->config()))->pdo();
+    $app=bootstrapApplication();
+    // Chave por servidor (NET_COLLECTOR_ENABLED): desligada = nenhum equipamento e nem o banco sao tocados.
+    if (!NetCollectorSwitch::enabled()) {
+        NetCollectorSwitch::logDisabled(dirname(__DIR__).'/storage/logs');
+        echo json_encode(['result'=>'collector_disabled','message'=>NetCollectorSwitch::MESSAGE],JSON_UNESCAPED_UNICODE)."\n";
+        exit(0);
+    }
+    $pdo=(new Database($app->config()))->pdo();
     // Falhar antes de qualquer SNMP se a 033 ainda nao estiver aplicada por completo.
     $pdo->query('SELECT power_interval_s FROM net_devices LIMIT 0');
     $pdo->query('SELECT last_power_attempt_at FROM net_device_poll_state LIMIT 0');
@@ -34,7 +42,7 @@ try {
     if ($all) {
         // Percorre os equipamentos ativos; um lock por equipamento (dentro do NetTick); falha de um nao para os outros.
         $r=(new NetTickAll(
-            static fn (): array => array_map('intval',$pdo->query('SELECT id FROM net_devices WHERE enabled = 1 ORDER BY id')->fetchAll(PDO::FETCH_COLUMN)),
+            static fn (): array => NetTickAll::enabledIds($pdo),
             static fn (int $deviceId): array => $tick->run($deviceId,isset($opts['dry-run']),isset($opts['force-status']),isset($opts['force-power']))
         ))->run();
         echo json_encode($r,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE)."\n";

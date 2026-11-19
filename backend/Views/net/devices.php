@@ -35,6 +35,7 @@ ob_start();
         <button type="button" class="button" id="rc-new">Nova OLT / configurar coleta</button>
     </div>
     <p class="rc-msg" id="rc-msg" role="status" aria-live="polite" hidden></p>
+    <p class="rc-planned" id="rc-server-off" role="status" hidden><strong>Coleta desativada neste servidor</strong> (NET_COLLECTOR_ENABLED). Os equipamentos abaixo guardam a configuração, mas este servidor não contata nenhum deles e "Testar conexão" fica bloqueado.</p>
 
     <section class="card rc-form" id="rc-form-card" aria-label="Cadastro de equipamento" hidden>
         <form id="rc-form" novalidate>

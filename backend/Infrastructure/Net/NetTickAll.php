@@ -24,6 +24,12 @@ final class NetTickAll
         $this->runOne = $runOne;
     }
 
+    /** ids de net_devices com enabled = 1 (a mesma consulta do `net_tick.php --all`), em ordem estavel. @return list<int> */
+    public static function enabledIds(\PDO $pdo): array
+    {
+        return array_map('intval', $pdo->query('SELECT id FROM net_devices WHERE enabled = 1 ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
     /** @return array{result:string,mode:string,devices:list<array<string,mixed>>,counts:array<string,int>} */
     public function run(): array
     {

@@ -22,6 +22,7 @@ use App\Infrastructure\Net\NetStatusCollector;
 use App\Infrastructure\Net\NetCredentialRepository;
 use App\Infrastructure\Net\NetSecretBox;
 use App\Infrastructure\Net\NetTransportFactory;
+use App\Infrastructure\Net\NetCollectorSwitch;
 use App\Infrastructure\Net\Store\PdoNetStore;
 
 require dirname(__DIR__) . '/backend/bootstrap/app.php';
@@ -47,6 +48,10 @@ if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
 }
 
 $app = bootstrapApplication();
+if (!NetCollectorSwitch::enabled()) {
+    fwrite(STDERR, 'Nada feito: ' . NetCollectorSwitch::MESSAGE . " (NET_COLLECTOR_ENABLED no .env).\n");
+    exit(4);
+}
 $pdo = (new Database($app->config()))->pdo();
 $store = new PdoNetStore($pdo);
 if ($kind === 'power') {

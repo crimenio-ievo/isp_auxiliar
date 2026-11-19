@@ -213,6 +213,16 @@ try {
 
     // --- Testar conexao ---
     $mode = 'ok';
+    // Chave por servidor (NET_COLLECTOR_ENABLED): desligada, "Testar conexao" nao contata o equipamento.
+    $_ENV['NET_COLLECTOR_ENABLED'] = '0';
+    $before0 = count($transports);
+    $r = $post('test', ['device_id' => (string) $deviceId]);
+    $check($r->status() === 409 && str_contains($json($r)['message'], 'coleta desativada neste servidor') && count($transports) === $before0, 'coleta desligada no servidor: Testar conexao bloqueado (409) e nenhum transporte aberto');
+    $lst = $json($ctl->list(new Request('GET', '/api/rede-equipamentos')));
+    $check(($lst['data']['coletor_servidor'] ?? null) === false, 'API de equipamentos informa coletor_servidor=false');
+    $_ENV['NET_COLLECTOR_ENABLED'] = '1';
+    $lst = $json($ctl->list(new Request('GET', '/api/rede-equipamentos')));
+    $check(($lst['data']['coletor_servidor'] ?? null) === true, 'API informa coletor_servidor=true quando ligado');
     $r = $post('test', ['device_id' => '9999']);
     $check($r->status() === 404, 'testar equipamento inexistente = 404');
     $before = count($transports);

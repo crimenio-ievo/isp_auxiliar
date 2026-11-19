@@ -60,6 +60,7 @@
 
   function render() {
     var d = state.data, list = d.equipamentos, tb = document.querySelector('#rc-table tbody');
+    var off = $('rc-server-off'); if (off) { off.hidden = d.coletor_servidor !== false; }
     tb.replaceChildren();
     var active = list.filter(function (r) { return r.coleta_ativa; }).length;
     $('rc-summary').textContent = list.length + ' OLT(s) no mapa · ' + active + ' com coleta ativa · ' + list.filter(function (r) { return r.device_id !== null; }).length + ' com registro de coleta';
