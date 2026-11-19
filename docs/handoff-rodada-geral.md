@@ -57,6 +57,46 @@ de usuários precisam corresponder, o que é **não verificado** para o .86.
 - Teste: `tests/Feature/MapTestsGuardSmoke.php` (schema descartável: 10 reais + 5 ZZ permite; 11 recusa;
   `=0` não libera; `=1` libera; o runner chama a proteção antes das suítes).
 
-## Suítes e merge
+## Não feito nesta rodada (motivo: horário)
 
-Ver a seção "Resultado final" abaixo.
+A ordem abaixo segue o pedido original. Nada disso foi iniciado e nenhum código parcial ficou no branch.
+
+- **3a** `/rede-fibra`: colunas Cliente e CTO visíveis por padrão, mais a migração única da preferência salva
+  (com teste). Hoje continuam ocultas por padrão.
+- **3b** busca de rede do topo para o técnico, só leitura. Hoje só o gestor a vê. Será preciso ajustar o
+  teste que exige 403 para o técnico.
+- **3c** `/rede-vinculos`: confiança "média" confirmável, com selo e motivo ("MAC −1", "+9 no último
+  octeto"), e o aviso "A base do MkAuth lida por este servidor é de DATA". Hipótese para a DATA: o maior
+  cadastro/`datacad` de cliente que a integração enxerga; a coluna real no MkAuth está **não verificada**.
+- **4** teste de ponta a ponta do mapeamento no navegador headless e `docs/guia-mapeamento.md`.
+- **5** CP-0 a CP-3: modelo de equipamentos, credenciais cifradas (libsodium, `NET_SECRET_KEY`), catálogo e
+  equipamento físico, importação KML/KMZ. Lembrete para o CP-1: a chave `NET_SECRET_KEY`, quando existir,
+  terá de entrar no backup (perder a chave = perder as credenciais). O `backup_map.sh` atual **não** a inclui.
+
+## PARA O USUÁRIO
+
+1. O backup diário do mapa está ativo (02:17, root) a partir do merge. Arquivos em
+   `/root/isp-auxiliar-backups/mapa/`, retenção 30. Restauração na seção 1.
+2. Quando o mapeamento real passar de 10 nós, `tests/map/run_all.sh` vai recusar rodar no banco real. É o
+   esperado. Use um banco de teste via `DB_DATABASE=…` ou `MAP_TESTS_ALLOW_REAL_DB=1` conscientemente.
+3. Os itens 3, 4 e 5 ficam para a próxima rodada. Sugiro dar a ela pelo menos algumas horas: o item 5
+   sozinho envolve migrations novas (≥ 046), criptografia e telas.
+4. Para o deploy no .86, as tabelas do mapa e dos vínculos devem ser **copiadas** (o dump deste script
+   serve), não recriadas.
+
+## Resultado final
+
+**Verificado às 15:49 UTC, no branch com os itens 1 e 2:**
+
+- `tests/Feature/*.php`: todas passaram, incluindo a nova `MapTestsGuardSmoke`.
+- `tests/Feature/CadastroLocalDraft.js`: ok.
+- `tests/net/run_all.sh`: 0 grupos com falha.
+- `tests/map/run_all.sh`: 25 de 25 passaram. A proteção liberou, com 4 nós reais.
+
+A primeira tentativa de net/map falhou por ambiente: a worktree nova não tinha o symlink
+`tests/map/node_modules` (jsdom). Criei o symlink (fora do Git) e as duas passaram.
+
+- Depois da suíte de mapa, o banco real tem 4 nós e nenhum `ZZ TESTE`.
+- Não houve contato com a OLT nem escrita no MkAuth. O cron de telemetria não foi alterado.
+- Merge ff-only em `main` e conferência do `testes.ievo.com.br`: ver o resumo da sessão; a conferência
+  foi feita logo após este commit.
