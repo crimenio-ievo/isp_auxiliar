@@ -352,6 +352,11 @@ async function boot(opts) {
   let g = await boot({status: u => u.indexOf('/onu') !== -1 ? 404 : 0}); g.q('.rf-row--onu').click(); await wait(30);
   ok(g.q('#rf-p-body .rf-note').textContent === 'Acesso negado.' && g.q('#rf-p-title').textContent === 'ONU', 'erro ao abrir a ficha mostra aviso');
 
+  // Busca global -> /rede-fibra?dispositivo=1&pon=2 pre-seleciona a PON
+  const pq = await boot({url: 'http://localhost/rede-fibra?dispositivo=1&pon=2'});
+  ok(pq.q('#rf-f-pon').value === '2' && pq.qa('.rf-row--pon').length === 1 && pq.q('.rf-row--pon').textContent.indexOf('PON 2') !== -1, 'pon=2 na URL filtra a PON 2');
+  const pbad = await boot({url: 'http://localhost/rede-fibra?pon=99'});
+  ok(pbad.q('#rf-f-pon').value === '' && pbad.qa('.rf-row--pon').length === 3, 'pon inexistente na URL e ignorada');
   // Vinculos (migration 045): nivel CTO entre PON e ONU, Cliente e CTO reais com link.
   const vt = await boot({storage: {'rf.cols': JSON.stringify(['status', 'cliente', 'cto'])}, tree: (tr) => {
     tr.fontes.cto = true; tr.fontes.vinculo_cliente = true; tr.resumo.sem_vinculo = 2;
@@ -379,7 +384,7 @@ async function boot(opts) {
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');
-  const allErrs = [].concat(vt.errs, t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs, ch.errs, cf.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
+  const allErrs = [].concat(pq.errs, pbad.errs, vt.errs, t.errs, e.errs, a.errs, f.errs, g.errs, h1.errs, h2.errs, h3.errs, h4.errs, st.errs, ev0.errs, ev1.errs, ev2.errs, ev3.errs, tc.errs, tcs.errs, stl.errs, so.errs, sp.errs, sh.errs, rr.errs, rEdge.errs, rEq.errs, rFar.errs, ch.errs, cf.errs); ok(allErrs.length === 0, 'sem erros no console: ' + allErrs.join(';'));
   console.log('falhas: ' + falhas + ' | verificacoes: ' + total + ' | erros console: ' + (allErrs.length ? allErrs.length : 'nenhum'));
   process.exit(falhas ? 1 : 0);
 })().catch(err => { console.log('[FALHA] excecao: ' + err.stack); process.exit(1); });

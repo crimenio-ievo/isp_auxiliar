@@ -4425,8 +4425,13 @@ document.querySelectorAll('[data-network-search]').forEach((form) => {
                 const response = await fetch(form.dataset.networkSearch + '?q=' + encodeURIComponent(q), {credentials:'same-origin', headers:{Accept:'application/json'}});
                 if (!response.ok) return;
                 const result = await response.json(); if (generation !== token || !result.ok) return;
+                const TIPO = {onu:'ONU', equipamento:'Equipamento', telemetria:'Telemetria', cto:'CTO', pon:'PON', cliente:'Cliente'};
                 result.data.forEach((item) => {
-                    const a = document.createElement('a'); a.textContent = item.titulo; a.href = item.url; list.appendChild(a);
+                    const a = document.createElement('a'); a.href = item.url;
+                    if (item.tipo && TIPO[item.tipo]) { const tag = document.createElement('small'); tag.className = 'network-search-results__tipo'; tag.textContent = TIPO[item.tipo]; a.appendChild(tag); }
+                    const title = document.createElement('span'); title.textContent = item.titulo; a.appendChild(title);
+                    if (item.detalhe) { const d = document.createElement('small'); d.className = 'network-search-results__detalhe'; d.textContent = item.detalhe; a.appendChild(d); }
+                    list.appendChild(a);
                 });
                 list.hidden = list.childElementCount === 0;
             } catch (_) { list.hidden = true; }

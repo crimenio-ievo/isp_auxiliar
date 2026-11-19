@@ -592,6 +592,6 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { $('rf-modal').hidden = true; } });
   renderColsMenu();
   renderEventPeriods();
-  loadTree().then(function () { var id = new URLSearchParams(window.location.search).get('onu'); if (id !== null) { if (/^[1-9][0-9]{0,14}$/.test(id)) { openSheet(id); } else { $('rf-note').hidden = false; $('rf-note').textContent = 'ONU inválida.'; } } });
+  loadTree().then(function () { var qp = new URLSearchParams(window.location.search).get('pon'); if (qp !== null && /^[0-9]{1,3}$/.test(qp) && $('rf-f-pon').querySelector('option[value="' + qp + '"]')) { $('rf-f-pon').value = qp; renderTree(); } var id = new URLSearchParams(window.location.search).get('onu'); if (id !== null) { if (/^[1-9][0-9]{0,14}$/.test(id)) { openSheet(id); } else { $('rf-note').hidden = false; $('rf-note').textContent = 'ONU inválida.'; } } });
   loadEvents();
 })();

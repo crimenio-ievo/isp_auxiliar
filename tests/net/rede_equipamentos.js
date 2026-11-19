@@ -104,6 +104,14 @@ const btn=(row,text)=>[...row.querySelectorAll('button,a')].find(b=>b.textConten
  nextPost={status:200,body:{ok:false,message:'O equipamento não respondeu a tempo.',data:{ok:false,codigo:'sem_resposta',mensagem:'O equipamento não respondeu a tempo.',leituras:{},duracao_ms:2100}}};
  btn(rows()[0],'Testar conexão').click();await wait(30);
  check(D.querySelector('[data-test-result=erro]')&&D.querySelector('[data-test-result=erro]').textContent.includes('não respondeu'),'erro do teste sem expor nada alem da mensagem');
+ {
+  const w2=new JSDOM(html,{runScripts:'outside-only',url:'http://localhost/rede-equipamentos?no=43',virtualConsole:vc,pretendToBeVisual:true}).window;
+  w2.HTMLElement.prototype.scrollIntoView=function(){};
+  w2.fetch=async ()=>({ok:true,status:200,json:async()=>({ok:true,data:fx})});
+  w2.eval(fs.readFileSync(path.join(root,'public/assets/js/rede-equipamentos.js'),'utf8'));await wait(30);
+  const f2=[...w2.document.querySelectorAll('#rc-table tbody tr')].filter(r=>r.classList.contains('rc-focus'));
+  check(f2.length===1&&f2[0].getAttribute('data-node')==='43','?no=43 (busca global) destaca a OLT');
+ }
  check(errors.length===0,'sem erros de script: '+errors.join('|'));
  console.log('RedeEquipamentos: '+n+' verificacoes, zero falhas');
 })().catch(e=>{console.error(e.message);process.exitCode=1;});

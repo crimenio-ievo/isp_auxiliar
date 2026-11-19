@@ -4918,3 +4918,6 @@ button.app-nav__brand {
 .network-search-results[hidden] { display:none!important; }
 .network-search-results a { padding:10px 14px; text-decoration:none; color:var(--text); }
 .network-search-results a:hover, .network-search-results a:focus { background:var(--surface-muted); }
+.network-search-results a { display:flex; flex-wrap:wrap; gap:2px 10px; align-items:baseline; }
+.network-search-results__tipo { font-size:0.68rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--primary); min-width:84px; }
+.network-search-results__detalhe { color:var(--muted); font-size:0.8rem; }

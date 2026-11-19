@@ -233,6 +233,30 @@ try {
     $check(count(array_filter($network->search($providerId,'002'),static fn($r)=>$r['tipo']==='onu'))===0, 'MAC curto nao consulta ONU');
     $check($network->search(999999,'002e')===[], 'busca isolada por provedor');
     $check(count($network->search($providerId,'fake'))>0, 'busca equipamento por IP/host');
+    // Busca global estendida (Fase 5): equipamento, telemetria, CTO, PON e clientes vinculados, cada um abrindo a tela certa.
+    $by = static fn (array $r, string $tipo): array => array_values(array_filter($r, static fn ($x) => $x['tipo'] === $tipo));
+    $eq = $by($network->search($providerId, 'OLT-TESTE'), 'equipamento');
+    $check(count($eq) === 1 && $eq[0]['url'] === '/rede-equipamentos?no=42' && $eq[0]['detalhe'] === 'fake', 'equipamento abre /rede-equipamentos?no=ID e mostra o IP');
+    $check(count($by($network->search($providerId, 'OLT-TESTE'), 'telemetria')) === 1 && $by($network->search($providerId, 'OLT-TESTE'), 'telemetria')[0]['url'] === '/rede-fibra?dispositivo=1', 'OLT com coleta tambem leva a telemetria');
+    $ct = $by($network->search($providerId, 'cto-teste'), 'cto');
+    $check(count($ct) === 1 && $ct[0]['url'] === '/rede-ctos/ficha?id=45' && $ct[0]['titulo'] === 'CTO CTO-TESTE', 'CTO por nome abre a ficha da CTO');
+    foreach (['PON 2', 'pon2', 'PON 2 OLT-TESTE', 'OLT-TESTE PON 2', 'olt-teste pon2'] as $q) {
+        $pn = $by($network->search($providerId, $q), 'pon');
+        $check(count($pn) === 1 && $pn[0]['url'] === '/rede-fibra?dispositivo=1&pon=2' && str_contains($pn[0]['titulo'], 'PON 2') && str_contains($pn[0]['titulo'], 'OLT-TESTE'), "PON: '{$q}'");
+    }
+    $check($by($network->search($providerId, 'PON 9'), 'pon') === [] && $by($network->search($providerId, 'PON 2 NAOEXISTE'), 'pon') === [] && $by($network->search($providerId, 'PON 2 OLT-OUTRO'), 'pon') === [], 'PON inexistente, OLT inexistente e OLT de outro provedor: nada');
+    $check($network->search($providerId, '%%') === [] && $network->search($providerId, '__') === [], 'curingas LIKE nao viram busca ampla');
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,cto_node_id,onu_id,origem,ativo,created_at,updated_at) VALUES ($providerId,'joao_s','Joao da Silva',45,1,'manual',1,NOW(),NOW())");
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,onu_id,origem,ativo,created_at,updated_at) VALUES ($providerId,'joana_x','Joana Sem Cto',3,'manual',1,NOW(),NOW())");
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,origem,ativo,created_at,updated_at) VALUES ($providerId,'joel_old','Joel Antigo','manual',0,NOW(),NOW())");
+    $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,onu_id,origem,ativo,created_at,updated_at) VALUES ($other,'joao_o','Joao de Outro',8,'manual',1,NOW(),NOW())");
+    $cl = $by($network->search($providerId, 'joao'), 'cliente');
+    $check(count($cl) === 1 && $cl[0]['titulo'] === 'Joao da Silva (joao_s)' && $cl[0]['url'] === '/clientes/detalhe?login=joao_s' && $cl[0]['detalhe'] === 'CTO CTO-TESTE · ONU 1 · PON 1', 'cliente vinculado mostra CTO e ONU e abre o perfil');
+    $cl = $by($network->search($providerId, 'joa'), 'cliente');
+    $check(array_column($cl, 'detalhe') === ['CTO CTO-TESTE · ONU 1 · PON 1', 'sem CTO · ONU 3 · PON 1'] || count($cl) === 2, 'cliente sem CTO: "sem CTO"');
+    $check($by($network->search($providerId, 'jo'), 'cliente') === [] && $by($network->search($providerId, 'joel'), 'cliente') === [] && $by($network->search($providerId, 'Outro'), 'cliente') === [], 'cliente: menos de 3 letras, vinculo inativo e outro provedor ficam de fora');
+    $pdo->exec('DELETE FROM client_network_bindings');
+    $check(count($network->search($providerId, 'a')) === 0 && count($network->search($providerId, str_repeat('a', 101))) === 0, 'consulta curta ou longa demais nao busca');
     $check($status->getValue($call('search',['q'=>'002e']))===200, 'busca autorizada na rota');
     $r = $call('tree');
     $d = json_decode((string) $body->getValue($r), true);

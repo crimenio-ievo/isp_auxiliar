@@ -7,7 +7,7 @@
   var API = { list: app.dataset.api, toggle: app.dataset.apiToggle, test: app.dataset.apiTest };
   var CSRF = app.dataset.csrf || '';
   var $ = function (id) { return document.getElementById(id); };
-  var state = { data: null, editing: null, pendingToggle: null, tests: {} };
+  var state = { data: null, editing: null, pendingToggle: null, tests: {}, focus: new URLSearchParams(window.location.search).get('no') || '' };
 
   var LABELS = ['Nome', 'Site', 'Modelo', 'IP de gerência', 'Perfil', 'Coleta', 'Última leitura OK', 'Saúde', 'Ações'];
   var HEALTH = { ok: 'ok', atrasada: 'atencao', falha: 'critico', sem_leitura: 'unknown', desativada: 'unknown', sem_coleta: 'unknown' };
@@ -66,6 +66,7 @@
     $('rc-empty').hidden = list.length > 0;
     list.forEach(function (r) {
       var tr = el('tr'); tr.setAttribute('data-node', r.node_id);
+      if (String(r.node_id) === state.focus) { tr.className = 'rc-focus'; }
       var cellNo = 0, origAppend = tr.appendChild.bind(tr);
       tr.appendChild = function (td) { td.setAttribute('data-label', LABELS[cellNo++] || ''); return origAppend(td); };
       tr.appendChild(el('td', null, r.nome));
@@ -100,6 +101,7 @@
       tr.appendChild(act);
       tb.appendChild(tr);
     });
+    var fr = tb.querySelector('.rc-focus'); if (fr && fr.scrollIntoView) { fr.scrollIntoView({ block: 'center' }); }
   }
 
   function testBox(res) {
