@@ -103,6 +103,7 @@ return static function (Router $router): void {
     $router->post('/api/mapa/links', [MapController::class, 'createLink'], 'api.map.links.create');
     $router->post('/api/mapa/links/editar', [MapController::class, 'updateLink'], 'api.map.links.update');
     $router->post('/api/mapa/links/excluir', [MapController::class, 'deleteLink'], 'api.map.links.delete');
+    $router->post('/api/mapa/importar-cabos', [MapController::class, 'importCables'], 'api.map.links.import');
     $router->post('/api/mapa/rota', [MapController::class, 'route'], 'api.map.route');
     $router->post('/api/mapa/portas/editar', [MapController::class, 'updatePort'], 'api.map.ports.update');
     $router->post('/api/mapa/portas/excluir', [MapController::class, 'deletePort'], 'api.map.ports.delete');

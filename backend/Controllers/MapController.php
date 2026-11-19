@@ -11,6 +11,9 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Url;
 use App\Infrastructure\Local\LocalRepository;
+use App\Infrastructure\Net\KmlCtoReader;
+use App\Infrastructure\Map\CableImportPlanner;
+use App\Infrastructure\Map\KmlCableReader;
 use App\Infrastructure\Map\MapPath;
 use App\Infrastructure\Map\MapRepository;
 use App\Infrastructure\Map\OsrmRouter;
@@ -687,6 +690,125 @@ final class MapController
         $link['path_json'] = ['pontos' => count($p['pontos'] ?? []), 'reservas' => $p['reservas'] ?? [], 'folga_pct' => $p['folga_pct'] ?? null];
 
         return $link;
+    }
+
+    /**
+     * POST /api/mapa/importar-cabos: LineString de KML/KMZ viram cabos. Sem confirmar=1 só devolve a prévia (nada é gravado);
+     * com confirmar=1 grava as linhas "ok" escolhidas em selecionados (índices separados por vírgula; vazio = todas as ok),
+     * tudo-ou-nada. Cada ponta liga ao elemento mais próximo dentro de raio_m (padrão 25 m).
+     */
+    public function importCables(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+
+        $b64 = (string) $request->input('kml_b64', '');
+        $bytes = $b64 === '' || strlen($b64) > (int) (KmlCtoReader::MAX_BYTES * 4 / 3) + 8 ? false : base64_decode($b64, true);
+        if ($bytes === false) {
+            return $this->fail('Arquivo KML/KMZ ausente, inválido ou grande demais (máximo 2 MB).', 422);
+        }
+        $read = KmlCableReader::lines($bytes);
+        if (!$read['ok']) {
+            return $this->fail((string) $read['erro'], 422);
+        }
+        $radius = is_numeric($request->input('raio_m')) ? (float) $request->input('raio_m') : CableImportPlanner::DEFAULT_RADIUS_M;
+        if ($radius < CableImportPlanner::MIN_RADIUS_M || $radius > CableImportPlanner::MAX_RADIUS_M) {
+            return $this->fail('Raio inválido (' . (int) CableImportPlanner::MIN_RADIUS_M . ' a ' . (int) CableImportPlanner::MAX_RADIUS_M . ' m).', 422);
+        }
+        $type = trim((string) $request->input('tipo', 'distribuicao'));
+        if (!isset(self::LINK_MEDIUMS[$type]) || self::LINK_MEDIUMS[$type] === 'radio') {
+            return $this->fail('Tipo de cabo inválido.', 422);
+        }
+        $lifecycle = trim((string) $request->input('lifecycle', 'ativo'));
+        $fibers = trim((string) $request->input('fibras', ''));
+
+        try {
+            $topology = $this->mapRepository->topology($providerId);
+        } catch (\Throwable) {
+            return $this->fail('Não foi possível ler o mapa.', 500);
+        }
+        $existing = array_map(static fn (array $l): array => [(int) $l['from_node_id'], (int) $l['to_node_id'], (string) $l['link_type']], $topology['links']);
+        $plan = CableImportPlanner::plan($topology['nodes'], $read['linhas'], $radius, $type, $existing);
+
+        // Valida cada linha "ok" com as mesmas regras de POST /api/mapa/links, sem gravar.
+        $requests = [];
+        foreach ($plan as $k => $row) {
+            if ($row['status'] !== 'ok') {
+                continue;
+            }
+            $attrs = ['cabo_nome' => mb_substr($row['nome'] !== '' ? $row['nome'] : $row['origem']['nome'] . '→' . $row['destino']['nome'], 0, 100)];
+            if ($fibers !== '' && self::LINK_MEDIUMS[$type] === 'fibra') {
+                $attrs['cabo_tipo'] = $fibers . 'FO';
+            }
+            $body = [
+                'link_type' => $type, 'from_node_id' => $row['origem']['id'], 'to_node_id' => $row['destino']['id'], 'lifecycle' => $lifecycle,
+                'label' => mb_substr($row['origem']['nome'] . ' → ' . $row['destino']['nome'], 0, 120), 'attrs' => json_encode($attrs, JSON_UNESCAPED_UNICODE),
+                'path' => $row['pontos'] === [] ? '' : json_encode(['pontos' => $row['pontos'], 'reservas' => []]),
+            ];
+            if ($fibers !== '' && self::LINK_MEDIUMS[$type] === 'fibra') {
+                $body['fiber_count'] = $fibers;
+            }
+            $errors = [];
+            $conflicts = [];
+            $warnings = [];
+            $fields = $this->validateLinkInput(new Request('POST', '/api/mapa/links', '', [], $body), $providerId, null, $errors, $conflicts, $warnings);
+            if ($errors !== [] || $conflicts !== []) {
+                $plan[$k]['status'] = 'recusado';
+                $plan[$k]['mensagem'] = implode(' ', array_merge($errors, $conflicts));
+                continue;
+            }
+            $requests[$k] = [$fields, $warnings];
+        }
+
+        $summary = array_count_values(array_column($plan, 'status'));
+        $rows = array_map(static function (array $r): array {
+            $r['n_pontos_meio'] = count($r['pontos']);
+            unset($r['pontos']);
+
+            return $r;
+        }, $plan);
+
+        if ((string) $request->input('confirmar', '') !== '1') {
+            return Response::json(['ok' => true, 'message' => 'Prévia: nada foi gravado.', 'data' => [
+                'previa' => true, 'linhas' => $rows, 'resumo' => $summary, 'ignorados_sem_linha' => $read['ignorados'], 'raio_m' => $radius,
+            ]], 200, ['Cache-Control' => 'private, no-store']);
+        }
+
+        $chosen = trim((string) $request->input('selecionados', ''));
+        $wanted = $chosen === '' ? array_keys($requests) : array_values(array_filter(array_map('intval', explode(',', $chosen)), static fn (int $i): bool => $i >= 0));
+        foreach ($wanted as $k) {
+            if (!isset($requests[$k])) {
+                return $this->fail('A linha ' . ($k + 1) . ' não pode ser importada (' . ($plan[$k]['mensagem'] ?? 'inexistente') . ').', 422);
+            }
+        }
+        if ($wanted === []) {
+            return $this->fail('Nenhuma linha importável selecionada.', 422);
+        }
+
+        $pdo = $this->mapRepository->pdo();
+        $pdo->beginTransaction();
+        $created = [];
+        try {
+            foreach ($wanted as $k) {
+                $fields = $requests[$k][0];
+                if ($this->mapRepository->linkExists($providerId, $fields['from_node_id'], $fields['to_node_id'], $fields['link_type'])) {
+                    throw new \DomainException('Cabo repetido na importação: ' . $plan[$k]['mensagem']);
+                }
+                $id = $this->mapRepository->createLink($providerId, $userId, $fields);
+                $created[] = $id;
+                $this->audit($userId, $actor, 'map.link.create', $id, ['link' => $this->linkForAudit($this->mapRepository->findLink($providerId, $id)), 'origem' => 'importacao_kml'], 'map_link');
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+
+            return $this->fail($e instanceof \DomainException ? $e->getMessage() : 'Não foi possível importar os cabos; nada foi gravado.', $e instanceof \DomainException ? 409 : 500);
+        }
+
+        return Response::json(['ok' => true, 'message' => count($created) . ' cabo(s) importado(s).', 'data' => ['criados' => $created]], 200, ['Cache-Control' => 'private, no-store']);
     }
 
     /** @var (callable(string): ?string)|null transporte HTTP trocável nos testes */

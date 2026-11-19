@@ -2357,6 +2357,71 @@ addMenu.querySelectorAll('.add-menu-item').forEach(el=>{
   });
 });
 
+/* ---- importar cabos de KML/KMZ (LineString): prévia no servidor, nada grava até "Importar" ---- */
+const IMPORT_STATUS = {ok:'Pronto', sem_origem:'Início sem elemento', sem_destino:'Fim sem elemento', sem_pontas:'Sem elementos nas pontas', mesmo_no:'Mesmo elemento', ambiguo:'Ambíguo', duplicado:'Já existe', curta:'Linha curta', recusado:'Recusado'};
+(function(){
+  const extra = document.createElement('div');
+  extra.className = 'add-menu-item'; extra.id = 'add-import-cables';
+  extra.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="'+STATUS_COLOR.normal+'" stroke-width="1.8"><path d="M4 18c4-10 8 2 16-12"/></svg>Importar cabos (KML/KMZ)';
+  addMenu.appendChild(extra);
+  extra.addEventListener('click', (e)=>{ e.stopPropagation(); addMenu.classList.remove('show'); openImportCablesModal(); });
+})();
+function openImportCablesModal(){
+  let b64 = null, rows = [];
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Importar cabos (KML/KMZ)</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      <div class="cable-meta">Cada linha (LineString) do arquivo vira um cabo. As pontas ligam ao elemento (CTO, CEO, POP ou torre) mais próximo dentro do raio; os pontos do meio viram o traçado. A prévia não grava nada.</div>
+      <div class="form-field"><label>Arquivo .kml ou .kmz (até 2 MB)</label><input id="f-imp-file" type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz"></div>
+      <div class="form-field"><label>Raio para ligar cada ponta (metros)</label><input id="f-imp-raio" type="number" min="1" max="500" step="1" value="25"></div>
+      <div class="form-field"><label>Tipo de cabo</label><select id="f-imp-tipo"><option value="backbone">Fibra backbone</option><option value="distribuicao" selected>Fibra distribuição</option><option value="drop">Drop</option><option value="ethernet">Ethernet</option></select></div>
+      <div class="form-field"><label>Situação</label><select id="f-imp-life"><option value="projeto">Projeto</option><option value="ativo" selected>Ativo</option><option value="desativado">Desativado</option></select></div>
+      <div class="form-field"><label>Nº de fibras (opcional, só fibra)</label><select id="f-imp-fo"><option value="">—</option><option>2</option><option>4</option><option>6</option><option>12</option><option>24</option><option>36</option><option>48</option></select></div>
+      <div class="form-field"><button class="btn btn-sm" id="f-imp-read" type="button">Ler arquivo (prévia)</button></div>
+      <div id="f-imp-result"></div>
+    </div>
+    <div class="modal-foot"><button class="btn" id="modal-cancel">Fechar</button><button class="btn btn-accent" id="f-imp-go" disabled>Importar selecionados</button></div>`;
+  overlay.classList.add('show');
+  document.getElementById('modal-x').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  const res = document.getElementById('f-imp-result'), go = document.getElementById('f-imp-go');
+  const body = (extra)=> Object.assign({kml_b64:b64, raio_m:document.getElementById('f-imp-raio').value, tipo:document.getElementById('f-imp-tipo').value,
+    lifecycle:document.getElementById('f-imp-life').value, fibras:document.getElementById('f-imp-fo').value}, extra||{});
+  const refreshGo = ()=>{ const n = res.querySelectorAll('input.imp-chk:checked').length; go.disabled = n===0; go.textContent = 'Importar selecionados ('+n+')'; };
+  document.getElementById('f-imp-read').addEventListener('click', ()=>{
+    const f = document.getElementById('f-imp-file').files[0];
+    if(!f){ toast('Escolha um arquivo .kml ou .kmz.'); return; }
+    if(f.size > 2*1024*1024){ toast('Arquivo grande demais (máximo 2 MB).'); return; }
+    const rd = new FileReader();
+    rd.onload = ()=>{
+      b64 = String(rd.result).split(',')[1] || '';
+      res.textContent = 'Lendo…';
+      mapPost('/importar-cabos', body()).then(data=>{
+        rows = data.linhas || [];
+        const resumo = Object.keys(data.resumo||{}).map(k=>(IMPORT_STATUS[k]||k)+': '+data.resumo[k]).join(' · ');
+        res.innerHTML = `<div class="cable-meta">${escapeHtml(resumo)}${data.ignorados_sem_linha?' · '+data.ignorados_sem_linha+' item(ns) sem linha ignorado(s)':''}. Raio de ${escapeHtml(data.raio_m)} m.</div>
+          <div style="max-height:260px;overflow:auto"><table style="width:100%;font-size:12px;border-collapse:collapse">
+          <tr><th></th><th align="left">Linha</th><th align="right">Pts</th><th align="right">Comprimento</th><th align="left">Liga</th></tr>
+          ${rows.map(r=>`<tr data-imp-row="${r.indice}"><td><input type="checkbox" class="imp-chk" data-idx="${r.indice}" ${r.status==='ok'?'checked':'disabled'}></td>
+            <td>${escapeHtml(r.nome||'(sem nome)')}</td><td align="right">${r.n_pontos}</td><td align="right">${fmtLength(+r.comprimento_m)}</td>
+            <td><b>${escapeHtml(IMPORT_STATUS[r.status]||r.status)}</b> — ${escapeHtml(r.mensagem)}${r.status==='ok'?' <span class="cable-meta">('+escapeHtml(r.origem.dist_m)+' m / '+escapeHtml(r.destino.dist_m)+' m das pontas)</span>':''}</td></tr>`).join('')}</table></div>`;
+        res.querySelectorAll('input.imp-chk').forEach(c=>c.addEventListener('change', refreshGo));
+        refreshGo();
+      }).catch(err=>{ res.textContent = ''; go.disabled = true; toast(err.message); });
+    };
+    rd.readAsDataURL(f);
+  });
+  go.addEventListener('click', ()=>{
+    const sel = [...res.querySelectorAll('input.imp-chk:checked')].map(c=>c.getAttribute('data-idx')).join(',');
+    if(!sel) return;
+    go.disabled = true;
+    mapPost('/importar-cabos', body({confirmar:'1', selecionados:sel})).then(data=>{
+      closeModal();
+      loadNetwork(()=> toast((data.criados||[]).length+' cabo(s) importado(s).'));
+    }).catch(err=>{ go.disabled = false; toast(err.message); });
+  });
+}
+
 function setModeBanner(text){
   const b = document.getElementById('mode-banner');
   document.getElementById('mode-banner-text').textContent = text;

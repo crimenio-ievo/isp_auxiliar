@@ -22,34 +22,11 @@ final class KmlCtoReader
     public static function toCsv(string $bytes): array
     {
         $fail = static fn (string $e): array => ['ok' => false, 'erro' => $e, 'csv' => '', 'pontos' => 0, 'ignorados' => 0];
-        if ($bytes === '') {
-            return $fail('O arquivo está vazio.');
+        $loaded = self::document($bytes);
+        if ($loaded['doc'] === null) {
+            return $fail((string) $loaded['erro']);
         }
-        if (strlen($bytes) > self::MAX_BYTES) {
-            return $fail('Arquivo grande demais (máximo ' . intdiv(self::MAX_BYTES, 1048576) . ' MB).');
-        }
-        $xml = $bytes;
-        if (str_starts_with($bytes, "PK\x03\x04")) {
-            $xml = self::unzip($bytes, $err);
-            if ($xml === null) {
-                return $fail($err);
-            }
-        }
-        $xml = preg_replace('/^\xEF\xBB\xBF/', '', $xml) ?? $xml;
-        if (stripos($xml, '<!DOCTYPE') !== false || stripos($xml, '<!ENTITY') !== false) {
-            return $fail('KML recusado: declarações DOCTYPE/ENTITY não são permitidas.');
-        }
-        $prev = libxml_use_internal_errors(true);
-        try {
-            $doc = simplexml_load_string($xml, SimpleXMLElement::class, LIBXML_NONET | LIBXML_NOCDATA);
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($prev);
-        }
-        if (!$doc instanceof SimpleXMLElement) {
-            return $fail('Não foi possível ler o arquivo: KML/XML inválido.');
-        }
-        $placemarks = $doc->xpath("//*[local-name()='Placemark']");
+        $placemarks = $loaded['doc']->xpath("//*[local-name()='Placemark']");
         if ($placemarks === false || $placemarks === []) {
             return $fail('Nenhum Placemark encontrado no arquivo.');
         }
@@ -89,6 +66,45 @@ final class KmlCtoReader
         }
 
         return ['ok' => true, 'erro' => null, 'csv' => $out, 'pontos' => count($rows), 'ignorados' => $ignored];
+    }
+
+    /**
+     * Abre KML/KMZ com as mesmas proteções (tamanho, DOCTYPE/ENTITY, sem rede). Compartilhado com a importação de cabos.
+     *
+     * @return array{doc: ?SimpleXMLElement, erro: ?string}
+     */
+    public static function document(string $bytes): array
+    {
+        $fail = static fn (string $e): array => ['doc' => null, 'erro' => $e];
+        if ($bytes === '') {
+            return $fail('O arquivo está vazio.');
+        }
+        if (strlen($bytes) > self::MAX_BYTES) {
+            return $fail('Arquivo grande demais (máximo ' . intdiv(self::MAX_BYTES, 1048576) . ' MB).');
+        }
+        $xml = $bytes;
+        if (str_starts_with($bytes, "PK\x03\x04")) {
+            $xml = self::unzip($bytes, $err);
+            if ($xml === null) {
+                return $fail((string) $err);
+            }
+        }
+        $xml = preg_replace('/^\xEF\xBB\xBF/', '', $xml) ?? $xml;
+        if (stripos($xml, '<!DOCTYPE') !== false || stripos($xml, '<!ENTITY') !== false) {
+            return $fail('KML recusado: declarações DOCTYPE/ENTITY não são permitidas.');
+        }
+        $prev = libxml_use_internal_errors(true);
+        try {
+            $doc = simplexml_load_string($xml, SimpleXMLElement::class, LIBXML_NONET | LIBXML_NOCDATA);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($prev);
+        }
+        if (!$doc instanceof SimpleXMLElement) {
+            return $fail('Não foi possível ler o arquivo: KML/XML inválido.');
+        }
+
+        return ['doc' => $doc, 'erro' => null];
     }
 
     private static function unzip(string $bytes, ?string &$error): ?string

@@ -40,6 +40,10 @@ não solta os cabos.
     continua visível ao lado. Apague para voltar ao calculado.
 - **Seguir rua:** no editor de traçado, liga um modo em que cada clique busca a rota pelas ruas e a transforma em pontos
   editáveis. Depende de um serviço OSRM configurado (`docs/osrm-seguir-rua.md`); sem ele, a tela segue no modo manual.
+- **Importar cabos de KML/KMZ:** *Adicionar → Importar cabos (KML/KMZ)*. Cada LineString vira um cabo; a prévia lista, por
+  linha, a qual elemento (CTO, CEO, POP ou torre) cada ponta liga (o **mais próximo dentro do raio**, padrão 25 m,
+  configurável de 1 a 500 m) e por que uma linha não entra (sem elemento na ponta, mesmo elemento, ambíguo, já existe).
+  Só as linhas marcadas são importadas, tudo-ou-nada. Os pontos do meio viram o traçado; o comprimento fica calculado.
 - **Onde fica gravado:** coluna `map_links.path_json` (já existia desde a migration 019; **sem migration nova**).
 
 ## O que ainda não existe e como contornar
