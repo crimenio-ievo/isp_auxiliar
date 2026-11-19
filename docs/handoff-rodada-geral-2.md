@@ -51,3 +51,14 @@ telemetria.
   por quê (hipótese: o `radacct` está sendo recarregado/atualizado por outro processo). Conclusão: a data
   mostrada depende do momento da leitura; confira a tela antes de confiar nas sugestões.
 - Testes: `NetBindingSmoke` (101) e `rede_vinculos.js` (39).
+
+## 4. Fluxo de mapeamento real
+
+- Teste: `tests/Feature/MapMapeamentoFlowSmoke.php` (schema descartável; controlador do `/mapa` com CSRF e
+  sessão de gestor): 20 passos funcionam; 2 recursos **não existem** (pontos intermediários do cabo, reserva
+  técnica como recurso próprio). Nada de ZZ TESTE no banco real.
+- Guia para o usuário: `docs/guia-mapeamento.md` (ordem, o que falta e contornos, aviso de copiar as tabelas para o .86).
+- **Não feito:** a passagem por navegador headless (Playwright). Os scripts de browser da rodada anterior
+  não existem mais e a interface foi avaliada só pelo código e pelos testes jsdom já existentes. Ficam como
+  **não verificados em tela**: a distância ao arrastar um ponto, o botão de splitter e o conector do cabo.
+- Nenhuma correção de código foi necessária (nenhuma falha encontrada).
