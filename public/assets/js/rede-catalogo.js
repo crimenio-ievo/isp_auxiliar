@@ -17,6 +17,8 @@
     return fetch(url, { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': CSRF }, body: body.toString() })
       .then(function (r) { return r.json().catch(function () { return { ok: false, message: 'Resposta inesperada do servidor.' }; }).then(function (j) { j.httpStatus = r.status; return j; }); });
   }
+  var ENUM = { no_mapa: 'No mapa', estoque: 'Estoque', cliente: 'Cliente', outro: 'Outro', instalado: 'Instalado', manutencao: 'Manutenção', baixado: 'Baixado' };
+  function enumLabel(v) { return Object.prototype.hasOwnProperty.call(ENUM, v) ? ENUM[v] : v; }
   function opts(list, key, labelFn) { return list.map(function (x) { return { v: key ? x[key] : x, l: labelFn ? labelFn(x) : x }; }); }
 
   // ---- configuracao por secao -------------------------------------------------------------------------------
@@ -44,10 +46,10 @@
       cols: ['Modelo', 'Série', 'MAC', 'Patrimônio', 'Situação', 'Local', 'Ações'],
       fields: function (d) { return [
         { n: 'modelo_id', l: 'Modelo', sel: opts(d.modelos, 'id', function (m) { return m.rotulo; }) }, { n: 'serie', l: 'Série (opcional)', max: 80 },
-        { n: 'mac', l: 'MAC (opcional)', max: 17 }, { n: 'patrimonio', l: 'Patrimônio (opcional)', max: 60 }, { n: 'situacao', l: 'Situação', sel: opts(d.situacoes) },
-        { n: 'local_tipo', l: 'Local', sel: opts(d.locais) }, { n: 'no_id', l: 'Elemento do mapa', sel: [{ v: '', l: '—' }].concat(opts(d.nos, 'id', function (n) { return n.nome + ' (' + n.tipo + ')'; })) },
+        { n: 'mac', l: 'MAC (opcional)', max: 17 }, { n: 'patrimonio', l: 'Patrimônio (opcional)', max: 60 }, { n: 'situacao', l: 'Situação', sel: opts(d.situacoes, null, enumLabel) },
+        { n: 'local_tipo', l: 'Local', sel: opts(d.locais, null, enumLabel) }, { n: 'no_id', l: 'Elemento do mapa', sel: [{ v: '', l: '—' }].concat(opts(d.nos, 'id', function (n) { return n.nome + ' (' + n.tipo + ')'; })) },
         { n: 'local_obs', l: 'Observação do local', max: 160 }, { n: 'observacao', l: 'Observação', max: 500 }]; },
-      row: function (r) { return [r.fabricante + ' ' + r.modelo, r.serie || '—', r.mac || '—', r.patrimonio || '—', r.situacao, r.no_nome ? r.no_nome : (r.local_tipo + (r.local_obs ? ' · ' + r.local_obs : ''))]; },
+      row: function (r) { return [r.fabricante + ' ' + r.modelo, r.serie || '—', r.mac || '—', r.patrimonio || '—', enumLabel(r.situacao), r.no_nome ? r.no_nome : (enumLabel(r.local_tipo) + (r.local_obs ? ' · ' + r.local_obs : ''))]; },
       list: function (d) { return d.equipamentos; }, title: 'Equipamento'
     }
   }[SECTION];
@@ -94,7 +96,7 @@
       lab.appendChild(inp); box.appendChild(lab);
     });
     $('cg-id').value = r ? r.id : '';
-    $('cg-form-title').textContent = (replacing ? 'Substituir segredo: ' + r.nome : (r ? 'Editar ' : 'Novo(a) ') + CFG.title.toLowerCase());
+    $('cg-form-title').textContent = (replacing ? 'Substituir segredo: ' + r.nome : (r ? 'Editar ' : 'Cadastrar ') + CFG.title.toLowerCase());
     $('cg-form-card').hidden = false;
   }
   function valueOf(r, n) {

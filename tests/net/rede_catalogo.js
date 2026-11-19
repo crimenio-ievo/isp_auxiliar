@@ -80,6 +80,7 @@ const posts=c=>c.filter(x=>x.o&&x.o.method==='POST');
   const D=t.D;await wait(30);
   const row=D.querySelector('#cg-table tbody tr');
   check(row.textContent.includes('Hioso HA7004S')&&row.textContent.includes('SN-1')&&row.textContent.includes('OLT-001')&&row.textContent.includes('—'),'inventario: modelo, serie, local no mapa e campos vazios como "—"');
+  check(row.textContent.includes('Instalado')&&!row.textContent.includes('instalado'),'situacao com rotulo em portugues (Instalado), nao o valor cru');
   D.getElementById('cg-new').click();
   check(D.querySelector('#cg-form select[name="situacao"]').options.length===4&&D.querySelector('#cg-form select[name="no_id"]').options.length===2,'formulario: situacoes e elementos do mapa');
   D.querySelector('#cg-form [name="serie"]').value='SN-2';D.querySelector('#cg-form [name="situacao"]').value='estoque';D.querySelector('#cg-form [name="local_tipo"]').value='estoque';

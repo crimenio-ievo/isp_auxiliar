@@ -111,3 +111,46 @@ momento deste commit as duas migrations ainda **não** estão aplicadas no banco
   (e 5 MB descompactado no KMZ). Teste: `NetKmlImportSmoke` (25), `rede_ctos.js` (53). **Não verificado:** um
   KMZ real exportado do Google My Maps/Earth (só KML/KMZ gerados nos testes); capacidade lida só do dado
   estendido "capacidade"/"capacity"/"portas".
+
+## Aplicação, verificação e capturas
+
+- **Dump antes de aplicar:** `/root/isp-auxiliar-backups/isp_auxiliar-pre046-20261119-161858.sql` (fora do Git).
+- **Aplicadas no banco real do .89 em 2026-11-19 ~16:19 UTC:** `046_net_credentials.sql` e
+  `047_net_equipment_catalog.sql` (aplicador oficial, 0 erros). **Fato verificado depois:** 3 modelos em cada
+  um dos 2 provedores, 0 equipamentos físicos, `net_devices` do equipamento 1 intacto (`credential_id` NULL,
+  `credential_ref` preenchido). Rollbacks: `scripts/rollback_046_net_credentials.sql` e
+  `scripts/rollback_047_net_equipment_catalog.sql`.
+- **Compatibilidade:** o código antigo do `main` (cron de telemetria) continua funcionando com o banco novo (a coluna
+  `credential_ref` segue preenchida e as colunas novas são opcionais). Nada mudou no cron.
+- **Simulações rodadas (sem `--apply`):** `net_equipment_migrate.php --link-node=42 --model=HA7004S` (liga a
+  OLT-001 ao Hioso HA7004S) e `net_migrate_credentials.php` (1 equipamento passaria a usar a credencial
+  "OLT 89"). **`--apply` NÃO rodado e `NET_SECRET_KEY` NÃO gerada no .env.** Nenhum contato com a OLT
+  (o `net_tick.php --all --dry-run` conferido não acessa o equipamento: ver `NetTick`).
+- **Suítes (todas verdes, na worktree, depois de aplicar as migrations):** Feature (todos os arquivos),
+  `CadastroLocalDraft.js`, `tests/net/run_all.sh` (0 grupos com falha) e `tests/map/run_all.sh` (25/25, com a
+  proteção do item 2). Banco real depois: 4 nós, nenhum "ZZ TESTE"; nenhum schema `_sim` sobrando.
+- **Capturas** (fora do Git, sem dados de cliente): `/root/isp-auxiliar-backups/capturas-rodada-geral-2/`, 15
+  imagens (5 telas × 100%, 125% e 390 px). Sem erro de console/script e sem rolagem horizontal. As telas de
+  `/rede-vinculos` e `/rede-fibra` ficaram de fora porque mostram dados de clientes/ONUs. **O "125%" é emulado**
+  (janela de 1024 px com fator 1,25), não o zoom real do navegador.
+- **Não verificado:** a interface do `/mapa` em navegador real (item 4 só pela API e pelo código), um KMZ real do
+  Google, `/rede-equipamentos` com o formulário novo em navegador real (só jsdom e as capturas da lista).
+
+## PARA O USUÁRIO
+
+1. **Gerar a chave de cifragem** (ainda não existe): `php scripts/net_secret_key.php` no diretório da produção do
+   .89. Sem ela, `/rede-credenciais` mostra o aviso e bloqueia o cadastro. **Guarde uma cópia do `.env`**: perder
+   a chave = perder as credenciais cifradas.
+2. Depois, **simular** e só então aplicar: `php scripts/net_migrate_credentials.php` e, se estiver certo,
+   `... --apply`. Em seguida teste a conexão pela tela (isso fala com a OLT: combine com o Codex).
+3. **Ligar a OLT-001 ao HA7004S:** `php scripts/net_equipment_migrate.php --link-node=42 --model=HA7004S`
+   (simulação) e depois com `--apply`.
+4. Confirmar no navegador: `/rede-credenciais`, `/rede-modelos`, `/rede-inventario`, `/rede-equipamentos` (novo
+   formulário), importação KML/KMZ em `/rede-ctos` com um arquivo real do Google My Maps, e o `/mapa` pelo
+   `docs/guia-mapeamento.md`.
+5. Decisões que ficaram minhas (diga se quer outra): a busca do técnico só mostra CTO, cliente vinculado e ONU
+   vinculada (sem equipamento/PON/telemetria); a preferência de colunas é por navegador (não por usuário).
+6. O `/mapa` não grava traçado com pontos intermediários nem reserva técnica: contorno e limites em
+   `docs/guia-mapeamento.md`. Se isso for necessário antes de mapear, é trabalho novo no mapa.
+7. **.86:** além das migrations 019–021, 030–034 e 045, agora também **046 e 047**; cuidado com o
+   backup da chave `NET_SECRET_KEY`.
