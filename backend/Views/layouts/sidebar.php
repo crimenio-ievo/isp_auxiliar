@@ -53,7 +53,7 @@ if ($canViewLogs) {
         $navigationItems[] = ['href' => '/mapa', 'label' => 'Mapa', 'icon' => 'mapa', 'match' => ['/mapa']];
     }
     if (Features::enabled('net')) {
-        $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede', 'icon' => 'fibra', 'match' => ['/rede-fibra', '/rede-equipamentos', '/rede-ctos', '/rede-vinculos']];
+        $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede', 'icon' => 'fibra', 'match' => ['/rede-fibra', '/rede-equipamentos', '/rede-ctos', '/rede-vinculos', '/rede-credenciais', '/rede-modelos', '/rede-inventario']];
     }
 } elseif (Features::enabled('net') && AccessControl::can($access, 'clients.view')) {
     // Tecnico: so a lista de CTOs (somente leitura).

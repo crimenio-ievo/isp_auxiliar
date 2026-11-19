@@ -34,6 +34,8 @@ use App\Infrastructure\MkAuth\TechnologyMapper;
 use App\Infrastructure\Net\ClientDirectory;
 use App\Infrastructure\Net\MkAuthClientDirectory;
 use App\Infrastructure\Net\NetConnectionTester;
+use App\Infrastructure\Net\NetCredentialRepository;
+use App\Infrastructure\Net\NetSecretBox;
 use App\Infrastructure\Net\NetDeviceLock;
 use App\Infrastructure\Processes\OperationalProcessRepository;
 use App\Services\Contracts\AcceptanceWorkflowService;
@@ -241,7 +243,12 @@ function bootstrapApplication(): Application
     ));
 
     $container->set(ClientDirectory::class, new MkAuthClientDirectory($container->get(MkAuthDatabase::class)));
-    $container->set(NetConnectionTester::class, new NetConnectionTester(new NetDeviceLock($rootPath . '/tmp')));
+    $container->set(NetSecretBox::class, NetSecretBox::fromEnv());
+    $container->set(NetCredentialRepository::class, new NetCredentialRepository(
+        static fn () => $container->get(Database::class)->pdo(),
+        $container->get(NetSecretBox::class)
+    ));
+    $container->set(NetConnectionTester::class, new NetConnectionTester(new NetDeviceLock($rootPath . '/tmp'), null, $container->get(NetCredentialRepository::class)));
 
     $router = new Router();
     $registerRoutes = require __DIR__ . '/../routes.php';

@@ -62,3 +62,41 @@ telemetria.
   não existem mais e a interface foi avaliada só pelo código e pelos testes jsdom já existentes. Ficam como
   **não verificados em tela**: a distância ao arrastar um ponto, o botão de splitter e o conector do cabo.
 - Nenhuma correção de código foi necessária (nenhuma falha encontrada).
+
+## 5. Equipamentos e credenciais (CP-1 e CP-2; CP-0 e CP-3 abaixo)
+
+Migrations **046** (`net_credentials`, `net_devices.credential_id`, `credential_ref` aceita NULL) e **047**
+(`net_equipment_models`, `net_equipment`, `net_equipment_movements` + pré-cadastro). Rollbacks em
+`scripts/rollback_046_net_credentials.sql` e `scripts/rollback_047_net_equipment_catalog.sql`. **Fato:** no
+momento deste commit as duas migrations ainda **não** estão aplicadas no banco real do .89 (ver "Aplicação").
+
+### CP-1 Credenciais cifradas
+- `NetSecretBox` (libsodium secretbox, chave `NET_SECRET_KEY` base64 de 32 bytes, versão `NET_SECRET_KEY_VERSION`),
+  `NetCredentialRepository` (listas só com metadados; `secretFor()` é o único caminho ao texto claro e só o
+  coletor o usa) e `NetCredentialMigrator`.
+- Tela `/rede-credenciais` (gestor/admin; CSRF escopo `rede`; auditoria `net.credential.*` sem segredo):
+  mostra "definida em DATA por USUÁRIO", "Substituir" e "Excluir" (bloqueado se um equipamento usa). Sem chave
+  ou sem a tabela, o cadastro e a substituição ficam bloqueados com aviso.
+- Coletor (`net_tick.php`, `net_collect.php`) e "Testar conexão": preferem `credential_id` e usam
+  `credential_ref` (.env) como alternativa. O equipamento atual (credential_id NULL) continua igual.
+- `scripts/net_secret_key.php`: gera `NET_SECRET_KEY` no .env **só se não existir** e não imprime a chave.
+  **Não foi executado** no .env real (decisão sua; ver PARA O USUÁRIO).
+- `scripts/net_migrate_credentials.php --ref=NET_CRED_OLT_89_COMMUNITY --name="OLT 89" [--apply]`: simulação
+  por padrão. **Não rodei `--apply`** nem testei contra a OLT, como pedido.
+- **Perder a chave = perder as credenciais cifradas.** O backup do `.env` (que guarda a chave) tem de ser
+  guardado separado do dump do banco. `backup_map.sh` não inclui credenciais (só mapa e vínculos).
+- Testes: `NetCredentialSmoke` (55) e `rede_catalogo.js` (25, jsdom): o segredo digitado nunca reaparece em
+  resposta, HTML, auditoria nem log; sem chave bloqueia; migrador idempotente; script de chave não troca chave.
+
+### CP-2 Catálogo e equipamento físico
+- Telas `/rede-modelos` (catálogo) e `/rede-inventario` (equipamento físico, situação, local, histórico
+  mínimo). `/rede-equipamentos` agora tem modelo do catálogo + série/MAC/patrimônio opcionais + credencial
+  (.env ou banco) e a coleta nasce desativada. Um ativo por nó (`map_nodes.equipment_id`).
+- Pré-cadastro só de fatos: Hioso HA7004S (EPON, 4 PON, perfil ativo), Hioso HA7308VX (EPON, 8 PON, perfil
+  "ainda não suportado"), V-SOL "a identificar" (sem tecnologia inventada, perfil não suportado). Provedores
+  criados depois da migration recebem o mesmo pré-cadastro na primeira abertura (`seedFacts`).
+- `scripts/net_equipment_migrate.php [--link-node=42 --model=HA7004S] [--apply]`: migra fabricante/modelo do
+  `attrs_json` para o catálogo e liga a OLT-001 ao HA7004S (simulação por padrão). **Não rodei `--apply`.**
+  Nós sem modelo no catálogo só são relatados.
+- Testes: `NetCatalogSmoke` (62), `NetDeviceCadastroSmoke` (104) e `rede_equipamentos.js` (35) ajustados.
+- Achado: o teste jsdom pegou um bug da própria tela (select de tipo vazio ao criar); corrigido.

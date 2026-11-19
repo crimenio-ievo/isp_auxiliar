@@ -63,12 +63,16 @@ final class NetDeviceRegistry
     {
         $st = $this->pdo->prepare(
             'SELECT n.id AS node_id, n.name, n.attrs_json, n.parent_node_id, st.name AS site_name,
-                    d.id AS device_id, d.mgmt_host, d.credential_ref, d.enabled, d.status_interval_s, d.power_interval_s, d.expected_identity_json,
+                    d.id AS device_id, d.mgmt_host, d.credential_ref, d.credential_id, cr.name AS credential_name, d.enabled,
+                    em.id AS model_id, em.vendor AS model_vendor, em.model AS model_name, eq.serial AS eq_serial, eq.mac AS eq_mac, eq.asset_tag AS eq_asset, d.status_interval_s, d.power_interval_s, d.expected_identity_json,
                     d.profile_id, pr.code AS profile_code, pr.vendor AS profile_vendor, pr.status AS profile_status,
                     ps.last_attempt_at, ps.last_success_at, ps.last_result, ps.consecutive_failures
                FROM map_nodes n
                LEFT JOIN map_nodes st ON st.id = n.parent_node_id AND st.node_type IN (\'pop\', \'tower\')
                LEFT JOIN net_devices d ON d.map_node_id = n.id AND d.provider_id = n.provider_id
+               LEFT JOIN net_credentials cr ON cr.id = d.credential_id
+               LEFT JOIN net_equipment eq ON eq.id = n.equipment_id AND eq.provider_id = n.provider_id
+               LEFT JOIN net_equipment_models em ON em.id = eq.model_id
                LEFT JOIN net_device_profiles pr ON pr.id = d.profile_id
                LEFT JOIN net_device_poll_state ps ON ps.device_id = d.id
               WHERE n.provider_id = ? AND n.node_type = \'olt\'
@@ -87,13 +91,18 @@ final class NetDeviceRegistry
                 'nome' => (string) $r['name'],
                 'site' => $r['site_name'] === null ? null : (string) $r['site_name'],
                 'site_id' => $r['parent_node_id'] === null ? null : (int) $r['parent_node_id'],
-                'fabricante' => (string) ($attrs['fabricante'] ?? ''),
-                'modelo' => (string) ($attrs['modelo'] ?? ''),
+                // Uma origem: o catalogo (map_nodes.equipment_id -> net_equipment -> modelo). attrs_json so por compatibilidade.
+                'fabricante' => $r['model_id'] !== null ? (string) $r['model_vendor'] : (string) ($attrs['fabricante'] ?? ''),
+                'modelo' => $r['model_id'] !== null ? (string) $r['model_name'] : (string) ($attrs['modelo'] ?? ''),
+                'modelo_id' => $r['model_id'] === null ? null : (int) $r['model_id'],
+                'serie' => $r['eq_serial'], 'mac' => $r['eq_mac'], 'patrimonio' => $r['eq_asset'],
                 'device_id' => $hasDevice ? (int) $r['device_id'] : null,
                 'ip' => $hasDevice ? (string) $r['mgmt_host'] : null,
                 'perfil' => $hasDevice ? ['id' => (int) $r['profile_id'], 'code' => (string) $r['profile_code'], 'status' => (string) $r['profile_status']] : null,
                 'perfil_pretendido' => $planned === '' ? null : $planned,
-                'credencial' => $hasDevice ? (string) $r['credential_ref'] : null,
+                'credencial' => $hasDevice && $r['credential_id'] === null ? (string) $r['credential_ref'] : null,
+                'credencial_id' => $hasDevice && $r['credential_id'] !== null ? (int) $r['credential_id'] : null,
+                'credencial_nome' => $r['credential_name'],
                 'coleta_ativa' => $hasDevice && (int) $r['enabled'] === 1,
                 'intervalo_status_s' => $hasDevice ? (int) $r['status_interval_s'] : null,
                 'intervalo_potencia_s' => $hasDevice ? (int) $r['power_interval_s'] : null,
@@ -182,14 +191,14 @@ final class NetDeviceRegistry
     /**
      * Cria o registro de coleta SEMPRE desativado.
      *
-     * @param array{map_node_id:int,profile_id:int,mgmt_host:string,credential_ref:string,status_interval_s:int,power_interval_s:int} $f
+     * @param array{map_node_id:int,profile_id:int,mgmt_host:string,credential_ref?:?string,credential_id?:?int,status_interval_s:int,power_interval_s:int} $f
      */
     public function createDevice(int $providerId, array $f): int
     {
         $this->pdo->prepare(
-            "INSERT INTO net_devices (provider_id, map_node_id, profile_id, mgmt_host, snmp_version, credential_ref, expected_identity_json, enabled, status_interval_s, power_interval_s, created_at, updated_at)
-             VALUES (?, ?, ?, ?, '2c', ?, NULL, 0, ?, ?, NOW(), NOW())"
-        )->execute([$providerId, $f['map_node_id'], $f['profile_id'], $f['mgmt_host'], $f['credential_ref'], $f['status_interval_s'], $f['power_interval_s']]);
+            "INSERT INTO net_devices (provider_id, map_node_id, profile_id, mgmt_host, snmp_version, credential_ref, credential_id, expected_identity_json, enabled, status_interval_s, power_interval_s, created_at, updated_at)
+             VALUES (?, ?, ?, ?, '2c', ?, ?, NULL, 0, ?, ?, NOW(), NOW())"
+        )->execute([$providerId, $f['map_node_id'], $f['profile_id'], $f['mgmt_host'], $f['credential_ref'] ?? null, $f['credential_id'] ?? null, $f['status_interval_s'], $f['power_interval_s']]);
 
         return (int) $this->pdo->lastInsertId();
     }
@@ -203,7 +212,7 @@ final class NetDeviceRegistry
     {
         $sets = [];
         $params = [];
-        foreach (['profile_id', 'mgmt_host', 'credential_ref', 'status_interval_s', 'power_interval_s', 'enabled'] as $col) {
+        foreach (['profile_id', 'mgmt_host', 'credential_ref', 'credential_id', 'status_interval_s', 'power_interval_s', 'enabled'] as $col) {
             if (array_key_exists($col, $fields)) {
                 $sets[] = "{$col} = ?";
                 $params[] = $fields[$col];

@@ -7,6 +7,8 @@ use App\Infrastructure\Net\NetDeviceLock;
 use App\Infrastructure\Net\NetTick;
 use App\Infrastructure\Net\NetTickAll;
 use App\Infrastructure\Net\NetAlertEngine;
+use App\Infrastructure\Net\NetCredentialRepository;
+use App\Infrastructure\Net\NetSecretBox;
 use App\Infrastructure\Net\NetTransportFactory;
 use App\Infrastructure\Net\Store\PdoNetStore;
 use App\Infrastructure\Net\Store\PdoNetAlertStore;
@@ -28,7 +30,7 @@ try {
     $pdo->query('SELECT id FROM net_alerts LIMIT 0');
     $pdo->query('SELECT id FROM net_interventions LIMIT 0');
     $net=new PdoNetStore($pdo); $root=dirname(__DIR__);
-    $tick=new NetTick($net,new NetAlertEngine($net,new PdoNetAlertStore($pdo)),new NetTransportFactory(),new NetDeviceLock($root.'/tmp'),$root.'/storage/logs');
+    $tick=new NetTick($net,new NetAlertEngine($net,new PdoNetAlertStore($pdo)),new NetTransportFactory(new NetCredentialRepository($pdo, NetSecretBox::fromEnv())),new NetDeviceLock($root.'/tmp'),$root.'/storage/logs');
     if ($all) {
         // Percorre os equipamentos ativos; um lock por equipamento (dentro do NetTick); falha de um nao para os outros.
         $r=(new NetTickAll(

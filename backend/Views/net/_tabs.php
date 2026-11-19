@@ -13,6 +13,9 @@ $netTabs = [
     'equipamentos' => ['/rede-equipamentos', 'Equipamentos'],
     'ctos' => ['/rede-ctos', 'CTOs'],
     'vinculos' => ['/rede-vinculos', 'Vínculos'],
+    'modelos' => ['/rede-modelos', 'Modelos'],
+    'inventario' => ['/rede-inventario', 'Inventário'],
+    'credenciais' => ['/rede-credenciais', 'Credenciais'],
 ];
 // Tecnico (somente leitura) so enxerga a aba de CTOs.
 if (!empty($netTabsOnly)) {

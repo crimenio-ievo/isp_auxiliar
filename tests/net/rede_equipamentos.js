@@ -44,7 +44,7 @@ const btn=(row,text)=>[...row.querySelectorAll('button,a')].find(b=>b.textConten
  D.getElementById('rc-new').click();
  check(!D.getElementById('rc-form-card').hidden,'abre o formulario');
  const cred=[...D.getElementById('rc-cred').options].map(o=>o.textContent);
- check(cred.join('|')==='Escolha a credencial|NET_CRED_A|NET_CRED_B','credencial lista so nomes NET_CRED_*');
+ check(cred.join('|')==='Escolha a credencial|NET_CRED_A (.env)|NET_CRED_B (.env)','credencial lista so nomes (sem valores), marcando a origem .env');
  const perf=[...D.getElementById('rc-perfil').options].map(o=>o.textContent);
  check(perf.length===4&&perf[1].includes('V-SOL')&&perf[1].includes('perfil ainda não suportado'),'perfis suportados + nao suportados');
  const nodes=[...D.getElementById('rc-node-id').options].map(o=>o.textContent);

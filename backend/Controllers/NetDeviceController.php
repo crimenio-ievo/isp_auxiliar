@@ -17,6 +17,8 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Map\MapRepository;
 use App\Infrastructure\Net\DeviceProfile;
 use App\Infrastructure\Net\NetConnectionTester;
+use App\Infrastructure\Net\NetCredentialRepository;
+use App\Infrastructure\Net\NetEquipmentRepository;
 use App\Infrastructure\Net\NetDeviceRegistry;
 use App\Infrastructure\Net\NetTransportFactory;
 use App\Services\Net\MapNodeGateway;
@@ -39,7 +41,8 @@ final class NetDeviceController
         private Database $database,
         private MapRepository $mapRepository,
         private MapNodeGateway $gateway,
-        private NetConnectionTester $tester
+        private NetConnectionTester $tester,
+        private ?NetCredentialRepository $credentials = null
     ) {
     }
 
@@ -71,6 +74,10 @@ final class NetDeviceController
         }
         try {
             $registry = $this->registry();
+            $catalog = new NetEquipmentRepository($this->database->pdo());
+            if ($catalog->available()) {
+                $catalog->seedFacts($providerId);
+            }
 
             return Response::json(['ok' => true, 'data' => [
                 'equipamentos' => $registry->listOlts($providerId),
@@ -79,6 +86,8 @@ final class NetDeviceController
                     'planejados' => array_map(static fn (string $code, string $label): array => ['code' => $code, 'label' => $label], array_keys(NetDeviceRegistry::PLANNED_PROFILES), array_values(NetDeviceRegistry::PLANNED_PROFILES)),
                 ],
                 'credenciais' => Env::names('NET_CRED_'),
+                'credenciais_banco' => $this->credentials !== null && $this->credentials->available() ? array_map(static fn (array $c): array => ['id' => $c['id'], 'nome' => $c['nome'], 'tipo' => $c['tipo']], $this->credentials->list($providerId)) : [],
+                'modelos' => $catalog->available() ? array_map(static fn (array $m): array => ['id' => $m['id'], 'rotulo' => $m['fabricante'] . ' ' . $m['modelo'], 'tipo' => $m['tipo'], 'portas' => $m['portas'], 'perfil_padrao' => $m['perfil_padrao']], array_values(array_filter($catalog->models($providerId), static fn (array $m): bool => $m['tipo'] === 'olt'))) : [],
                 'sites' => $registry->sites($providerId),
                 'padroes' => ['intervalo_status_s' => NetDeviceRegistry::STATUS_INTERVAL_DEFAULT, 'intervalo_potencia_s' => NetDeviceRegistry::POWER_INTERVAL_DEFAULT],
                 'limites' => ['status_s' => NetDeviceRegistry::STATUS_INTERVAL_RANGE, 'potencia_s' => NetDeviceRegistry::POWER_INTERVAL_RANGE],
@@ -127,8 +136,16 @@ final class NetDeviceController
                 $errors[] = 'IP de gerência inválido (informe um IPv4 de equipamento, ex.: 192.168.0.10).';
             }
             $ref = $in('credential_ref');
-            if (!NetTransportFactory::isValidCredentialRef($ref) || !in_array($ref, Env::names('NET_CRED_'), true)) {
-                $errors[] = 'Referência de credencial inválida: escolha um nome da lista (NET_CRED_*).';
+            $credentialId = null;
+            if (preg_match('/^id:([1-9][0-9]{0,14})$/', $ref, $cm) === 1) {
+                // Credencial cifrada no banco (net_credentials), escolhida pelo id; o segredo nunca passa por aqui.
+                $credentialId = (int) $cm[1];
+                if ($this->credentials === null || !$this->credentials->available() || $this->credentials->find($providerId, $credentialId) === null) {
+                    $errors[] = 'Credencial do banco não encontrada.';
+                }
+                $ref = '';
+            } elseif (!NetTransportFactory::isValidCredentialRef($ref) || !in_array($ref, Env::names('NET_CRED_'), true)) {
+                $errors[] = 'Referência de credencial inválida: escolha uma credencial da lista.';
             }
             $statusInterval = $this->interval($in('intervalo_status_s'), NetDeviceRegistry::STATUS_INTERVAL_DEFAULT, NetDeviceRegistry::STATUS_INTERVAL_RANGE, 'Intervalo de status', $errors);
             $powerInterval = $this->interval($in('intervalo_potencia_s'), NetDeviceRegistry::POWER_INTERVAL_DEFAULT, NetDeviceRegistry::POWER_INTERVAL_RANGE, 'Intervalo de potência', $errors);
@@ -139,6 +156,24 @@ final class NetDeviceController
             if (mb_strlen($value) > 80) {
                 $errors[] = $label . ' deve ter até 80 caracteres.';
             }
+        }
+
+        $catalog = new NetEquipmentRepository($this->database->pdo());
+        $modelId = $this->idOrNull($in('modelo_id'));
+        if ($modelId !== null && (!$catalog->available() || $catalog->model($providerId, $modelId) === null)) {
+            $errors[] = 'Modelo do catálogo não encontrado.';
+        }
+        if ($modelId !== null && $catalog->available()) {
+            $mdl = $catalog->model($providerId, $modelId);
+            if ($mdl !== null && $mdl['tipo'] !== 'olt') {
+                $errors[] = 'O modelo escolhido não é de OLT.';
+            }
+        }
+        $serie = $in('serie');
+        $assetTag = $in('patrimonio');
+        $macEq = $in('mac');
+        if (mb_strlen($serie) > 80 || mb_strlen($assetTag) > 60 || mb_strlen($macEq) > 17) {
+            $errors[] = 'Série, patrimônio ou MAC longo demais.';
         }
 
         // --- No do mapa: existente ou novo ---
@@ -191,8 +226,13 @@ final class NetDeviceController
         }
 
         // --- Gravacao ---
-        $nodeAttrs = static function (?array $current) use ($fabricante, $modelo, $planned): ?string {
+        $nodeAttrs = static function (?array $current) use ($fabricante, $modelo, $planned, $modelId): ?string {
             $attrs = is_array($current) ? $current : [];
+            if ($modelId !== null) {
+                // Fabricante/modelo passam a ter uma unica origem (o catalogo): sai do texto livre do no.
+                $fabricante = '';
+                $modelo = '';
+            }
             foreach (['fabricante' => $fabricante, 'modelo' => $modelo] as $k => $v) {
                 $v === '' ? $attrs = array_diff_key($attrs, [$k => 1]) : $attrs[$k] = $v;
             }
@@ -240,27 +280,31 @@ final class NetDeviceController
                 $result = ['node_id' => $nodeId, 'device_id' => null];
             } elseif ($existingDevice === null) {
                 $newId = $registry->createDevice($providerId, [
-                    'map_node_id' => (int) $nodeId, 'profile_id' => (int) $profile['id'], 'mgmt_host' => $host, 'credential_ref' => $ref,
+                    'map_node_id' => (int) $nodeId, 'profile_id' => (int) $profile['id'], 'mgmt_host' => $host, 'credential_ref' => $ref === '' ? null : $ref, 'credential_id' => $credentialId,
                     'status_interval_s' => $statusInterval, 'power_interval_s' => $powerInterval,
                 ]);
-                $this->audit($userId, $actor, 'net.device.create', $newId, ['map_node_id' => $nodeId, 'host' => $host, 'profile' => $profile['code'], 'credential_ref' => $ref, 'enabled' => false]);
+                $this->audit($userId, $actor, 'net.device.create', $newId, ['map_node_id' => $nodeId, 'host' => $host, 'profile' => $profile['code'], 'credential_ref' => $ref === '' ? null : $ref, 'credential_id' => $credentialId, 'enabled' => false]);
                 $message = 'Equipamento cadastrado com a coleta DESATIVADA.';
                 $result = ['node_id' => $nodeId, 'device_id' => $newId];
             } else {
-                $changes = ['profile_id' => (int) $profile['id'], 'mgmt_host' => $host, 'credential_ref' => $ref, 'status_interval_s' => $statusInterval, 'power_interval_s' => $powerInterval];
-                $critical = (int) $existingDevice['profile_id'] !== (int) $profile['id'] || $existingDevice['mgmt_host'] !== $host || $existingDevice['credential_ref'] !== $ref;
+                $changes = ['profile_id' => (int) $profile['id'], 'mgmt_host' => $host, 'credential_ref' => $ref === '' ? null : $ref, 'credential_id' => $credentialId, 'status_interval_s' => $statusInterval, 'power_interval_s' => $powerInterval];
+                $critical = (int) $existingDevice['profile_id'] !== (int) $profile['id'] || $existingDevice['mgmt_host'] !== $host
+                    || (string) ($existingDevice['credential_ref'] ?? '') !== $ref || ($existingDevice['credential_id'] === null ? null : (int) $existingDevice['credential_id']) !== $credentialId;
                 if ($critical && (int) $existingDevice['enabled'] === 1) {
                     $changes['enabled'] = 0;
                     $warning = 'IP, perfil ou credencial mudaram: a coleta foi DESATIVADA. Teste a conexão e reative.';
                 }
                 $registry->updateDevice($providerId, (int) $existingDevice['id'], $changes);
                 $this->audit($userId, $actor, 'net.device.update', (int) $existingDevice['id'], [
-                    'antes' => ['host' => $existingDevice['mgmt_host'], 'profile_id' => (int) $existingDevice['profile_id'], 'credential_ref' => $existingDevice['credential_ref'], 'status_interval_s' => (int) $existingDevice['status_interval_s'], 'power_interval_s' => (int) $existingDevice['power_interval_s']],
-                    'depois' => ['host' => $host, 'profile' => $profile['code'], 'credential_ref' => $ref, 'status_interval_s' => $statusInterval, 'power_interval_s' => $powerInterval],
+                    'antes' => ['host' => $existingDevice['mgmt_host'], 'profile_id' => (int) $existingDevice['profile_id'], 'credential_ref' => $existingDevice['credential_ref'], 'credential_id' => $existingDevice['credential_id'], 'status_interval_s' => (int) $existingDevice['status_interval_s'], 'power_interval_s' => (int) $existingDevice['power_interval_s']],
+                    'depois' => ['host' => $host, 'profile' => $profile['code'], 'credential_ref' => $ref === '' ? null : $ref, 'credential_id' => $credentialId, 'status_interval_s' => $statusInterval, 'power_interval_s' => $powerInterval],
                     'desativada_por_mudanca' => $warning !== null,
                 ]);
                 $message = 'Equipamento atualizado.' . ($warning !== null ? ' ' . $warning : '');
                 $result = ['node_id' => $nodeId, 'device_id' => (int) $existingDevice['id']];
+            }
+            if ($modelId !== null && $nodeId !== null) {
+                $this->attachEquipment($catalog, $providerId, (int) $nodeId, $modelId, $serie, $macEq, $assetTag, $actor);
             }
         } catch (\Throwable) {
             // Compensa o no criado nesta chamada para nao deixar uma OLT sem registro por erro nosso.
@@ -300,7 +344,11 @@ final class NetDeviceController
             } catch (\Throwable) {
                 return $this->fail('Perfil ainda não suportado: a coleta não pode ser ativada.', 422);
             }
-            if (!in_array((string) $device['credential_ref'], Env::names('NET_CRED_'), true)) {
+            if ($device['credential_id'] !== null) {
+                if ($this->credentials === null || !$this->credentials->box()->available() || $this->credentials->find($providerId, (int) $device['credential_id']) === null) {
+                    return $this->fail('A credencial cadastrada não pôde ser usada: confira a chave NET_SECRET_KEY e a credencial.', 422);
+                }
+            } elseif (!in_array((string) $device['credential_ref'], Env::names('NET_CRED_'), true)) {
                 return $this->fail('A credencial ' . $device['credential_ref'] . ' não está definida no .env deste servidor.', 422);
             }
         }
@@ -424,6 +472,19 @@ final class NetDeviceController
         }
 
         return [$providerId, $userId > 0 ? $userId : null, (string) ($user['login'] ?? '')];
+    }
+
+    /** Liga/atualiza o equipamento fisico (catalogo) do no da OLT: um ativo por no, modelo + serie/MAC/patrimonio opcionais. */
+    private function attachEquipment(NetEquipmentRepository $catalog, int $providerId, int $nodeId, int $modelId, string $serial, string $mac, string $asset, string $actor): void
+    {
+        $existing = $catalog->equipmentOfNode($providerId, $nodeId);
+        [$id, $errors] = $catalog->saveEquipment($providerId, $existing === null ? null : (int) $existing['id'], [
+            'model_id' => $modelId, 'serial' => $serial, 'mac' => $mac, 'asset_tag' => $asset, 'status' => 'instalado',
+            'location_kind' => 'no_mapa', 'location_node_id' => $nodeId, 'notes' => $existing['notes'] ?? null,
+        ], $actor);
+        if ($id === null) {
+            throw new \RuntimeException(implode(' ', $errors));
+        }
     }
 
     /** @param array<string,mixed> $context */

@@ -170,7 +170,9 @@
     var sel = $('rc-perfil'); sel.replaceChildren();
     d.perfis.suportados.forEach(function (p) { sel.appendChild(new Option(p.vendor + ' — ' + p.code + ' (' + p.technology.toUpperCase() + ')', String(p.id))); });
     d.perfis.planejados.forEach(function (p) { sel.appendChild(new Option(p.label + ' — perfil ainda não suportado: coleta desativada', p.code)); });
-    fillSelect($('rc-cred'), d.credenciais.map(function (n) { return { n: n }; }), 'n', function (x) { return x.n; }, d.credenciais.length ? 'Escolha a credencial' : 'Nenhuma NET_CRED_* no .env');
+    var credList = d.credenciais.map(function (n) { return { n: n, l: n + ' (.env)' }; }).concat((d.credenciais_banco || []).map(function (c) { return { n: 'id:' + c.id, l: c.nome + ' (' + c.tipo + ', cifrada no banco)' }; }));
+    fillSelect($('rc-cred'), credList, 'n', function (x) { return x.l; }, credList.length ? 'Escolha a credencial' : 'Nenhuma credencial cadastrada (ver aba Credenciais)');
+    fillSelect($('rc-model'), d.modelos || [], 'id', function (x) { return x.rotulo; }, 'Modelo fora do catálogo (texto livre abaixo)');
     form.reset(); say('');
     $('rc-device-id').value = r && r.device_id !== null ? r.device_id : '';
     $('rc-i-status').value = (r && r.intervalo_status_s) || d.padroes.intervalo_status_s;
@@ -181,7 +183,9 @@
       setMode('existing'); $('rc-node-id').value = String(r.node_id);
       field('fabricante').value = r.fabricante || ''; field('modelo').value = r.modelo || '';
       if (r.perfil) { field('perfil').value = String(r.perfil.id); } else if (r.perfil_pretendido) { field('perfil').value = r.perfil_pretendido; }
-      field('mgmt_host').value = r.ip || ''; if (r.credencial) { $('rc-cred').value = r.credencial; }
+      field('mgmt_host').value = r.ip || ''; if (r.credencial) { $('rc-cred').value = r.credencial; } else if (r.credencial_id) { $('rc-cred').value = 'id:' + r.credencial_id; }
+      if (r.modelo_id) { $('rc-model').value = String(r.modelo_id); }
+      field('serie').value = r.serie || ''; field('mac').value = r.mac || ''; field('patrimonio').value = r.patrimonio || '';
       document.getElementById('rc-node-fs').disabled = true;
     } else {
       document.getElementById('rc-node-fs').disabled = false; setMode(free.length ? 'existing' : 'new');
@@ -197,7 +201,7 @@
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
     var f = {}, mode = form.elements.node_mode.value || 'existing', planned = !$('rc-planned').hidden;
-    ['device_id', 'fabricante', 'modelo', 'perfil'].forEach(function (k) { f[k] = field(k).value.trim(); });
+    ['device_id', 'fabricante', 'modelo', 'perfil', 'modelo_id', 'serie', 'mac', 'patrimonio'].forEach(function (k) { f[k] = field(k).value.trim(); });
     if (state.editing) { f.node_id = String(state.editing.node_id); }
     else if (mode === 'existing') { f.node_id = field('node_id').value; }
     else { f.node_mode = 'new'; f.name = field('name').value.trim(); f.site_id = field('site_id').value; f.ports_pon = field('ports_pon').value; }

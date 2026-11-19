@@ -19,6 +19,8 @@ declare(strict_types=1);
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Net\NetPowerCollector;
 use App\Infrastructure\Net\NetStatusCollector;
+use App\Infrastructure\Net\NetCredentialRepository;
+use App\Infrastructure\Net\NetSecretBox;
 use App\Infrastructure\Net\NetTransportFactory;
 use App\Infrastructure\Net\Store\PdoNetStore;
 
@@ -48,9 +50,9 @@ $app = bootstrapApplication();
 $pdo = (new Database($app->config()))->pdo();
 $store = new PdoNetStore($pdo);
 if ($kind === 'power') {
-    $summary = (new NetPowerCollector($store, new NetTransportFactory()))->run($deviceId, $pon, $onuId, $dryRun);
+    $summary = (new NetPowerCollector($store, new NetTransportFactory(new NetCredentialRepository($pdo, NetSecretBox::fromEnv()))))->run($deviceId, $pon, $onuId, $dryRun);
 } else {
-    $summary = (new NetStatusCollector($store, new NetTransportFactory()))->run($deviceId, $approve, $dryRun);
+    $summary = (new NetStatusCollector($store, new NetTransportFactory(new NetCredentialRepository($pdo, NetSecretBox::fromEnv()))))->run($deviceId, $approve, $dryRun);
 }
 $summary['kind'] = $kind;
 $summary['finished_at'] = date('Y-m-d H:i:s');

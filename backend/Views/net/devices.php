@@ -52,18 +52,22 @@ ob_start();
                 </div>
             </fieldset>
             <div class="rc-grid">
-                <label class="rf-field"><span>Fabricante</span><input name="fabricante" maxlength="80" autocomplete="off"></label>
-                <label class="rf-field"><span>Modelo</span><input name="modelo" maxlength="80" autocomplete="off"></label>
+                <label class="rf-field"><span>Modelo do catálogo</span><select name="modelo_id" id="rc-model"></select></label>
+                <label class="rf-field"><span>Fabricante (texto livre)</span><input name="fabricante" maxlength="80" autocomplete="off"></label>
+                <label class="rf-field"><span>Modelo (texto livre)</span><input name="modelo" maxlength="80" autocomplete="off"></label>
+                <label class="rf-field"><span>Série (opcional)</span><input name="serie" maxlength="80" autocomplete="off"></label>
+                <label class="rf-field"><span>MAC (opcional)</span><input name="mac" maxlength="17" autocomplete="off"></label>
+                <label class="rf-field"><span>Patrimônio (opcional)</span><input name="patrimonio" maxlength="60" autocomplete="off"></label>
                 <label class="rf-field"><span>Perfil de coleta</span><select name="perfil" id="rc-perfil"></select></label>
             </div>
             <p class="rc-planned" id="rc-planned" hidden>Perfil ainda não suportado: coleta desativada. A OLT fica registrada no mapa e a coleta só poderá ser configurada quando o perfil existir.</p>
             <div class="rc-grid" id="rc-collect-fields">
                 <label class="rf-field"><span>IP de gerência</span><input name="mgmt_host" inputmode="decimal" autocomplete="off" placeholder="192.168.0.10"></label>
-                <label class="rf-field"><span>Credencial (nome no .env)</span><select name="credential_ref" id="rc-cred"></select></label>
+                <label class="rf-field"><span>Credencial</span><select name="credential_ref" id="rc-cred"></select></label>
                 <label class="rf-field"><span>Intervalo de status (s)</span><input name="intervalo_status_s" type="number" id="rc-i-status"></label>
                 <label class="rf-field"><span>Intervalo de potência (s)</span><input name="intervalo_potencia_s" type="number" id="rc-i-power"></label>
             </div>
-            <p class="rf-muted" id="rc-cred-note">Só os nomes das chaves NET_CRED_* aparecem; o valor nunca é exibido.</p>
+            <p class="rf-muted" id="rc-cred-note">Só os nomes das credenciais aparecem; o valor nunca é exibido. O catálogo e as credenciais cifradas ficam nas abas Modelos e Credenciais.</p>
             <div class="rc-actions">
                 <button type="submit" class="button" id="rc-save">Salvar</button>
                 <button type="button" class="button button--secondary" id="rc-cancel">Cancelar</button>

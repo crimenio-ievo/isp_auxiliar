@@ -31,7 +31,7 @@ final class NetConnectionTester
     /**
      * @param (callable(string,string):SnmpTransport)|null $transportFactory recebe (host, credencial) e devolve o transporte (so para teste)
      */
-    public function __construct(private NetDeviceLock $lock, ?callable $transportFactory = null)
+    public function __construct(private NetDeviceLock $lock, ?callable $transportFactory = null, private ?NetCredentialRepository $credentials = null)
     {
         $this->factory = $transportFactory ?? static fn (string $host, string $secret): SnmpTransport => new NetSnmpCliTransport($host, $secret, self::INTERVAL_MS, self::TIMEOUT_MS);
     }
@@ -45,13 +45,21 @@ final class NetConnectionTester
         $t0 = microtime(true);
         $fail = static fn (string $code, string $msg): array => ['ok' => false, 'codigo' => $code, 'mensagem' => $msg, 'leituras' => [], 'duracao_ms' => (int) round((microtime(true) - $t0) * 1000)];
 
-        $ref = (string) ($device['credential_ref'] ?? '');
-        if (!NetTransportFactory::isValidCredentialRef($ref)) {
-            return $fail('credencial_invalida', 'Referência de credencial inválida.');
-        }
-        $secret = (string) (Env::get($ref, '') ?? '');
-        if ($secret === '') {
-            return $fail('credencial_ausente', 'A credencial ' . $ref . ' não está definida no .env deste servidor.');
+        if ((int) ($device['credential_id'] ?? 0) > 0) {
+            try {
+                $secret = NetTransportFactory::resolveSecret($device, $this->credentials);
+            } catch (\Throwable) {
+                return $fail('credencial_ausente', 'A credencial cadastrada não pôde ser lida (chave NET_SECRET_KEY ausente ou diferente da usada ao gravar).');
+            }
+        } else {
+            $ref = (string) ($device['credential_ref'] ?? '');
+            if (!NetTransportFactory::isValidCredentialRef($ref)) {
+                return $fail('credencial_invalida', 'Referência de credencial inválida.');
+            }
+            $secret = (string) (Env::get($ref, '') ?? '');
+            if ($secret === '') {
+                return $fail('credencial_ausente', 'A credencial ' . $ref . ' não está definida no .env deste servidor.');
+            }
         }
         $host = (string) ($device['mgmt_host'] ?? '');
         if (filter_var($host, FILTER_VALIDATE_IP) === false) {
