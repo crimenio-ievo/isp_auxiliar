@@ -24,6 +24,14 @@ final class Application
 
     public function handle(Request $request): Response
     {
+        // Flags por provedor (map/net): modulo desligado = pagina 404 e API 403, antes mesmo de olhar a sessao.
+        $feature = Features::featureForPath($request->path());
+        if ($feature !== null && !Features::enabled($feature)) {
+            return str_starts_with($request->path(), '/api/')
+                ? Response::json(['ok' => false, 'message' => 'Recurso desativado neste ambiente.'], 403, ['Cache-Control' => 'private, no-store'])
+                : $this->notFound($request);
+        }
+
         $route = $this->router->match($request->method(), $request->path());
 
         if ($route === null) {

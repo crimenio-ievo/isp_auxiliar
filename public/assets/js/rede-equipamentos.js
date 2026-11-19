@@ -95,7 +95,7 @@
         tg.addEventListener('click', function () { r.coleta_ativa ? doToggle(r, false) : askActivate(r); });
         box.appendChild(tg);
       }
-      var link = el('a', 'rc-btn', 'Ver no mapa'); link.href = app.dataset.mapUrl; box.appendChild(link);
+      if (app.dataset.mapUrl) { var link = el('a', 'rc-btn', 'Ver no mapa'); link.href = app.dataset.mapUrl; box.appendChild(link); }
       act.appendChild(box);
       var keep = state.tests[r.device_id]; if (keep) { act.appendChild(testBox(keep)); }
       tr.appendChild(act);

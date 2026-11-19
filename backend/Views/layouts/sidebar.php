@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Core\Url;
 use App\Core\AccessControl;
+use App\Core\Features;
 
 $currentPath = $currentPath ?? '/';
 $access = is_array($user['access'] ?? null) ? $user['access'] : [];
@@ -48,9 +49,13 @@ if ($canAccessContracts) {
 }
 
 if ($canViewLogs) {
-    $navigationItems[] = ['href' => '/mapa', 'label' => 'Mapa', 'icon' => 'mapa', 'match' => ['/mapa']];
-    $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede', 'icon' => 'fibra', 'match' => ['/rede-fibra', '/rede-equipamentos', '/rede-ctos', '/rede-vinculos']];
-} elseif (AccessControl::can($access, 'clients.view')) {
+    if (Features::enabled('map')) {
+        $navigationItems[] = ['href' => '/mapa', 'label' => 'Mapa', 'icon' => 'mapa', 'match' => ['/mapa']];
+    }
+    if (Features::enabled('net')) {
+        $navigationItems[] = ['href' => '/rede-fibra', 'label' => 'Rede', 'icon' => 'fibra', 'match' => ['/rede-fibra', '/rede-equipamentos', '/rede-ctos', '/rede-vinculos']];
+    }
+} elseif (Features::enabled('net') && AccessControl::can($access, 'clients.view')) {
     // Tecnico: so a lista de CTOs (somente leitura).
     $navigationItems[] = ['href' => '/rede-ctos', 'label' => 'CTOs', 'icon' => 'fibra', 'match' => ['/rede-ctos']];
 }

@@ -10,6 +10,7 @@ use App\Infrastructure\Settings\IntegrationSettingsStore;
 use App\Core\Flash;
 use App\Core\Container;
 use App\Core\Env;
+use App\Core\Features;
 use App\Core\Url;
 use App\Core\Router;
 use App\Core\View;
@@ -98,6 +99,8 @@ function bootstrapApplication(): Application
         // O banco complementar pode ainda nao existir durante a primeira instalacao.
         $providerSettings = [];
     }
+
+    Features::configure($providerSettings);
 
     $provider = null;
     try {

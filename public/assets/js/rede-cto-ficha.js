@@ -42,7 +42,7 @@
     var d = state.data, c = d.cto, tb = document.querySelector('#cf-table tbody');
     $('cf-title').textContent = 'CTO ' + c.nome;
     $('cf-sub').textContent = [c.origem ? 'Origem: ' + c.origem : 'Origem a identificar', c.lat === null ? 'sem coordenadas' : c.lat.toFixed(6) + ', ' + c.lng.toFixed(6), 'capacidade ' + c.capacidade].join(' · ');
-    $('cf-map').href = D.mapUrl + '?no=' + c.id;
+    if (D.mapUrl) { $('cf-map').href = D.mapUrl + '?no=' + c.id; } else { $('cf-map').hidden = true; }
     var clients = d.portas.filter(function (p) { return p.cliente; }).length;
     $('cf-summary').textContent = c.portas.total + ' porta(s) · ' + c.portas.em_ligacao + ' em ligação · ' + clients + ' com cliente · ' + c.portas.livres + ' livre(s)' + (c.portas.indisponiveis ? ' · ' + c.portas.indisponiveis + ' indisponível(is)' : '') + (d.vinculos_disponiveis ? '' : ' · vínculos ainda não disponíveis neste ambiente');
     tb.replaceChildren(); $('cf-empty').hidden = d.portas.length > 0;

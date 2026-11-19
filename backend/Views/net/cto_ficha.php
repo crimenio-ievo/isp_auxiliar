@@ -30,7 +30,7 @@ ob_start();
      data-api-bind="<?= $e(Url::to('/api/rede-vinculos/cto')); ?>"
      data-api-remove="<?= $e(Url::to('/api/rede-vinculos/remover')); ?>"
      data-list-url="<?= $e(Url::to('/rede-ctos')); ?>"
-     data-map-url="<?= $e(Url::to('/mapa')); ?>"
+     data-map-url="<?= $e(\App\Core\Features::enabled('map') ? Url::to('/mapa') : ''); ?>"
      data-client-url="<?= $e(Url::to('/clientes/detalhe')); ?>"
      data-onu-url="<?= $e(Url::to('/rede-fibra')); ?>"
      data-cto="<?= (int) ($ctoId ?? 0); ?>"

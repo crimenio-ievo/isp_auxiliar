@@ -1271,7 +1271,7 @@ final class MapController
 
         $focus = $request->query('no');
         $config = json_encode(
-            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'ctoFicha' => Url::to('/rede-ctos/ficha'), 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
+            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'ctoFicha' => \App\Core\Features::enabled('net') ? Url::to('/rede-ctos/ficha') : null, 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
             JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
         );
         $html = preg_replace('#</head>#i', '<script>window.ISP_MAP=' . $config . ';</script></head>', $html, 1) ?? $html;

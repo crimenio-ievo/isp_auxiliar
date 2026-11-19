@@ -26,7 +26,7 @@ ob_start();
      data-api="<?= $e(Url::to('/api/rede-equipamentos')); ?>"
      data-api-toggle="<?= $e(Url::to('/api/rede-equipamentos/coleta')); ?>"
      data-api-test="<?= $e(Url::to('/api/rede-equipamentos/testar')); ?>"
-     data-map-url="<?= $e(Url::to('/mapa')); ?>"
+     data-map-url="<?= $e(\App\Core\Features::enabled('map') ? Url::to('/mapa') : ''); ?>"
      data-fiber-url="<?= $e(Url::to('/rede-fibra')); ?>"
      data-csrf="<?= $e((string) ($csrf ?? '')); ?>">
 
