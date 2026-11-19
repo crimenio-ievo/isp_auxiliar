@@ -11,6 +11,7 @@ function boot(page,mode,jsFile,router){
   w.HTMLElement.prototype.scrollIntoView=function(){};
   const calls=[];
   w.fetch=async (u,o)=>{calls.push({u,o});const r=router(u,o)||{status:200,body:{ok:true,message:'Feito.'}};return {ok:r.status<400,status:r.status,json:async()=>r.body};};
+  w.eval(fs.readFileSync(path.join(root,'public/assets/js/rede-cto-picker.js'),'utf8'));
   w.eval(fs.readFileSync(path.join(root,'public/assets/js/'+jsFile),'utf8'));
   return {w,D:w.document,calls,errors};
 }
@@ -117,6 +118,8 @@ const ficha={cto,pode_editar:true,vinculos_disponiveis:true,sem_porta:[],contage
     {id:21,login:'joao',nome:'João <i>T</i>',modo_pppoe:'pppoe_na_onu'},{id:22,login:'maria',nome:'Maria',modo_pppoe:null}]}],modos:['pppoe_na_onu','atras_da_onu']};
   const t=boot('vinculos','edit','rede-vinculos.js',(u,o)=>{
     if(o&&o.method==='POST'){return nextPost;}
+    if(u.indexOf('/api/rede-vinculos/ctos-proximas')===0){return {status:200,body:{ok:true,data:{n_clientes:2,aviso:null,referencia:{login:'joao',lat:-20.85,lng:-42.8},atual:{cto_id:33,cto:'CTO-001',porta_id:102,porta:'Porta 2'},
+      ctos:[{id:40,nome:'CTO-<b>9</b>',distancia_m:320,total_portas:4,livres:[{id:201,rotulo:'Porta 1'},{id:202,rotulo:'Porta 3'}]},{id:41,nome:'CTO-10',distancia_m:1500,total_portas:2,livres:[]}]}}};}
     if(u.indexOf('/api/rede-vinculos/onus')===0){return {status:200,body:{ok:true,data:bound}};}
     if(u.indexOf('/api/rede-vinculos/clientes')===0){return {status:200,body:{ok:true,data:[{login:'zeca',nome:'Zeca <b>Z</b>',vinculo:null},{login:'rui',nome:'Rui',vinculo:{id:3,login:'rui',nome:'Rui',onu:{id:1,pon:1,onu_index:1}}}]}};}
     listCalls++;return {status:200,body:{ok:true,data}};});
@@ -139,6 +142,23 @@ const ficha={cto,pode_editar:true,vinculos_disponiveis:true,sem_porta:[],contage
   p0=posts(t.calls)[0];check(p0.u==='/api/rede-vinculos/modo'&&body(p0).id==='22'&&body(p0).modo==='atras_da_onu'&&p0.o.headers['X-CSRF-Token']==='TOKEN-TESTE','mudar o modo envia o vinculo e o modo com CSRF');
   msel[1].value='';msel[1].dispatchEvent(new t.w.Event('change'));await wait(30);
   check(body(posts(t.calls)[1]).modo==='','voltar a "nao verificado" envia modo vazio');
+  // Definir/Trocar CTO pelo seletor compartilhado
+  const defBtn=[...brow.querySelectorAll('button')].filter(b=>b.textContent==='Trocar CTO')[0];
+  check(!!defBtn,'ONU vinculada com CTO: botão "Trocar CTO"');
+  t.calls.length=0;defBtn.click();await wait(40);
+  const pk=brow.querySelector('.rc-picker');
+  check(!!pk&&t.calls.some(c=>/ctos-proximas\?onu_id=7&q=$/.test(c.u))&&pk.textContent.includes('os 2 clientes dela vão juntos')&&pk.textContent.includes('Mais próximas das coordenadas de joao')&&pk.textContent.includes('Hoje: CTO-001, Porta 2'),'seletor: busca as mais próximas, avisa que os 2 clientes vão juntos e mostra a CTO atual');
+  check(pk.textContent.includes('CTO-<b>9</b>')&&!pk.querySelector('b')&&pk.textContent.includes('320 m')&&pk.textContent.includes('2 livre(s) de 4')&&pk.textContent.includes('sem porta livre'),'lista: nome como texto, distância, livres de total e "sem porta livre"');
+  const qi=pk.querySelector('input');t.calls.length=0;qi.value='CTO-1';qi.dispatchEvent(new t.w.Event('input'));await wait(320);
+  check(t.calls.some(c=>/ctos-proximas\?onu_id=7&q=CTO-1$/.test(c.u)),'digitar o nome busca por nome');
+  nextPost={status:409,body:{ok:false,codigo:'mover',message:'A ONU já está em CTO-001, Porta 2. Confirme para mover para CTO-<b>9</b>, Porta 1: os 2 clientes dessa ONU vão juntos.'}};
+  t.calls.length=0;[...pk.querySelectorAll('.rc-results button')].filter(b=>b.textContent==='Porta 1')[0].click();
+  check(pk.textContent.includes('Mover a ONU (2 clientes) para CTO-<b>9</b>, Porta 1?'),'escolher a porta pede confirmação, dizendo que são 2 clientes');
+  pk.querySelector('.rc-pick-confirm .rc-btn--ok').click();await wait(40);
+  p0=posts(t.calls)[0];check(p0.u==='/api/rede-vinculos/onu-cto'&&body(p0).onu_id==='7'&&body(p0).cto_id==='40'&&body(p0).port_id==='201'&&body(p0).mover==='1'&&p0.o.headers['X-CSRF-Token']==='TOKEN-TESTE','POST onu-cto com ONU, CTO, porta, mover=1 (ONU já tinha porta) e CSRF');
+  nextPost={status:200,body:{ok:true,message:'ONU com 2 clientes ligada a CTO-9, Porta 1.'}};
+  pk.querySelector('.rc-pick-confirm .rc-btn--ok').click();await wait(40);
+  const aq0=brow.querySelector('.rc-add input');check(!brow.querySelector('.rc-picker'),'seletor fecha ao concluir');
   const aq=brow.querySelector('.rc-add input');aq.value='ze';aq.dispatchEvent(new t.w.Event('input'));await wait(320);
   check(!t.calls.some(c=>c.u.indexOf('/api/rede-vinculos/clientes')===0),'adicionar cliente: menos de 3 caracteres nao busca');
   aq.value='zec';aq.dispatchEvent(new t.w.Event('input'));await wait(320);

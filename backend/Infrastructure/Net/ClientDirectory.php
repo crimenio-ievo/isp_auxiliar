@@ -25,6 +25,14 @@ interface ClientDirectory
      */
     public function namesByLogins(array $logins): array;
 
+    /**
+     * Resumo seguro (sem CPF, telefone ou e-mail) por login, para a ficha da ONU e as colunas da telemetria.
+     *
+     * @param list<string> $logins
+     * @return array<string,array{login:string,nome:string,bairro:string,cidade:string,endereco:string,numero:string,coordenadas:string,plano:string,situacao:string}> chave = login em minusculas
+     */
+    public function briefByLogins(array $logins): array;
+
     /** @return array{data: ?string, origem: ?string} data AAAA-MM-DD do cliente/sessao mais recente que a integracao enxerga */
     public function latestVisibleDate(): array;
 }

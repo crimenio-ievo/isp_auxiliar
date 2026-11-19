@@ -979,6 +979,45 @@ final class MkAuthDatabase implements ClientPlanReadRepository
         return $out;
     }
 
+    /**
+     * Resumo de clientes por login para a ficha da ONU (SOMENTE LEITURA, lista fechada de campos: nunca CPF/CNPJ, telefone, e-mail nem
+     * datas de nascimento). Chave = login em minusculas.
+     *
+     * @param list<string> $logins
+     * @return array<string, array{login:string,nome:string,bairro:string,cidade:string,endereco:string,numero:string,coordenadas:string,plano:string,situacao:string}>
+     */
+    public function clientBriefByLogins(array $logins): array
+    {
+        $logins = array_values(array_unique(array_filter(array_map(static fn ($l): string => trim((string) $l), $logins), static fn (string $l): bool => $l !== '')));
+        $out = [];
+        foreach (array_chunk($logins, 200) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $statement = $this->connection()->prepare(
+                'SELECT c.login, c.nome, c.bairro, c.cidade, c.endereco, c.numero, c.coordenadas, c.bloqueado, c.status_corte, c.cli_ativado,
+                        COALESCE(NULLIF(p.nome, ""), NULLIF(c.plano, "")) AS plano_nome
+                   FROM sis_cliente c LEFT JOIN sis_plano p ON LOWER(p.nome) = LOWER(c.plano) OR p.uuid_plano = c.plano
+                  WHERE c.login IN (' . $marks . ')'
+            );
+            $statement->execute($chunk);
+            foreach ($statement->fetchAll() as $row) {
+                $key = strtolower(trim((string) $row['login']));
+                if (isset($out[$key])) {
+                    continue;
+                }
+                $blocked = strtolower(trim((string) ($row['bloqueado'] ?? ''))) === 'sim' || strtolower(trim((string) ($row['status_corte'] ?? ''))) === 'down';
+                $active = in_array(strtolower(trim((string) ($row['cli_ativado'] ?? ''))), ['s', 'sim', '1', 'true', 'yes'], true);
+                $out[$key] = [
+                    'login' => trim((string) $row['login']), 'nome' => trim((string) $row['nome']), 'bairro' => trim((string) $row['bairro']),
+                    'cidade' => trim((string) $row['cidade']), 'endereco' => trim((string) $row['endereco']), 'numero' => trim((string) $row['numero']),
+                    'coordenadas' => trim((string) $row['coordenadas']), 'plano' => trim((string) $row['plano_nome']),
+                    'situacao' => $blocked ? 'bloqueado' : ($active ? 'ativo' : 'desativado'),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
     private function connection(): PDO
     {
         if ($this->pdo instanceof PDO) {

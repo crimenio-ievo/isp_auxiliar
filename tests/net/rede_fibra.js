@@ -62,10 +62,10 @@ async function boot(opts) {
   const w = dom.window;
   const style = w.document.createElement('style'); style.textContent = fs.readFileSync(path.join(root, 'public/assets/css/rede-fibra.css'), 'utf8'); w.document.head.appendChild(style);
   const treeData = opts.tree ? opts.tree(JSON.parse(JSON.stringify(tree))) : tree;
-  w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/eventos') !== -1 ? (opts.events ? opts.events(u) : events([evGroup()])) : u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
+  w.fetch = (u) => { calls.push(u); const status = opts.status && opts.status(u); const body = status ? {ok: false, message: 'Acesso negado.'} : {ok: true, data: u.indexOf('/api/rede-vinculos/onu-ficha') !== -1 ? (opts.ficha ? opts.ficha(u) : {clientes: [], mkauth_ok: true}) : u.indexOf('/api/rede-vinculos/clientes-resumo') !== -1 ? (opts.resumo ? opts.resumo(u) : {clientes: {}}) : u.indexOf('/eventos') !== -1 ? (opts.events ? opts.events(u) : events([evGroup()])) : u.indexOf('/onu') !== -1 ? (opts.sheet ? opts.sheet(u) : sheet()) : treeData};
     return Promise.resolve({ok: !status, status: status || 200, json: () => Promise.resolve(body)}); };
   if (opts.storage) { Object.keys(opts.storage).forEach(k => w.localStorage.setItem(k, opts.storage[k])); }
-  w.eval(js); await wait(40);
+  w.eval(fs.readFileSync(path.join(root, 'public/assets/js/rede-cto-picker.js'), 'utf8')); w.eval(js); await wait(40);
   const d = w.document, q = s => d.querySelector(s), qa = s => [...d.querySelectorAll(s)];
   return {w, d, q, qa, calls, errs, ev: (el, type, init) => el.dispatchEvent(new w.Event(type, Object.assign({bubbles: true}, init || {})))};
 }
@@ -117,7 +117,7 @@ async function boot(opts) {
 
   // Colunas escolhiveis (persistem)
   const boxes = t.qa('#rf-cols-list input');
-  ok(boxes.length === 9 && t.qa('#rf-cols-list label').map(x => x.textContent.trim()).join('|') === 'Estado|Sinal|Tx (dBm)|Temp. (°C)|Distância|Cliente|CTO|Quedas 24 h|MAC', 'menu de colunas: Cliente e CTO continuam disponíveis; Sinal e Faixa unificados'); const macBox = boxes[8]; macBox.checked = false; t.ev(macBox, 'change');
+  ok(boxes.length === 11 && t.qa('#rf-cols-list label').map(x => x.textContent.trim()).join('|') === 'Estado|Sinal|Tx (dBm)|Temp. (°C)|Distância|Cliente|CTO|Login|Bairro/Localidade|Quedas 24 h|MAC', 'menu de colunas: Login e Bairro/Localidade opcionais; Cliente e CTO continuam; Sinal e Faixa unificados'); const macBox = boxes[10]; macBox.checked = false; t.ev(macBox, 'change');
   ok(t.qa('#rf-table thead th').map(x => x.textContent).indexOf('MAC') === -1 && t.w.localStorage.getItem('rf.cols').indexOf('mac') === -1, 'coluna MAC oculta e salva');
   boxes[2].checked = true; t.ev(boxes[2], 'change'); ok(t.qa('#rf-table thead th').map(x => x.textContent).indexOf('Tx (dBm)') !== -1, 'coluna Tx habilitada');
 
@@ -407,6 +407,34 @@ async function boot(opts) {
   ok(t.qa('.rf-row--cto').length === 0 && t.q('#rf-note').textContent.indexOf('ainda não são lidos') !== -1, 'sem a tabela de vinculos: arvore como antes e aviso mantido');
   const sv = sheet({cliente: {login: 'joao', nome: 'João'}, cliente_texto: 'João', cto: {id: 5, nome: 'CTO-5', porta: 'Porta 3'}, cto_texto: 'CTO-5 · Porta 3'});
   ok(keys(sv) === K2(K.sheet), 'ficha com vinculo mantem as mesmas chaves da API');
+
+  // ---- ficha da ONU com mais dados, "Definir CTO", colunas Login e Bairro (ficha-onu) ----
+  const fichaCli = {mkauth_ok: true, clientes: [
+    {vinculo_id: 1, login: 'joao', nome: 'João <b>T</b>', modo_pppoe: 'pppoe_na_onu', endereco: 'Rua A, 10', bairro: 'Centro', cidade: 'Coimbra', coordenadas: {lat: -20.85, lng: -42.8}, plano: '100M', situacao_mkauth: 'ativo', encontrado_no_mkauth: true},
+    {vinculo_id: 2, login: 'maria', nome: null, modo_pppoe: null, endereco: null, bairro: null, cidade: null, coordenadas: null, plano: null, situacao_mkauth: null, encontrado_no_mkauth: false}]};
+  const tv = (tr) => { tr.fontes.cto = true; tr.fontes.vinculo_cliente = true; const on = tr.dispositivos[0].pons[0].onus; on[0].cliente = {login: 'joao', nome: 'João <b>T</b>'}; on[0].n_clientes = 2; on[0].clientes = [{login: 'joao', nome: 'João <b>T</b>', modo_pppoe: 'pppoe_na_onu'}, {login: 'maria', nome: null, modo_pppoe: null}]; on[0].cto = {id: 5, nome: 'CTO-5', porta: 'Porta 3'}; return tr; };
+  const sh2 = () => sheet({cliente: {login: 'joao', nome: 'João'}, n_clientes: 2, cliente_texto: 'João +1', cto: {id: 5, nome: 'CTO-5', porta: 'Porta 3'}, cto_texto: 'CTO-5 · Porta 3', clientes: [{login: 'joao', nome: 'João', modo_pppoe: 'pppoe_na_onu'}, {login: 'maria', nome: null, modo_pppoe: null}]});
+  const fc = await boot({tree: tv, sheet: sh2, ficha: () => fichaCli});
+  ok(fc.qa('#rf-table thead th').map(x => x.textContent).join('|') === 'ONU|Estado|Sinal|Distância|Cliente|CTO|Quedas 24 h|MAC' && !fc.calls.some(u => u.indexOf('clientes-resumo') !== -1), 'Login e Bairro/Localidade vêm desligadas e sem consulta ao MkAuth');
+  fc.qa('#rf-cols-list input').filter(i => i.parentNode.textContent.trim() === 'Login')[0].checked = true; fc.ev(fc.qa('#rf-cols-list input').filter(i => i.parentNode.textContent.trim() === 'Login')[0], 'change');
+  const lg = fc.qa('.rf-row--onu')[0];
+  ok(fc.qa('#rf-table thead th').map(x => x.textContent).indexOf('Login') !== -1 && lg.textContent.indexOf('joao') !== -1 && lg.textContent.indexOf('+1') !== -1 && !fc.calls.some(u => u.indexOf('clientes-resumo') !== -1), 'coluna Login: primeiro login + "+1", sem consultar o MkAuth');
+  const bx = fc.qa('#rf-cols-list input').filter(i => i.parentNode.textContent.trim() === 'Bairro/Localidade')[0]; bx.checked = true; fc.ev(bx, 'change'); await wait(60);
+  ok(fc.calls.filter(u => u.indexOf('clientes-resumo') !== -1).length === 1, 'ligar Bairro/Localidade consulta o resumo UMA vez');
+  const fcr = await boot({storage: {'rf.cols': JSON.stringify(['status', 'cliente', 'bairro'])}, tree: tv, resumo: () => ({clientes: {joao: {bairro: 'Centro', cidade: 'Coimbra'}}})}); await wait(60);
+  ok(fcr.qa('.rf-row--onu')[0].textContent.indexOf('Centro') !== -1 && fcr.qa('.rf-row--onu')[0].querySelector('td[title="Centro · Coimbra"]') && fcr.qa('.rf-row--onu')[1].textContent.indexOf('sem vínculo') !== -1, 'coluna Bairro/Localidade mostra o bairro do primeiro cliente');
+  const fer = await boot({storage: {'rf.cols': JSON.stringify(['status', 'cliente', 'bairro'])}, tree: tv, status: (u) => u.indexOf('clientes-resumo') !== -1 ? 503 : 0}); await wait(60);
+  ok(fer.qa('.rf-row--onu')[0].textContent.indexOf('indisponível') !== -1 && fer.errs.length === 0, 'MkAuth fora: "indisponível" na coluna e a tela segue');
+  fc.qa('.rf-row--onu')[0].querySelector('td').click(); await wait(80);
+  const fb = fc.q('#rf-p-body'), fbt = fb.textContent;
+  ok(fbt.indexOf('Dados dos clientes') !== -1 && fbt.indexOf('Rua A, 10 · Centro · Coimbra') !== -1 && fbt.indexOf('Plano: 100M') !== -1 && fbt.indexOf('Situação no MkAuth: Ativo') !== -1 && fbt.indexOf('cliente não encontrado no MkAuth') !== -1 && !fb.querySelector('b'), 'ficha da ONU: endereço curto, plano, situação e modo de cada cliente (texto puro)');
+  const mapA = fb.querySelector('a[href*="?lat="]'); ok(!!mapA && /\?lat=-20\.85&lng=-42\.8$/.test(mapA.getAttribute('href')) && mapA.textContent === 'ver no mapa', 'link "ver no mapa" com as coordenadas');
+  ok(!/cpf|telefone|celular|e-mail|@/i.test(fbt), 'a ficha não mostra CPF, telefone nem e-mail');
+  ok(!!fc.q('#rf-define-cto') && fc.q('#rf-define-cto').textContent === 'Trocar CTO', 'ficha com CTO: botão "Trocar CTO"');
+  fc.q('#rf-define-cto').click(); await wait(40);
+  ok(!!fc.q('.rc-picker') && fc.calls.some(u => /ctos-proximas\?onu_id=\d+&q=$/.test(u)), '"Trocar CTO" abre o seletor e busca as CTOs (sem texto = mais próximas)');
+  const f0 = await boot({tree: tv, sheet: () => sheet()}); f0.qa('.rf-row--onu')[3].querySelector('td').click(); await wait(60);
+  ok(!f0.q('#rf-define-cto') && f0.q('#rf-p-body').textContent.indexOf('Vincule um cliente a esta ONU') !== -1, 'ONU sem cliente: sem botão e com a orientação de vincular primeiro');
 
   // Fechar ficha
   t.q('#rf-p-close').click(); ok(t.q('#rf-panel').hidden && !t.q('.rf-layout').classList.contains('has-panel'), 'fechar ficha');

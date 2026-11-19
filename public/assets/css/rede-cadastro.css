@@ -79,3 +79,14 @@
 .rc-cands { display: grid; gap: 8px; }
 .rc-cand { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 6px 0; }
 .rc-cand + .rc-cand { border-top: 1px solid var(--border); }
+
+/* "Definir CTO" (seletor compartilhado de /rede-fibra e /rede-vinculos) */
+.rc-picker { margin-top: 10px; padding: 12px; border: 1px solid var(--border, #d9dde3); border-radius: 10px; background: var(--surface-alt, rgba(0,0,0,.03)); }
+.rc-picker input[type="search"] { width: 100%; box-sizing: border-box; margin: 6px 0; }
+.rc-picker .rc-results { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; max-height: 280px; overflow: auto; }
+.rc-picker .rc-results li { padding: 8px; border: 1px solid var(--border, #d9dde3); border-radius: 8px; }
+.rc-picker .rc-rowactions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rc-pick-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px; border-radius: 8px; background: rgba(245, 185, 66, .18); }
+.rc-add .rc-results { list-style: none; margin: 4px 0; padding: 0; }
+.rf-clientcard { margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--border, #d9dde3); border-radius: 8px; }
+.rf-clientcard p { margin: 2px 0; }

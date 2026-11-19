@@ -142,6 +142,10 @@ return static function (Router $router): void {
     $router->post('/api/rede-vinculos/cto', [NetBindingController::class, 'bindCto'], 'api.net.bindings.cto');
     $router->post('/api/rede-vinculos/remover', [NetBindingController::class, 'remove'], 'api.net.bindings.remove');
     $router->get('/api/rede-vinculos/onus', [NetBindingController::class, 'boundOnus'], 'api.net.bindings.onus');
+    $router->get('/api/rede-vinculos/onu-ficha', [NetBindingController::class, 'onuClients'], 'api.net.bindings.onu_clients');
+    $router->get('/api/rede-vinculos/clientes-resumo', [NetBindingController::class, 'clientsSummary'], 'api.net.bindings.clients_summary');
+    $router->get('/api/rede-vinculos/ctos-proximas', [NetBindingController::class, 'nearbyCtos'], 'api.net.bindings.nearby_ctos');
+    $router->post('/api/rede-vinculos/onu-cto', [NetBindingController::class, 'bindOnuCto'], 'api.net.bindings.onu_cto');
     $router->post('/api/rede-vinculos/modo', [NetBindingController::class, 'mode'], 'api.net.bindings.mode');
     $router->post('/api/rede-vinculos/onu', [NetBindingController::class, 'onu'], 'api.net.bindings.onu');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');

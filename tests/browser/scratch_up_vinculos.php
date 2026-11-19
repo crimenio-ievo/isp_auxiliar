@@ -42,6 +42,19 @@ foreach ([['cliente_a', 'Cliente Teste A', 'pppoe_na_onu'], ['cliente_b', 'Clien
 }
 $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cliente_nome,onu_id,origem,ativo,created_at,updated_at) VALUES ($pid,'cliente_e','Cliente Teste E',2,'manual',1,NOW(),NOW())");
 
+// "MkAuth" FICTICIO (schema local descartavel) para a ficha da ONU: so SELECT, com colunas sensiveis presentes para provar que nao saem.
+$pdo->exec('DROP DATABASE IF EXISTS isp_auxiliar_mksim');
+$pdo->exec('CREATE DATABASE isp_auxiliar_mksim');
+$pdo->exec('CREATE TABLE isp_auxiliar_mksim.sis_plano (nome VARCHAR(60), uuid_plano VARCHAR(40))');
+$pdo->exec('CREATE TABLE isp_auxiliar_mksim.sis_cliente (id INT AUTO_INCREMENT PRIMARY KEY, login VARCHAR(60), nome VARCHAR(100), bairro VARCHAR(60), cidade VARCHAR(60), endereco VARCHAR(100), numero VARCHAR(20), coordenadas VARCHAR(60), plano VARCHAR(60), bloqueado VARCHAR(5), status_corte VARCHAR(10), cli_ativado VARCHAR(5), cpf_cnpj VARCHAR(20), celular VARCHAR(20), email VARCHAR(80))');
+$pdo->exec("INSERT INTO isp_auxiliar_mksim.sis_plano VALUES ('Plano 100M', 'u1')");
+foreach ([['cliente_a', 'Cliente Teste A', 'Centro', 'Rua das Flores', '10', '-20.8571,-42.8011', 'nao', 's'], ['cliente_b', 'Cliente Teste B', 'Centro', 'Rua B', '20', '-20.8572,-42.8012', 'sim', 's'], ['cliente_c', 'Cliente Teste C', 'Vila Nova', 'Rua C', '30', '', 'nao', 'n'], ['cliente_d', 'Cliente Teste D', 'Vila Nova', 'Rua D', '40', '-20.8574,-42.8014', 'nao', 's'], ['cliente_e', 'Cliente Teste E', 'Alto', 'Rua E', '50', '-20.8551,-42.7992', 'nao', 's']] as [$l, $n, $b, $e, $nu, $co, $bl, $at]) {
+    $pdo->exec("INSERT INTO isp_auxiliar_mksim.sis_cliente (login,nome,bairro,cidade,endereco,numero,coordenadas,plano,bloqueado,status_corte,cli_ativado,cpf_cnpj,celular,email) VALUES ('$l','$n','$b','Coimbra','$e','$nu','$co','Plano 100M','$bl','ok','$at','11122233344','31988887777','sigiloso@exemplo.com')");
+}
+foreach (['mkauth_db_host' => 'localhost', 'mkauth_db_name' => 'isp_auxiliar_mksim', 'mkauth_db_user' => 'root', 'mkauth_db_password' => '', 'mkauth_db_port' => '3306'] as $k => $v) {
+    $pdo->exec("INSERT INTO provider_settings (provider_id, setting_key, setting_value, is_secret, updated_at) VALUES ($pid, '$k', '$v', " . ($k === 'mkauth_db_password' ? 1 : 0) . ', NOW())');
+}
+
 $dir = sys_get_temp_dir() . '/mapa_harness_' . bin2hex(random_bytes(4));
 mkdir($dir, 0700);
 session_save_path($dir);

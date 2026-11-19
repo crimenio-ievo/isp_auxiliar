@@ -17,6 +17,8 @@ use App\Infrastructure\Map\MapRepository;
 use App\Infrastructure\Net\BindingConflict;
 use App\Infrastructure\Net\ClientDirectory;
 use App\Infrastructure\Net\NetBindingRepository;
+use App\Infrastructure\Net\Coordinates;
+use App\Infrastructure\Net\NetCtoPicker;
 use App\Infrastructure\Net\NetCtoRepository;
 use App\Infrastructure\Net\OnuMatchSuggester;
 
@@ -381,6 +383,209 @@ final class NetBindingController
         ]);
 
         return Response::json(['ok' => true, 'message' => ($action === 'adicionar' ? 'Cliente ' : 'ONU vinculada a ') . $client['nome'] . ($action === 'adicionar' ? ' adicionado à ONU.' : '.'), 'data' => ['id' => $res['id']]], 200, self::NO_STORE);
+    }
+
+    /**
+     * Ficha da ONU: os clientes vinculados com os dados do MkAuth que ajudam a localizar o assinante, SEM abrir o cliente.
+     * Somente leitura; lista fechada de campos (nunca CPF/CNPJ, telefone nem e-mail). MkAuth fora do ar nao derruba a ficha:
+     * os campos do MkAuth vem null e `mkauth_ok=false`.
+     */
+    public function onuClients(Request $request): Response
+    {
+        $ctx = $this->guard(true, $denied);
+        if ($ctx === null) {
+            return $denied;
+        }
+        [$providerId] = $ctx;
+        $onuId = $this->idOrNull((string) $request->query('id', ''));
+        $bindings = new NetBindingRepository($this->database->pdo());
+        if ($onuId === null || !$bindings->available()) {
+            return $this->fail('ONU inválida.', 422);
+        }
+        $rows = $bindings->activeListByOnu($providerId, $onuId);
+        $briefs = [];
+        $ok = true;
+        if ($rows !== []) {
+            try {
+                $briefs = $this->mkauth->briefByLogins(array_map(static fn (array $r): string => (string) $r['mkauth_login'], $rows));
+            } catch (\Throwable) {
+                $ok = false;
+            }
+        }
+        $out = [];
+        foreach ($rows as $r) {
+            $b = $briefs[strtolower((string) $r['mkauth_login'])] ?? null;
+            $pair = $b !== null && $b['coordenadas'] !== '' ? Coordinates::parsePair($b['coordenadas']) : null;
+            $street = $b === null ? '' : trim($b['endereco'] . ($b['numero'] !== '' ? ', ' . $b['numero'] : ''));
+            $out[] = [
+                'vinculo_id' => (int) $r['id'], 'login' => (string) $r['mkauth_login'], 'nome' => $b['nome'] ?? ($r['cliente_nome'] === null ? null : (string) $r['cliente_nome']),
+                'modo_pppoe' => $r['modo_pppoe'] ?? null,
+                'endereco' => $b === null ? null : ($street !== '' ? $street : null), 'bairro' => $b === null ? null : ($b['bairro'] !== '' ? $b['bairro'] : null),
+                'cidade' => $b === null ? null : ($b['cidade'] !== '' ? $b['cidade'] : null),
+                'coordenadas' => $pair === null ? null : ['lat' => $pair[0], 'lng' => $pair[1]],
+                'plano' => $b === null || $b['plano'] === '' ? null : $b['plano'], 'situacao_mkauth' => $b['situacao'] ?? null,
+                'encontrado_no_mkauth' => $b !== null,
+            ];
+        }
+
+        return Response::json(['ok' => true, 'data' => ['clientes' => $out, 'mkauth_ok' => $ok]], 200, self::NO_STORE);
+    }
+
+    /** Bairro/cidade (e login) dos clientes com ONU, numa consulta so, para as colunas opcionais de /rede-fibra. Somente leitura. */
+    public function clientsSummary(Request $request): Response
+    {
+        $ctx = $this->guard(true, $denied);
+        if ($ctx === null) {
+            return $denied;
+        }
+        [$providerId] = $ctx;
+        $bindings = new NetBindingRepository($this->database->pdo());
+        if (!$bindings->available()) {
+            return $this->fail('A tabela de vínculos ainda não foi criada neste ambiente (migration 045).', 409);
+        }
+        $st = $this->database->pdo()->prepare('SELECT DISTINCT mkauth_login FROM client_network_bindings WHERE provider_id = ? AND ativo = 1 AND onu_id IS NOT NULL');
+        $st->execute([$providerId]);
+        $logins = array_map('strval', $st->fetchAll(\PDO::FETCH_COLUMN));
+        try {
+            $briefs = $logins === [] ? [] : $this->mkauth->briefByLogins($logins);
+        } catch (\Throwable) {
+            return $this->fail('Não foi possível consultar o MkAuth agora.', 503);
+        }
+        $out = [];
+        foreach ($briefs as $key => $b) {
+            $out[$key] = ['bairro' => $b['bairro'] !== '' ? $b['bairro'] : null, 'cidade' => $b['cidade'] !== '' ? $b['cidade'] : null];
+        }
+
+        return Response::json(['ok' => true, 'data' => ['clientes' => $out]], 200, self::NO_STORE);
+    }
+
+    /**
+     * "Definir CTO" de uma ONU: CTOs por nome (q) ou, sem q, as MAIS PROXIMAS das coordenadas do cliente (primeiro cliente da ONU
+     * com coordenada no MkAuth), cada uma com as portas livres. Somente leitura.
+     */
+    public function nearbyCtos(Request $request): Response
+    {
+        $ctx = $this->guard(true, $denied);
+        if ($ctx === null) {
+            return $denied;
+        }
+        [$providerId] = $ctx;
+        $onuId = $this->idOrNull((string) $request->query('onu_id', ''));
+        $q = trim((string) $request->query('q', ''));
+        $bindings = new NetBindingRepository($this->database->pdo());
+        if ($onuId === null || !$bindings->available() || mb_strlen($q) > 80) {
+            return $this->fail('Pedido inválido.', 422);
+        }
+        $rows = $bindings->activeListByOnu($providerId, $onuId);
+        $near = null;
+        $ref = null;
+        $aviso = null;
+        if ($rows === []) {
+            $aviso = 'Esta ONU ainda não tem cliente vinculado: vincule um cliente antes de definir a CTO.';
+        } else {
+            try {
+                $briefs = $this->mkauth->briefByLogins(array_map(static fn (array $r): string => (string) $r['mkauth_login'], $rows));
+                foreach ($rows as $r) {
+                    $b = $briefs[strtolower((string) $r['mkauth_login'])] ?? null;
+                    $pair = $b !== null && $b['coordenadas'] !== '' ? Coordinates::parsePair($b['coordenadas']) : null;
+                    if ($pair !== null) {
+                        $near = [$pair[0], $pair[1]];
+                        $ref = ['login' => (string) $r['mkauth_login'], 'lat' => $pair[0], 'lng' => $pair[1]];
+                        break;
+                    }
+                }
+                if ($near === null) {
+                    $aviso = 'Nenhum cliente desta ONU tem coordenadas no MkAuth: a lista está por nome.';
+                }
+            } catch (\Throwable) {
+                $aviso = 'Não foi possível consultar o MkAuth agora: a lista está por nome, sem a distância.';
+            }
+        }
+        $cur = null;
+        foreach ($rows as $r) {
+            if ($r['cto_port_id'] !== null) {
+                $cur = ['cto_id' => (int) $r['cto_node_id'], 'cto' => (string) $r['cto_nome'], 'porta_id' => (int) $r['cto_port_id'], 'porta' => (string) $r['porta_rotulo']];
+                break;
+            }
+        }
+
+        return Response::json(['ok' => true, 'data' => [
+            'ctos' => (new NetCtoPicker($this->database->pdo()))->search($providerId, $q, $near, 8),
+            'referencia' => $ref, 'aviso' => $aviso, 'n_clientes' => count($rows), 'atual' => $cur,
+        ]], 200, self::NO_STORE);
+    }
+
+    /**
+     * Define (ou troca) a CTO/porta de uma ONU. Regras da 048: a porta e da ONU, entao TODOS os clientes da ONU vao juntos; a porta so
+     * aceita a mesma ONU. Quando a ONU ja esta numa porta, pede confirmacao (codigo "mover") dizendo quantos clientes vao junto.
+     */
+    public function bindOnuCto(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+        $bindings = new NetBindingRepository($this->database->pdo());
+        if (!$bindings->available()) {
+            return $this->fail('A tabela de vínculos ainda não foi criada neste ambiente (migration 045).', 409);
+        }
+        $onuId = $this->idOrNull((string) $request->input('onu_id', ''));
+        $ctoId = $this->idOrNull((string) $request->input('cto_id', ''));
+        $portId = $this->idOrNull((string) $request->input('port_id', ''));
+        $rows = $onuId === null ? [] : $bindings->activeListByOnu($providerId, $onuId);
+        if ($rows === []) {
+            return $this->fail('Vincule um cliente a esta ONU antes de definir a CTO.', 409);
+        }
+        $cto = $ctoId === null ? null : $this->mapRepository->findNode($providerId, $ctoId);
+        if ($cto === null || $cto['node_type'] !== 'cto') {
+            return $this->fail('CTO não encontrada.', 404);
+        }
+        $port = $portId === null ? null : $this->mapRepository->findPort($providerId, $portId);
+        if ($port === null || (int) $port['node_id'] !== (int) $cto['id'] || $port['port_role'] !== 'fo') {
+            return $this->fail('A porta não pertence a esta CTO.', 422);
+        }
+        if ($port['status'] === 'defeito') {
+            return $this->fail($port['label'] . ' está com defeito e não pode receber cliente.', 422);
+        }
+        if ($this->mapRepository->linkUsingPort($providerId, (int) $port['id']) !== null) {
+            return $this->fail($port['label'] . ' está em uma ligação do mapa (alimentação/derivação) e não pode receber cliente.', 422);
+        }
+        foreach ($bindings->activeListByPort($providerId, (int) $port['id']) as $o) {
+            if ($o['onu_id'] === null || (int) $o['onu_id'] !== $onuId) {
+                return $this->fail($port['label'] . ' já está ocupada por ' . ($o['cliente_nome'] ?: $o['mkauth_login']) . ($o['onu_id'] !== null ? ' (outra ONU)' : '') . '.', 409);
+            }
+        }
+        $n = count($rows);
+        $current = null;
+        foreach ($rows as $r) {
+            if ($r['cto_port_id'] !== null) {
+                $current = $r;
+                break;
+            }
+        }
+        if ($current !== null && (int) $current['cto_port_id'] === (int) $port['id']) {
+            return Response::json(['ok' => true, 'message' => 'A ONU já está nesta porta.', 'data' => ['onu_id' => $onuId]], 200, self::NO_STORE);
+        }
+        if ($current !== null && (string) $request->input('mover', '') !== '1') {
+            return Response::json([
+                'ok' => false, 'codigo' => 'mover',
+                'message' => 'A ONU já está em ' . $current['cto_nome'] . ', ' . $current['porta_rotulo'] . '. Confirme para mover para ' . $cto['name'] . ', ' . $port['label'] . ($n > 1 ? ': os ' . $n . ' clientes dessa ONU vão juntos.' : '.'),
+            ], 409, self::NO_STORE);
+        }
+        try {
+            $res = $bindings->bindCto($providerId, (string) $rows[0]['mkauth_login'], null, (int) $cto['id'], (int) $port['id'], $actor);
+        } catch (BindingConflict $e) {
+            return $this->fail($e->getMessage(), 409);
+        } catch (\Throwable) {
+            return $this->fail('Não foi possível salvar o vínculo.', 500);
+        }
+        $this->audit($userId, $actor, 'net.binding.onu.cto', (int) $rows[0]['id'], [
+            'onu_id' => $onuId, 'clientes' => $n, 'linhas_movidas' => $res['movidos'], 'cto' => $cto['name'], 'cto_id' => (int) $cto['id'], 'porta' => $port['label'], 'porta_id' => (int) $port['id'],
+            'antes' => $current === null ? null : ['cto_id' => (int) $current['cto_node_id'], 'porta_id' => (int) $current['cto_port_id']],
+        ]);
+
+        return Response::json(['ok' => true, 'message' => ($n > 1 ? 'ONU com ' . $n . ' clientes ligada a ' : 'ONU ligada a ') . $cto['name'] . ', ' . $port['label'] . '.', 'data' => ['onu_id' => $onuId, 'clientes' => $n]], 200, self::NO_STORE);
     }
 
     /** Define ou limpa o modo PPPoE de um vinculo ativo (modo vazio = nao verificado). */

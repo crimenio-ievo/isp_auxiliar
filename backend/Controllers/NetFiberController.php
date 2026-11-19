@@ -12,6 +12,7 @@ use App\Core\Response;
 use App\Core\View;
 use App\Infrastructure\Database\Database;
 use App\Infrastructure\Local\LocalRepository;
+use App\Core\Csrf;
 use App\Infrastructure\Net\NetFiberReader;
 
 /**
@@ -46,6 +47,7 @@ final class NetFiberController
             'basePath' => $request->basePath(),
             'appName' => $this->config->get('app.name', 'ISP Auxiliar'),
             'user' => $user,
+            'csrf' => Csrf::token(NetDeviceController::CSRF_SCOPE),
         ]);
 
         return Response::html($html, 200, self::NO_STORE);

@@ -29,6 +29,8 @@ ob_start();
      data-api-modo="<?= $e(Url::to('/api/rede-vinculos/modo')); ?>"
      data-api-remove="<?= $e(Url::to('/api/rede-vinculos/remover')); ?>"
      data-api-search="<?= $e(Url::to('/api/rede-vinculos/clientes')); ?>"
+     data-api-ctos="<?= $e(Url::to('/api/rede-vinculos/ctos-proximas')); ?>"
+     data-api-bind="<?= $e(Url::to('/api/rede-vinculos/onu-cto')); ?>"
      data-client-url="<?= $e(Url::to('/clientes/detalhe')); ?>"
      data-onu-url="<?= $e(Url::to('/rede-fibra')); ?>"
      data-csrf="<?= $e((string) ($csrf ?? '')); ?>">
@@ -61,6 +63,7 @@ ob_start();
         <p class="rf-empty" id="vb-empty" hidden>Nenhuma ONU vinculada ainda.</p>
     </section>
 </div>
+<script src="<?= $e(Url::asset('js/rede-cto-picker.js?v=' . $v('js/rede-cto-picker.js'))); ?>" defer></script>
 <script src="<?= $e(Url::asset('js/rede-vinculos.js?v=' . $v('js/rede-vinculos.js'))); ?>" defer></script>
 <?php
 $content = (string) ob_get_clean();

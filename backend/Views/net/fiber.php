@@ -16,7 +16,7 @@ ob_start();
     <div>
         <p class="section-heading__eyebrow">Telemetria</p>
         <h1>Rede de fibra</h1>
-        <p class="page-description">OLT, PONs e ONUs lidas pela coleta automática. Somente leitura: nada aqui altera a rede.</p>
+        <p class="page-description">OLT, PONs e ONUs lidas pela coleta automática. Somente leitura, exceto "Definir CTO" na ficha da ONU (liga a ONU a uma porta de CTO).</p>
     </div>
 </section>
 <?php $netTab = 'fibra'; require __DIR__ . '/_tabs.php'; ?>
@@ -26,7 +26,13 @@ ob_start();
      data-api-onu="<?= $e(Url::to('/api/rede-fibra/onu')); ?>"
      data-api-events="<?= $e(Url::to('/api/rede-fibra/eventos')); ?>"
      data-client-url="<?= $e(Url::to('/clientes/detalhe')); ?>"
-     data-cto-url="<?= $e(Url::to('/rede-ctos/ficha')); ?>">
+     data-cto-url="<?= $e(Url::to('/rede-ctos/ficha')); ?>"
+     data-api-ficha="<?= $e(Url::to('/api/rede-vinculos/onu-ficha')); ?>"
+     data-api-resumo="<?= $e(Url::to('/api/rede-vinculos/clientes-resumo')); ?>"
+     data-api-ctos="<?= $e(Url::to('/api/rede-vinculos/ctos-proximas')); ?>"
+     data-api-bind="<?= $e(Url::to('/api/rede-vinculos/onu-cto')); ?>"
+     data-map-url="<?= $e(Url::to('/mapa')); ?>"
+     data-csrf="<?= $e((string) ($csrf ?? '')); ?>">
 
     <section class="card rf-filters" aria-label="Filtros">
         <label class="rf-field"><span>Site</span><select id="rf-f-site"><option value="">Todos</option></select></label>
@@ -78,6 +84,7 @@ ob_start();
         </div>
     </div>
 </div>
+<script src="<?= $e(Url::asset('js/rede-cto-picker.js?v=' . $v('js/rede-cto-picker.js'))); ?>" defer></script>
 <script src="<?= $e(Url::asset('js/rede-fibra.js?v=' . $v('js/rede-fibra.js'))); ?>" defer></script>
 <?php
 $content = (string) ob_get_clean();

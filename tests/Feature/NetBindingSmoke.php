@@ -48,6 +48,8 @@ $directory = new class () implements ClientDirectory {
     public function find(string $login): ?array { $this->calls[] = 'find'; if ($this->down) { throw new RuntimeException('mkauth fora (detalhe-interno)'); }
         foreach ($this->clients as $l => $nm) { if (strcasecmp($l, $login) === 0) { return ['login' => $l, 'nome' => $nm]; } } return null; }
     public function recentCallerMacs(int $days): array { $this->calls[] = 'callers'; if ($this->down) { throw new RuntimeException('mkauth fora (detalhe-interno)'); } return ['referencia' => '2026-10-13 09:45:43', 'inicio' => '2026-09-13 09:45:43', 'callers' => $this->callers]; }
+    public array $briefs = [];
+    public function briefByLogins(array $logins): array { $this->calls[] = 'brief'; if ($this->down) { throw new RuntimeException('mkauth fora (detalhe-interno)'); } $o = []; foreach ($logins as $l) { if (isset($this->briefs[strtolower($l)])) { $o[strtolower($l)] = $this->briefs[strtolower($l)]; } } return $o; }
     public function latestVisibleDate(): array { return ['data' => '2026-10-08', 'origem' => 'cliente']; }
     public function namesByLogins(array $logins): array { $o = []; foreach ($logins as $l) { if (isset($this->clients[strtolower($l)])) { $o[strtolower($l)] = $this->clients[strtolower($l)]; } } return $o; }
 };

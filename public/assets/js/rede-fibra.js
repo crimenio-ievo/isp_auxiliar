@@ -5,10 +5,15 @@
   var app = document.getElementById('rf-app');
   if (!app) { return; }
   var API = { tree: app.dataset.apiTree, onu: app.dataset.apiOnu, events: app.dataset.apiEvents };
-  var URLS = { client: app.dataset.clientUrl || '', cto: app.dataset.ctoUrl || '' };
+  var URLS = { client: app.dataset.clientUrl || '', cto: app.dataset.ctoUrl || '', ficha: app.dataset.apiFicha || '', resumo: app.dataset.apiResumo || '', ctos: app.dataset.apiCtos || '', bind: app.dataset.apiBind || '', map: app.dataset.mapUrl || '', csrf: app.dataset.csrf || '' };
   function clientLink(c) { var a = el('a', '', c.nome || c.login); a.href = URLS.client + '?login=' + encodeURIComponent(c.login); a.title = 'Abrir o perfil do cliente'; a.addEventListener('click', function (e) { e.stopPropagation(); }); return a; }
 var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
   function modoText(m) { return m ? (MODO[m] || m) : 'modo não verificado'; }
+  function loadResumo() {
+    state.resumoState = 'loading';
+    get(URLS.resumo).then(function (d) { state.resumo = d.clientes || {}; state.resumoState = 'ok'; renderTree(); })
+      .catch(function () { state.resumoState = 'error'; renderTree(); });
+  }
   function ctoLink(c, text) { var a = el('a', '', text || c.nome); a.href = URLS.cto + '?id=' + encodeURIComponent(c.id); a.title = 'Abrir a ficha da CTO'; a.addEventListener('click', function (e) { e.stopPropagation(); }); return a; }
   var $ = function (id) { return document.getElementById(id); };
   var NS = 'http://www.w3.org/2000/svg';
@@ -16,6 +21,7 @@ var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
   var COLS = [
     { k: 'status', l: 'Estado' }, { k: 'sinal', l: 'Sinal' }, { k: 'tx', l: 'Tx (dBm)' },
     { k: 'temp', l: 'Temp. (°C)' }, { k: 'dist', l: 'Distância' }, { k: 'cliente', l: 'Cliente' }, { k: 'cto', l: 'CTO' },
+    { k: 'login', l: 'Login' }, { k: 'bairro', l: 'Bairro/Localidade' },   // opcionais: desligadas por padrão
     { k: 'quedas', l: 'Quedas 24 h' }, { k: 'mac', l: 'MAC' }
   ];
   // Cliente e CTO vêm do vínculo ONU↔cliente↔CTO (client_network_bindings) e são visíveis por padrão (decisão do usuário, 2026-11-19).
@@ -28,7 +34,7 @@ var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
   var SITE_LABEL = { pop: 'POP', tower: 'Torre' };
   var STATUS = { online: 'Online', offline: 'Offline', unknown: 'Desconhecido' };
   var SORTABLE = { status: 'text', sinal: 'number', tx: 'number', temp: 'number', dist: 'number', quedas: 'number', mac: 'text' };
-  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '7d', from: '', to: '', sheet: null, evPeriod: '24h', sort: null };
+  var state = { tree: null, cols: loadCols(), collapsed: {}, selected: null, period: '7d', from: '', to: '', sheet: null, evPeriod: '24h', sort: null, resumo: null, resumoState: 'idle' };
   state.sort = loadSort();
 
   // Migra a preferência salva: as antigas colunas "Sinal (dBm)" (rx) e "Faixa" (band) viram a coluna única "Sinal".
@@ -213,6 +219,21 @@ var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
       if (o.cto === null) { td.textContent = state.tree.fontes.cto ? 'sem CTO' : 'ainda não lido'; td.className = 'rf-muted'; }
       else { td.appendChild(ctoLink(o.cto, o.cto.nome + (o.cto.porta ? ' · ' + o.cto.porta : ''))); }
     }
+    else if (k === 'login') {
+      if (o.cliente === null) { td.textContent = 'sem vínculo'; td.className = 'rf-muted'; }
+      else { td.textContent = o.cliente.login; if (o.n_clientes > 1) { var ml = el('span', 'rf-muted', ' +' + (o.n_clientes - 1)); ml.title = o.clientes.map(function (c) { return c.login; }).join(', '); td.appendChild(ml); } }
+    }
+    else if (k === 'bairro') {
+      if (o.cliente === null) { td.textContent = '—'; td.className = 'rf-muted'; }
+      else if (state.resumoState === 'error') { td.textContent = 'indisponível'; td.className = 'rf-muted'; td.title = 'Não foi possível consultar o MkAuth agora'; }
+      else if (state.resumo === null) { td.textContent = 'carregando…'; td.className = 'rf-muted'; }
+      else {
+        var rs = state.resumo[String(o.cliente.login).toLowerCase()];
+        td.textContent = rs ? (rs.bairro || rs.cidade || '—') : '—'; if (!rs || !(rs.bairro || rs.cidade)) { td.className = 'rf-muted'; }
+        if (rs && rs.bairro && rs.cidade) { td.title = rs.bairro + ' · ' + rs.cidade; }
+        if (o.n_clientes > 1) { td.appendChild(el('span', 'rf-muted', ' +' + (o.n_clientes - 1))); }
+      }
+    }
     else if (k === 'quedas') { td.textContent = o.quedas_24h > 0 ? String(o.quedas_24h) : '0'; if (o.quedas_24h > 0) { td.appendChild(el('span', 'rf-muted', ' · ' + fmtDT(o.ultima_queda_em))); } }
     else if (k === 'mac') { td.textContent = o.mac; }
     return td;
@@ -232,6 +253,7 @@ var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
   }
   function renderTree() {
     var f = filters(), head = $('rf-table').tHead, body = $('rf-table').tBodies[0], cols = COLS.filter(function (c) { return state.cols.indexOf(c.k) !== -1; });
+    if (state.cols.indexOf('bairro') !== -1 && state.resumoState === 'idle') { loadResumo(); }   // Bairro/Localidade vem do MkAuth (leitura), só quando a coluna está ligada
     clear(head); clear(body);
     var hr = el('tr'); hr.appendChild(el('th', '', 'ONU'));
     cols.forEach(function (c) {
@@ -435,6 +457,27 @@ var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
     });
     return t;
   }
+  // Dados do cliente na ficha da ONU (MkAuth, somente leitura): endereço curto, coordenadas, plano e situação. Sem CPF nem telefone.
+  var SITUACAO = { ativo: 'Ativo', bloqueado: 'Bloqueado', desativado: 'Desativado' };
+  function loadClientBox(onuId, host) {
+    get(URLS.ficha + '?id=' + encodeURIComponent(onuId)).then(function (r) {
+      if (!state.sheet || state.sheet.onu.id !== onuId) { return; }
+      host.className = ''; host.replaceChildren();
+      if (r.mkauth_ok === false) { host.appendChild(el('p', 'rf-muted', 'Não foi possível consultar o MkAuth agora: os dados do cliente não estão disponíveis.')); }
+      r.clientes.forEach(function (c) {
+        var card = el('div', 'rf-clientcard');
+        var head = el('p'); head.appendChild(clientLink({ login: c.login, nome: c.nome })); head.appendChild(el('span', 'rf-muted', ' · ' + c.login)); card.appendChild(head);
+        var place = [c.endereco, c.bairro, c.cidade].filter(Boolean).join(' · ');
+        card.appendChild(el('p', place ? '' : 'rf-muted', 'Endereço: ' + (place || (c.encontrado_no_mkauth ? 'não informado' : 'cliente não encontrado no MkAuth'))));
+        var lp = el('p'); lp.appendChild(document.createTextNode('Coordenadas: '));
+        if (c.coordenadas) { lp.appendChild(document.createTextNode(c.coordenadas.lat.toFixed(6) + ', ' + c.coordenadas.lng.toFixed(6) + ' · ')); var ma = el('a', '', 'ver no mapa'); ma.href = URLS.map + '?lat=' + encodeURIComponent(c.coordenadas.lat) + '&lng=' + encodeURIComponent(c.coordenadas.lng); lp.appendChild(ma); }
+        else { lp.appendChild(el('span', 'rf-muted', 'não informadas')); }
+        card.appendChild(lp);
+        card.appendChild(el('p', '', 'Plano: ' + (c.plano || '—') + ' · Situação no MkAuth: ' + (c.situacao_mkauth ? (SITUACAO[c.situacao_mkauth] || c.situacao_mkauth) : '—') + ' · Modo: ' + modoText(c.modo_pppoe)));
+        host.appendChild(card);
+      });
+    }).catch(function () { host.textContent = 'Não foi possível consultar os dados do cliente agora.'; });
+  }
   function renderSheet() {
     var d = state.sheet, o = d.onu, body = $('rf-p-body'); clear(body);
     $('rf-p-title').textContent = 'ONU ' + o.onu_index + ' · PON ' + o.pon_index + ' · ONU ou ONT: a identificar';
@@ -453,9 +496,23 @@ var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
       d.clientes.forEach(function (c) { var line = el('div'); line.appendChild(clientLink(c)); line.appendChild(el('span', 'rf-muted', ' · ' + modoText(c.modo_pppoe))); ddc.appendChild(line); });
     } else { ddc.textContent = d.cliente_texto; }
     g.appendChild(ddc);
-    g.appendChild(el('dt', '', 'CTO')); var ddt = el('dd'); if (d.cto) { ddt.appendChild(ctoLink(d.cto, d.cto_texto)); } else { ddt.textContent = d.cto_texto; } g.appendChild(ddt);
+    g.appendChild(el('dt', '', 'CTO')); var ddt = el('dd'); if (d.cto) { ddt.appendChild(ctoLink(d.cto, d.cto_texto)); } else { ddt.textContent = d.cto_texto; }
+    if (URLS.ctos) {   // caminho direto: ONU -> CTO/porta (a porta é da ONU; todos os clientes dela vão juntos)
+      var pickHost = el('div', 'rf-pickhost');
+      if (d.n_clientes > 0) {
+        var pb = el('button', 'rc-btn', d.cto ? 'Trocar CTO' : 'Definir CTO'); pb.type = 'button'; pb.id = 'rf-define-cto';
+        pb.addEventListener('click', function () {
+          window.RedeCtoPicker.open(pickHost, { onuId: o.id, nClientes: d.n_clientes, apiList: URLS.ctos, apiBind: URLS.bind, csrf: URLS.csrf,
+            onDone: function (m) { var n = $('rf-note'); if (n) { n.hidden = false; n.textContent = m; } loadTree().then(function () { if (state.selected) { loadSheet(); } }); } });
+        });
+        ddt.appendChild(document.createTextNode(' ')); ddt.appendChild(pb);
+      } else { ddt.appendChild(el('div', 'rf-muted', 'Vincule um cliente a esta ONU (em Vínculos) para poder definir a CTO.')); }
+      ddt.appendChild(pickHost);
+    }
+    g.appendChild(ddt);
     row('Última leitura', fmtDT(o.rx_medido_em));
     body.appendChild(g);
+    if (URLS.ficha && d.n_clientes > 0) { var cb = el('div', 'rf-clientbox'); cb.appendChild(el('h3', '', d.n_clientes > 1 ? 'Dados dos clientes' : 'Dados do cliente')); var cbody = el('div', 'rf-muted', 'Consultando o MkAuth (somente leitura)…'); cb.appendChild(cbody); body.appendChild(cb); loadClientBox(o.id, cbody); }
 
     var pr = el('div'); pr.appendChild(el('h3', '', 'Período'));
     var per = el('div', 'rf-periods');

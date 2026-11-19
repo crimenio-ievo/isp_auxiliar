@@ -1467,8 +1467,11 @@ final class MapController
         }
 
         $focus = $request->query('no');
+        $qLat = $request->query('lat');
+        $qLng = $request->query('lng');
+        $pin = is_string($qLat) && is_string($qLng) && is_numeric($qLat) && is_numeric($qLng) && abs((float) $qLat) <= 90 && abs((float) $qLng) <= 180 ? ['lat' => (float) $qLat, 'lng' => (float) $qLng] : null;
         $config = json_encode(
-            ['csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'ctoFicha' => \App\Core\Features::enabled('net') ? Url::to('/rede-ctos/ficha') : null, 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
+            ['pin' => $pin, 'csrf' => Csrf::token('map'), 'api' => Url::to('/api/mapa'), 'ctoFicha' => \App\Core\Features::enabled('net') ? Url::to('/rede-ctos/ficha') : null, 'focus' => is_string($focus) && ctype_digit($focus) && strlen($focus) < 16 ? (int) $focus : null],
             JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
         );
         $html = preg_replace('#</head>#i', '<script>window.ISP_MAP=' . $config . ';</script></head>', $html, 1) ?? $html;

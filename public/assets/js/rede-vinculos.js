@@ -101,7 +101,15 @@
       var n = 0, labels = ['ONU', 'CTO · porta', 'Clientes', 'Adicionar cliente'];
       function add(td) { td.setAttribute('data-label', labels[n++]); tr.appendChild(td); return td; }
       var a = el('a', null, 'PON ' + o.onu.pon + ' · ONU ' + o.onu.onu_index); a.href = D.onuUrl + '?onu=' + o.onu.id; add(el('td')).appendChild(a);
-      add(el('td', o.cto ? null : 'rf-muted', o.cto ? o.cto.nome + (o.cto.porta ? ' · ' + o.cto.porta : '') : 'sem CTO'));
+      var ctoCell = add(el('td', o.cto ? null : 'rf-muted', o.cto ? o.cto.nome + (o.cto.porta ? ' · ' + o.cto.porta : '') : 'sem CTO'));
+      if (D.apiCtos && window.RedeCtoPicker) {
+        var pickHost = el('div'), pb = el('button', 'rc-btn', o.cto ? 'Trocar CTO' : 'Definir CTO'); pb.type = 'button';
+        pb.addEventListener('click', function () {
+          window.RedeCtoPicker.open(pickHost, { onuId: o.onu.id, nClientes: o.clientes.length, apiList: D.apiCtos, apiBind: D.apiBind, csrf: CSRF,
+            onDone: function (m) { say(m, null); Promise.all([load(), loadBound()]); } });
+        });
+        ctoCell.appendChild(document.createTextNode(' ')); ctoCell.appendChild(pb); ctoCell.appendChild(pickHost);
+      }
       var cells = add(el('td'));
       o.clientes.forEach(function (c) {
         var line = el('div', 'rc-cand'); line.setAttribute('data-login', c.login);

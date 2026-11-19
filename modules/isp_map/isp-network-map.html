@@ -917,7 +917,17 @@ function resetTopology(){
 /* "Ver no mapa" das telas de rede: /mapa?no=ID centra e abre o painel do nó, uma única vez por carregamento da página. */
 let focusDone = false;
 function focusRequestedNode(){
-  const want = (window.ISP_MAP || {}).focus;
+  const cfgF = window.ISP_MAP || {};
+  const want = cfgF.focus;
+  if(!focusDone && !want && cfgF.pin && isFinite(cfgF.pin.lat) && isFinite(cfgF.pin.lng)){   // /mapa?lat=&lng=: marca o ponto (ex.: cliente da ONU) e centraliza
+    focusDone = true;
+    searchPin = {lat:+cfgF.pin.lat, lng:+cfgF.pin.lng};
+    measureMap();
+    view.cx = lngToWorldX(searchPin.lng); view.cy = latToWorldY(searchPin.lat);
+    view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, 256*Math.pow(2,17)));
+    renderAll();
+    return;
+  }
   if(focusDone || !want) return;
   focusDone = true;
   const n = nodes.find(x=>x.dbId===want);
