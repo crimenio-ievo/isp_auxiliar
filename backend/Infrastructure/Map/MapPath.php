@@ -9,7 +9,8 @@ namespace App\Infrastructure\Map;
  *
  * Formato gravado (objeto JSON):
  *   {"pontos": [[lat,lng], ...],            // SÓ os pontos intermediários; as pontas vêm dos nós
- *    "reservas": [{"local": "...", "m": 30}],  // reservas técnicas (lista no cabo)
+ *    "reservas": [{"local": "...", "m": 30, "pos": [lat,lng]}],  // reservas técnicas; "pos" (opcional) é o ponto no traçado
+ *                                              // onde a reserva aparece no mapa; sem "pos" = reserva antiga, vale no total
  *    "folga_pct": 5}                        // folga % sobre o traçado; ausente = padrão da rede
  * path_json NULL = cabo antigo, linha reta entre os dois nós (continua valendo).
  *
@@ -32,7 +33,7 @@ final class MapPath
      * Devolve o array canônico, null (sem traçado: linha reta) ou acrescenta erros.
      *
      * @param list<string> $errors
-     * @return array{pontos: list<array{0: float, 1: float}>, reservas: list<array{local: string, m: float}>, folga_pct?: float}|null
+     * @return array{pontos: list<array{0: float, 1: float}>, reservas: list<array{local: string, m: float, pos?: array{0: float, 1: float}}>, folga_pct?: float}|null
      */
     public static function normalize(mixed $raw, array &$errors): ?array
     {
@@ -118,7 +119,17 @@ final class MapPath
 
                 return null;
             }
-            $reservas[] = ['local' => $local, 'm' => round($m, 2)];
+            $item = ['local' => $local, 'm' => round($m, 2)];
+            if (isset($r['pos'])) {
+                $p = $r['pos'];
+                if (!is_array($p) || count($p) !== 2 || !isset($p[0], $p[1]) || !is_numeric($p[0]) || !is_numeric($p[1]) || abs((float) $p[0]) > 90 || abs((float) $p[1]) > 180) {
+                    $errors[] = 'Posição da reserva técnica inválida (esperado [lat, lng]).';
+
+                    return null;
+                }
+                $item['pos'] = [round((float) $p[0], 6), round((float) $p[1], 6)];
+            }
+            $reservas[] = $item;
         }
 
         $out = ['pontos' => $pontos, 'reservas' => $reservas];

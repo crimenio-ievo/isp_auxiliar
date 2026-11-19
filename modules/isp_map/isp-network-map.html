@@ -133,6 +133,11 @@ button{font-family:inherit;}
 .mmid{fill:#4fd1c5;fill-opacity:.55;stroke:#04211f;stroke-width:1.5;cursor:copy;}
 .mmid:hover{fill-opacity:1;}
 .trace-panel .action-row .btn{flex:1 1 100%;white-space:normal;}
+.mreserve{cursor:pointer;}
+.mreserve .rs-bg{fill:#f5b942;stroke:#2b1d00;stroke-width:2;}
+.mreserve .rs-ic{fill:none;stroke:#2b1d00;stroke-width:1.8;stroke-linecap:round;pointer-events:none;}
+.mreserve.sel .rs-bg{fill:#ffd978;stroke:#fff;}
+.mreserve.drag{cursor:grabbing;}
 .rs-row{display:flex;gap:6px;margin-bottom:6px;}
 .rs-row .rs-local{flex:1 1 auto;min-width:0;}
 .rs-row .rs-m{flex:0 0 84px;}
@@ -1090,6 +1095,7 @@ const LIFECYCLE_LABEL = {projeto:'Projeto', ativo:'Ativo', desativado:'Desativad
 const lifecycleOf = x => (x && x.lifecycle) || 'ativo';
 
 /* ---- estado de edição/criação ---- */
+let reserveMode = null;   // {linkId, idx|null}: esperando o clique no cabo para marcar/posicionar uma reserva
 let trace = null;       // edição do traçado de um cabo (ver bloco TRAÇADO DO CABO)
 let mode = 'idle';     // idle | placing | linking-dest
 let placingType = null;
@@ -1213,6 +1219,19 @@ function renderAll(){
     }
   });
 
+  // reservas técnicas com posição: ícone próprio sobre o cabo
+  links.forEach(l=>{
+    if(!linkVisible(l) || isInternalLink(l) || !l.reservas) return;
+    l.reservas.forEach((r,i)=>{
+      if(!r.pos) return;
+      const q = toScreen(r.pos[0], r.pos[1]);
+      if(q.x<-30||q.x>mapW+30||q.y<-30||q.y>mapH+30) return;
+      const sel = selectedLinkId===l.id;
+      parts.push(`<g class="mreserve${sel?' sel':''}" data-link="${l.id}" data-ri="${i}" transform="translate(${q.x.toFixed(1)},${q.y.toFixed(1)})"><title>${escapeHtml('Reserva técnica: '+(r.local||'sem local')+' · '+fmtLength(+r.m))}</title><circle class="rs-bg" r="9"/><path class="rs-ic" d="M-4,2 a4,4 0 1,1 4,3 a3,3 0 1,1 3,-3"/></g>`);
+    });
+  });
+
+
   // marcador temporário da busca por coordenada
   if(searchPin){
     const q = toScreen(searchPin.lat, searchPin.lng);
@@ -1280,7 +1299,11 @@ mapEl.addEventListener('pointerdown', (e)=>{
   const p = localPt(e);
   const vtx = trace && t.closest ? t.closest('.mvertex') : null;
   const midH = trace && t.closest ? t.closest('.mmid') : null;
-  if(vtx){
+  const resG = !trace && t.closest ? t.closest('.mreserve') : null;
+  if(resG && mode!=='reserving'){
+    const rl = resG.getAttribute('data-link');
+    ptr = {kind:'reserve', link:rl, idx:+resG.getAttribute('data-ri'), x0:p.x, y0:p.y, moved:false, wasSel:selectedLinkId===rl};
+  } else if(vtx){
     ptr = {kind:'vertex', idx:+vtx.getAttribute('data-vi'), x0:p.x, y0:p.y, moved:false};
   } else if(midH){
     ptr = {kind:'mid', idx:+midH.getAttribute('data-mi'), x0:p.x, y0:p.y, moved:false};
@@ -1303,7 +1326,10 @@ mapEl.addEventListener('pointermove', (e)=>{
   const p = localPt(e);
   const dist = Math.hypot(p.x-ptr.x0, p.y-ptr.y0);
   if(dist>4) ptr.moved = true;
-  if(ptr.kind==='mid' && ptr.moved && trace){   // arrastar o "+" cria um ponto novo e passa a arrastá-lo
+  if(ptr.kind==='reserve' && ptr.moved && ptr.wasSel){   // arrastar só vale com o cabo já selecionado (evita mover sem querer)
+    const rl = linkById(ptr.link), rr = rl && rl.reservas && rl.reservas[ptr.idx];
+    if(rr){ const sp = snapToLine(rl, toLatLng(p.x,p.y)); rr.pos = [sp.lat, sp.lng]; ptr.dragged = true; renderAll(); }
+  } else if(ptr.kind==='mid' && ptr.moved && trace){   // arrastar o "+" cria um ponto novo e passa a arrastá-lo
     const ll0 = toLatLng(p.x,p.y);
     trace.pts.splice(ptr.idx, 0, [ll0.lat, ll0.lng]);
     trace.sel = ptr.idx; trace.dirty = true;
@@ -1350,6 +1376,24 @@ mapEl.addEventListener('pointerup', (e)=>{
     drawTemp('');
     if(st.snap) openLinkTypeModal(nodeById(st.originId), nodeById(st.snap));
     else renderAll();
+    return;
+  }
+  if(st.kind==='reserve'){
+    const rl = linkById(st.link);
+    if(!rl) { renderAll(); return; }
+    if(st.dragged){ saveReserves(rl, 'Reserva movida.'); return; }
+    const rr = rl.reservas[st.idx];
+    onLinkClick(rl.id);
+    toast('Reserva técnica «'+(rr.local||'sem local')+'»: '+fmtLength(+rr.m)+' (cabo '+(rl.label||'')+')', 5000);
+    return;
+  }
+  if(mode==='reserving' && reserveMode){
+    if(st.moved) return;
+    const rl = linkById(reserveMode.linkId);
+    if(st.kind!=='link' || st.id!==reserveMode.linkId){ toast('Clique sobre o cabo selecionado para marcar a reserva.'); return; }
+    const sp = snapToLine(rl, toLatLng(p.x,p.y));
+    if(reserveMode.idx!==null){ rl.reservas[reserveMode.idx].pos = [sp.lat, sp.lng]; const keep = reserveMode; clearMode(); saveReserves(rl, 'Reserva posicionada.'); return; }
+    clearMode(); openReserveModal(rl, sp, null);
     return;
   }
   if(trace && (st.kind==='vertex' || st.kind==='mid' || st.kind==='pan')){
@@ -2043,7 +2087,7 @@ function openLinkPanel(linkId){
       ${fieldsHtml([
         {label:'Origem (envia) → Destino (recebe)', value:endpointLabel(a, l.fromPort)+' → '+endpointLabel(b, l.toPort), full:true},
         {label:'Comprimento', value:`<span data-link-len="${l.id}">${escapeHtml(linkLengthText(l))}</span><div data-link-detail="${l.id}" style="margin-top:6px">${linkLengthDetailHtml(l)}</div>`, full:true},
-        (l.reservas&&l.reservas.length) ? {label:'Reservas técnicas', value:l.reservas.map(r=>escapeHtml(r.local||'sem local')+' · '+fmtLength(+r.m)).join('<br>'), full:true} : null,
+        (l.reservas&&l.reservas.length) ? {label:'Reservas técnicas', value:l.reservas.map((r,i)=>escapeHtml(r.local||'sem local')+' · '+fmtLength(+r.m)+(r.pos?' · <span class="rf-muted">no mapa</span>':' · <span class="lk-detail">sem posição</span> <button class="btn btn-sm" data-place-reserve="'+i+'" type="button">Posicionar</button>')).join('<br>'), full:true} : null,
         (()=>{ const c=cables.find(cc=>cc.linkId===l.id); return c?{label:'Cabo físico', value:escapeHtml(c.nome)+' · '+c.tipo+' ('+c.totalFibras+' fibras)', full:true}:null; })(),
         l.freq ? {label:'Frequência', value:escapeHtml(l.freq)} : null,
         l.distancia ? {label:'Distância', value:escapeHtml(l.distancia)} : null,
@@ -2051,6 +2095,7 @@ function openLinkPanel(linkId){
       ])}
       <div class="action-row">
         <button class="btn" id="btn-edit-link" style="flex:1 1 100%;">Editar trecho</button>
+        ${l.medium==='radio'||l.type==='wireless' ? '' : '<button class="btn" id="btn-reserve-link" style="flex:1 1 100%;">Marcar reserva técnica no cabo</button>'}
         ${l.medium==='radio'||l.type==='wireless' ? '' : '<button class="btn" id="btn-trace-link" style="flex:1 1 100%;">Editar traçado (pontos do cabo)</button>'}
         <button class="btn" id="btn-invert-link" style="flex:1 1 100%;">⇄ Inverter sentido</button>
         <button class="btn" id="btn-sangria" style="flex:1 1 100%;" disabled title="Disponível em breve">Inserir caixa neste trecho (sangria) — disponível em breve</button>
@@ -2060,6 +2105,8 @@ function openLinkPanel(linkId){
   `;
   document.getElementById('panel-close-btn').addEventListener('click', closePanel);
   document.getElementById('btn-edit-link').addEventListener('click', ()=> openLinkEditModal(l));
+  const btnRes = document.getElementById('btn-reserve-link'); if(btnRes) btnRes.addEventListener('click', ()=> startReserveMode(l, null));
+  document.querySelectorAll('[data-place-reserve]').forEach(b=> b.addEventListener('click', ()=> startReserveMode(l, +b.getAttribute('data-place-reserve'))));
   const btnTrace = document.getElementById('btn-trace-link'); if(btnTrace) btnTrace.addEventListener('click', ()=> openTraceForLink(l));
   document.getElementById('btn-invert-link').addEventListener('click', ()=> invertLink(l));
   document.getElementById('btn-delete-link').addEventListener('click', ()=>{
@@ -2434,6 +2481,7 @@ function setModeBanner(text){
   b.classList.add('show');
 }
 function clearMode(){
+  reserveMode = null;
   if(trace){ const t = trace; trace = null; if(typeof t.onCancel==='function') t.onCancel(); renderAll(); }
   mode='idle'; placingType=null; linkOrigin=null;
   document.getElementById('mode-banner').classList.remove('show');
@@ -2661,7 +2709,11 @@ function normalizePath(raw){
   if(Array.isArray(o)) o = {pontos:o};
   if(!o || typeof o!=='object') return {pontos:[], reservas:[], folga_pct:null};
   const pontos = (Array.isArray(o.pontos)?o.pontos:[]).filter(q=>Array.isArray(q) && isFinite(+q[0]) && isFinite(+q[1])).map(q=>[+q[0], +q[1]]);
-  const reservas = (Array.isArray(o.reservas)?o.reservas:[]).filter(r=>r && isFinite(+r.m)).map(r=>({local:String(r.local||''), m:+r.m}));
+  const reservas = (Array.isArray(o.reservas)?o.reservas:[]).filter(r=>r && isFinite(+r.m)).map(r=>{
+    const it = {local:String(r.local||''), m:+r.m};
+    if(Array.isArray(r.pos) && r.pos.length===2 && isFinite(+r.pos[0]) && isFinite(+r.pos[1])) it.pos = [+r.pos[0], +r.pos[1]];   // ponto no traçado; sem pos = reserva antiga
+    return it;
+  });
   const f = o.folga_pct;
   return {pontos, reservas, folga_pct: (f===null||f===undefined||f==='') ? null : +f};
 }
@@ -2712,7 +2764,7 @@ function linkLengthDetailHtml(l){ return lengthDetailHtml(cableLength(l)); }
 function buildPathString(pts, reservas, folgaPct){
   const hasF = folgaPct!==null && folgaPct!==undefined && folgaPct!=='' && isFinite(+folgaPct);
   if(!(pts||[]).length && !(reservas||[]).length && !hasF) return '';
-  const o = {pontos:(pts||[]).map(q=>[+(+q[0]).toFixed(6), +(+q[1]).toFixed(6)]), reservas:(reservas||[]).map(r=>({local:r.local, m:+r.m}))};
+  const o = {pontos:(pts||[]).map(q=>[+(+q[0]).toFixed(6), +(+q[1]).toFixed(6)]), reservas:(reservas||[]).map(r=>{ const it = {local:r.local, m:+r.m}; if(r.pos) it.pos = [+(+r.pos[0]).toFixed(6), +(+r.pos[1]).toFixed(6)]; return it; })};
   if(hasF) o.folga_pct = +folgaPct;
   return JSON.stringify(o);
 }
@@ -2731,6 +2783,59 @@ function alongPath(l, ll){
     acc += segM;
   }
   return {fromA:best.along, toB:c.traceM-best.along};
+}
+
+/* ---- reservas técnicas como pontos no mapa ----
+   Cada reserva (path_json.reservas[i]) pode ter pos=[lat,lng], sempre encaixada no traçado do cabo. Sem pos (reservas antigas) ela
+   continua somando no total e aparece como "sem posição" no painel, com o botão Posicionar. */
+function snapToLine(l, ll){
+  const c = cableLength(l); if(!c) return {lat:ll.lat, lng:ll.lng};
+  const kx = 111320*Math.cos(ll.lat*Math.PI/180), ky = 110540;
+  let best = null;
+  for(let i=1;i<c.line.length;i++){
+    const A=c.line[i-1], B=c.line[i];
+    const ax=A.lng*kx, ay=A.lat*ky, bx=B.lng*kx, by=B.lat*ky, px=ll.lng*kx, py=ll.lat*ky;
+    const dx=bx-ax, dy=by-ay, len2=dx*dx+dy*dy;
+    const t = len2>0 ? Math.max(0, Math.min(1, ((px-ax)*dx+(py-ay)*dy)/len2)) : 0;
+    const d = Math.hypot(px-(ax+t*dx), py-(ay+t*dy));
+    if(!best || d<best.d) best = {d, lat:A.lat+(B.lat-A.lat)*t, lng:A.lng+(B.lng-A.lng)*t};
+  }
+  return best ? {lat:+best.lat.toFixed(6), lng:+best.lng.toFixed(6)} : {lat:ll.lat, lng:ll.lng};
+}
+function startReserveMode(l, idx){
+  if(!l.dbId){ toast('Trecho ainda não salvo. Recarregue o mapa.'); return; }
+  closeModal();
+  selectedLinkId = l.id; selectedNodeId = null; linkPoint = null;
+  reserveMode = {linkId:l.id, idx};
+  mode = 'reserving';
+  mapEl.classList.add('crosshair');
+  setModeBanner(idx===null ? 'Clique sobre o cabo para marcar a reserva técnica · Esc cancela' : 'Clique sobre o cabo para posicionar a reserva «'+(l.reservas[idx].local||'sem local')+'» · Esc cancela');
+  renderAll();
+}
+function saveReserves(l, okMsg){
+  mapPost('/links/editar', {id:l.dbId, path:buildPathString(l.pathPts, l.reservas, l.folgaPct)}).then(data=>{
+    loadNetwork(()=>{ const again = links.find(x=>x.dbId===l.dbId); if(again) onLinkClick(again.id); toastResult(okMsg, data); });
+  }).catch(err=>{ toast(err.message); loadNetwork(); });
+}
+function openReserveModal(l, pos){
+  modalEl.innerHTML = `
+    <div class="modal-head"><h3>Reserva técnica</h3><button class="panel-close" id="modal-x">✕</button></div>
+    <div class="modal-body">
+      <div class="cable-meta">Cabo: ${escapeHtml(l.label||'')}. A reserva fica marcada neste ponto do traçado e soma ao comprimento do cabo.</div>
+      <div class="form-field"><label>Local (opcional)</label><input id="f-rsv-local" type="text" maxlength="60" placeholder="ex.: poste 12, CTO-A"></div>
+      <div class="form-field"><label>Metros</label><input id="f-rsv-m" type="number" min="0" max="10000" step="0.1" placeholder="ex.: 30"></div>
+    </div>
+    <div class="modal-foot"><button class="btn" id="modal-cancel">Cancelar</button><button class="btn btn-accent" id="modal-save">Marcar reserva</button></div>`;
+  overlay.classList.add('show');
+  document.getElementById('modal-x').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-save').addEventListener('click', ()=>{
+    const m = Number(document.getElementById('f-rsv-m').value.replace(',','.'));
+    if(!isFinite(m) || m<0 || m>10000 || document.getElementById('f-rsv-m').value.trim()===''){ toast('Informe os metros da reserva (0 a 10000).'); return; }
+    l.reservas = (l.reservas||[]).concat([{local:document.getElementById('f-rsv-local').value.trim(), m:Math.round(m*100)/100, pos:[pos.lat, pos.lng]}]);
+    closeModal(); saveReserves(l, 'Reserva marcada no cabo.');
+  });
+  document.getElementById('f-rsv-m').focus();
 }
 
 /* ---- edição do traçado: arrastar, adicionar, remover pontos; desenhar clicando pela rota ----
@@ -2861,7 +2966,7 @@ function openTraceForLink(l){
 
 /* ---- editor de reservas técnicas + folga (usado no novo trecho e na edição) ---- */
 function reservaRowHtml(r){
-  return `<div class="rs-row"><input class="rs-local" type="text" maxlength="60" placeholder="Local (ex.: CTO-A, poste 12)" value="${escapeHtml(r.local||'')}"><input class="rs-m" type="number" min="0" max="10000" step="0.1" placeholder="m" value="${r.m!=null?escapeHtml(r.m):''}"><button type="button" class="btn btn-sm rs-del" title="Remover reserva">✕</button></div>`;
+  return `<div class="rs-row"${r.pos?` data-pos="${escapeHtml(r.pos[0]+','+r.pos[1])}"`:''}><input class="rs-local" type="text" maxlength="60" placeholder="Local (ex.: CTO-A, poste 12)" value="${escapeHtml(r.local||'')}"><input class="rs-m" type="number" min="0" max="10000" step="0.1" placeholder="m" value="${r.m!=null?escapeHtml(r.m):''}"><button type="button" class="btn btn-sm rs-del" title="Remover reserva">✕</button></div>`;
 }
 function reservasEditorHtml(reservas, folgaPct){
   return `<div class="form-field"><label>Reservas técnicas (local e metros)</label>
@@ -2886,7 +2991,10 @@ function readReservasEditor(){
     if(!local && raw==='') continue;
     const m = Number(raw.replace(',','.'));
     if(raw==='' || !isFinite(m) || m<0 || m>10000) return {error:'Reserva técnica: informe metros entre 0 e 10000'+(local?' ('+local+')':'')+'.'};
-    reservas.push({local, m:Math.round(m*100)/100});
+    const it = {local, m:Math.round(m*100)/100};
+    const ps = (r.getAttribute('data-pos')||'').split(',').map(Number);
+    if(ps.length===2 && isFinite(ps[0]) && isFinite(ps[1])) it.pos = ps;   // a posição no mapa sobrevive à edição dos metros/local
+    reservas.push(it);
   }
   const fr = document.getElementById('f-folga').value.trim().replace(',','.');
   let folgaPct = null;
@@ -3288,6 +3396,7 @@ function ctxItemsLink(l, ll){
   items.push({sep:true});
   items.push({label:'Editar trecho', onClick:()=> openLinkEditModal(l)});
   if(l.type!=='wireless') items.push({label:'Editar traçado', onClick:()=> openTraceForLink(l)});
+  if(l.type!=='wireless' && ll) items.push({label:'Marcar reserva técnica aqui', onClick:()=> openReserveModal(l, snapToLine(l, ll), null)});
   items.push({label:'Excluir trecho', danger:true, onClick:()=>{
     if(confirm('Excluir este trecho?')) deleteLinkRemote(l);
   }});

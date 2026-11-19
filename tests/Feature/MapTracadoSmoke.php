@@ -59,6 +59,16 @@ $L2 = MapPath::lengths($A, $B, ['pontos' => $path['pontos'], 'reservas' => []], 
 $ok($L2['slack_pct'] === 5.0 && $near($L2['slack_m'], $trace * 0.05, 0.01), 'sem folga própria, vale o padrão da rede');
 $L3 = MapPath::lengths($A, $B, $path, 1234.5, 0.0);
 $ok($L3['manual'] && $L3['total_m'] === 1234.5 && $near($L3['calculated_m'], $L['calculated_m'], 0.01), 'comprimento manual prevalece e o calculado continua disponível');
+// reservas com posicao no traçado (B2): "pos" e opcional; sem pos = reserva antiga (vale no total, aparece "sem posicao")
+$rp = MapPath::normalize('{"pontos":[[-20.851,-42.801]],"reservas":[{"local":"CTO-A","m":30,"pos":[-20.8512345678,-42.8011]},{"local":"poste 3","m":20}]}', $e);
+$ok(($rp['reservas'][0]['pos'] ?? null) === [-20.851235, -42.8011] && !array_key_exists('pos', $rp['reservas'][1]) && $rp['reservas'][1]['m'] === 20.0, 'reserva com pos (6 casas) e reserva antiga sem pos convivem');
+foreach (['pos fora' => '{"reservas":[{"local":"x","m":1,"pos":[95,0]}]}', 'pos incompleta' => '{"reservas":[{"local":"x","m":1,"pos":[1]}]}', 'pos texto' => '{"reservas":[{"local":"x","m":1,"pos":["a","b"]}]}', 'pos escalar' => '{"reservas":[{"local":"x","m":1,"pos":5}]}'] as $label => $raw) {
+    $err = [];
+    $ok(MapPath::normalize($raw, $err) === null && $err !== [], "recusa reserva: {$label}");
+}
+$withPos = MapPath::lengths($A, $B, $rp, null, 0.0);
+$noPos = $rp; unset($noPos['reservas'][0]['pos']);
+$ok($withPos['reserves_m'] === 50.0 && MapPath::lengths($A, $B, $noPos, null, 0.0)['total_m'] === $withPos['total_m'], 'a posicao nao muda o total: as duas reservas (30 + 20) entram igual');
 $simple = MapPath::simplify([[0, 0], [0.0000001, 0.0005], [0, 0.001]], 1.0);
 $ok(count($simple) === 2, 'simplify remove ponto colinear dentro da tolerância');
 $simple = MapPath::simplify([[0, 0], [0.001, 0.0005], [0, 0.001]], 1.0);
@@ -123,6 +133,19 @@ try {
     // auditoria sem a lista de pontos
     $audit = $pdo->query("SELECT context_json FROM audit_logs WHERE action = 'map.link.update' ORDER BY id DESC LIMIT 1")->fetchColumn();
     $ok(is_string($audit) && !str_contains($audit, '-20.855') && str_contains($audit, 'pontos'), 'auditoria guarda só a contagem de pontos, não as coordenadas');
+
+    // reservas com posicao: gravadas, devolvidas, movidas sem mexer no total; antigas sem pos continuam
+    $pr = '{"pontos":[[-20.855,-42.805]],"reservas":[{"local":"CTO-A","m":30,"pos":[-20.8531,-42.8031]},{"local":"antiga","m":20}]}';
+    $r = $post('updateLink', ['id' => $id1, 'path' => $pr]);
+    $rv = $get()['links'][0]['path_json']['reservas'] ?? [];
+    $ok($r[0] === 200 && count($rv) === 2 && $rv[0]['pos'] === [-20.8531, -42.8031] && !isset($rv[1]['pos']), 'GET devolve a reserva com pos e a antiga sem pos');
+    $r = $post('updateLink', ['id' => $id1, 'path' => '{"pontos":[[-20.855,-42.805]],"reservas":[{"local":"CTO-A","m":30,"pos":[-20.8541,-42.8041]},{"local":"antiga","m":20}]}']);
+    $rv2 = $get()['links'][0]['path_json']['reservas'];
+    $ok($r[0] === 200 && $rv2[0]['pos'] === [-20.8541, -42.8041] && $rv2[0]['m'] == 30 && $rv2[1]['m'] == 20, 'mover a reserva so troca a pos (metros e a antiga intactos)');
+    $before = json_encode($get()['links'][0]['path_json']);
+    $r = $post('updateLink', ['id' => $id1, 'path' => '{"pontos":[],"reservas":[{"local":"x","m":1,"pos":[200,0]}]}']);
+    $ok($r[0] === 422 && json_encode($get()['links'][0]['path_json']) === $before, 'pos invalida = 422 e nada e gravado');
+    $post('updateLink', ['id' => $id1, 'path' => '']);
 
     // permissão e CSRF
     $r = $post('updateLink', ['id' => $id1, 'path' => '{"pontos":[[1,1]]}'], false);

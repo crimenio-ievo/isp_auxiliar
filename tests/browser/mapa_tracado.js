@@ -78,9 +78,9 @@ const server = spawn('php', ['-S', '127.0.0.1:' + PORT, 'tests/browser/router.ph
     const line = () => [[A.lat, A.lng], ...link.path_json.pontos, [B.lat, B.lng]];
     const expected = poly(line());
     // abrir o painel do trecho clicando sobre o cabo (ponto do meio do segmento 2)
-    const openLinkPanel = async () => {
+    const openLinkPanel = async (fr = 0.5) => {
       const pts = await page.evaluate(() => { const r = document.querySelector('#map svg').getBoundingClientRect(); return [...document.querySelector('polyline.mlink-hit').points].map(p => [p.x + r.left, p.y + r.top]); });
-      const m = pts[1], n = pts[2]; await page.mouse.click((m[0] + n[0]) / 2, (m[1] + n[1]) / 2); await page.waitForSelector('#btn-ver-trecho'); await page.click('#btn-ver-trecho'); await page.waitForSelector('[data-link-len]');
+      const m = pts[1], n = pts[2]; await page.mouse.click(m[0] + (n[0] - m[0]) * fr, m[1] + (n[1] - m[1]) * fr);; await page.waitForSelector('#btn-ver-trecho'); await page.click('#btn-ver-trecho'); await page.waitForSelector('[data-link-len]');
     };
     await openLinkPanel();
     const lenTxt = () => page.locator('[data-link-len]').textContent();
@@ -136,6 +136,32 @@ const server = spawn('php', ['-S', '127.0.0.1:' + PORT, 'tests/browser/router.ph
     const det = (await page.locator('[data-link-detail]').textContent()).replace(/\s+/g, '');
     ck('traçado, folga e reservas em separado', det.includes(('Traçado' + fmt(tr)).replace(/\s+/g, '')) && det.includes('Reservastécnicas+20m'), det);
     await shot('05-distancia-detalhada');
+
+    // ---- B2: reserva técnica como ponto no mapa ----
+    const cablePt = async (seg, f) => page.evaluate(([sg, fr]) => { const r = document.querySelector('#map svg').getBoundingClientRect(); const P = [...document.querySelector('polyline.mlink-hit').points]; const a = P[sg], b = P[sg + 1]; return {x: r.left + a.x + (b.x - a.x) * fr, y: r.top + a.y + (b.y - a.y) * fr}; }, [seg, f]);
+    ck('reserva antiga (sem pos) aparece como "sem posição" no painel e não tem ícone', /sem posição/.test(await page.locator('#panel-right').textContent()) && (await page.locator('.mreserve').count()) === 0);
+    await page.locator('[data-place-reserve="0"]').click();
+    ck('"Posicionar" mostra a faixa do modo', /Clique sobre o cabo/.test(await page.locator('#mode-banner').textContent()));
+    let cp = await cablePt(1, 0.5); await page.mouse.click(cp.x, cp.y); await page.waitForTimeout(800);
+    d = await api(); link = d.links[0];
+    ck('a reserva ganhou posição gravada no cabo e o ícone aparece no mapa', Array.isArray(link.path_json.reservas[0].pos) && (await page.locator('.mreserve').count()) === 1);
+    await shot('05b-reserva-no-mapa');
+    await page.locator('.mreserve').first().click(); await page.waitForTimeout(200);
+    const tt = await toastText();
+    ck('clicar no ícone mostra os metros da reserva (20 m)', /20 m/.test(tt) && /CTO-T1/.test(tt), tt);
+    await openLinkPanel(0.2);
+    const pos0 = JSON.stringify((await api()).links[0].path_json.reservas[0].pos);
+    const ib = await page.locator('.mreserve').first().boundingBox();
+    const tgt = await cablePt(2, 0.5);
+    await page.mouse.move(ib.x + ib.width / 2, ib.y + ib.height / 2); await page.mouse.down(); await page.mouse.move(tgt.x, tgt.y + 25, {steps: 8}); await page.mouse.up(); await page.waitForTimeout(800);
+    ck('arrastar o ícone (cabo selecionado) grava outra posição', JSON.stringify((await api()).links[0].path_json.reservas[0].pos) !== pos0);
+    await openLinkPanel(); await page.click('#btn-reserve-link');
+    cp = await cablePt(0, 0.5); await page.mouse.click(cp.x, cp.y);
+    await page.waitForSelector('#f-rsv-m'); await page.fill('#f-rsv-local', 'poste 7'); await page.fill('#f-rsv-m', '12'); await page.click('#modal-save'); await page.waitForTimeout(800);
+    d = await api(); link = d.links[0];
+    ck('marcar nova reserva clicando no cabo: 2 reservas, as 2 posicionadas, 2 ícones; total soma 20 + 12', link.path_json.reservas.length === 2 && link.path_json.reservas.every(r => r.pos) && (await page.locator('.mreserve').count()) === 2 && link.path_json.reservas.reduce((t, r) => t + r.m, 0) === 32);
+    await shot('05c-duas-reservas');
+    await page.keyboard.press('Escape');
     await page.click('#btn-edit-link'); await page.waitForSelector('#f-lk-len');
     await page.fill('#f-lk-len', '500'); await page.click('#modal-save'); await page.waitForTimeout(800);
     await openLinkPanel();
@@ -147,7 +173,8 @@ const server = spawn('php', ['-S', '127.0.0.1:' + PORT, 'tests/browser/router.ph
     // ---- arrastar uma CTO e conferir a distância ----
     await page.keyboard.press('Escape');
     d = await api(); link = d.links[0];
-    const beforeTotal = poly(line()) * 1.1 + 20;
+    const resM = l => (l.path_json.reservas || []).reduce((t, r) => t + r.m, 0);
+    const beforeTotal = poly(line()) * 1.1 + resM(link);
     if (await page.locator('#panel-close-btn').count()) await page.click('#panel-close-btn');   // o painel cobre a CTO-T2
     await page.waitForTimeout(400);
     const t2b = await nodePos(1);
@@ -158,7 +185,7 @@ const server = spawn('php', ['-S', '127.0.0.1:' + PORT, 'tests/browser/router.ph
     await page.waitForTimeout(900);
     d = await api(); const B2 = d.nodes.find(n => n.name === 'CTO-T2'); const link2 = d.links[0];
     ck('arrastar a CTO gravou a nova posição e manteve os pontos do meio', (B2.lat !== B.lat || B2.lng !== B.lng) && link2.path_json.pontos.length === link.path_json.pontos.length, JSON.stringify([t2b, t2c, B, B2]));
-    const exp3 = poly([[A.lat, A.lng], ...link2.path_json.pontos, [B2.lat, B2.lng]]) * 1.1 + 20;
+    const exp3 = poly([[A.lat, A.lng], ...link2.path_json.pontos, [B2.lat, B2.lng]]) * 1.1 + resM(link2);
     await openLinkPanel();
     ck('distância acompanha a CTO movida (ponta segue o nó)', (await lenTxt()).startsWith(fmt(exp3)) && fmt(exp3) !== fmt(beforeTotal), (await lenTxt()) + ' esperado ' + fmt(exp3) + ' antes ' + fmt(beforeTotal));
     await shot('07-cto-arrastada');
