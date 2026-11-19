@@ -4,7 +4,10 @@ namespace App\Infrastructure\Net;
 use PDO;
 
 /**
- * Busca local da rede para a busca global do topo (so gestor/admin, ver NetFiberController::search).
+ * Busca local da rede para a busca global do topo (ver NetFiberController::search).
+ * Gestor/admin: todos os tipos. Tecnico ($readOnly): so resultados que abrem telas de leitura que ele ja pode ver
+ * (ficha da CTO sem edicao e perfil do cliente); ONU so quando vinculada; PON, equipamento e telemetria ficam de fora
+ * porque levam a telas so de gestor.
  * Nao consulta MkAuth nem equipamento. Tipos: onu (MAC parcial de 4+ hex), equipamento (nome/IP), cto (nome), pon ("PON 2 OLT-001"),
  * cliente (so clientes JA vinculados a CTO/ONU, por nome ou login, mostrando CTO e ONU). Cada resultado abre a tela certa.
  */
@@ -15,7 +18,7 @@ final class NetSearchReader
     public function __construct(private PDO $pdo) {}
 
     /** @return list<array{tipo:string,titulo:string,detalhe:?string,url:string}> */
-    public function search(int $providerId, string $query): array
+    public function search(int $providerId, string $query, bool $readOnly = false): array
     {
         $query=trim($query);
         if (mb_strlen($query)<2 || mb_strlen($query)>100) { return []; }
@@ -25,9 +28,19 @@ final class NetSearchReader
         // ONU por MAC parcial
         $mac=preg_replace('/[\s:.\-]/','',$query);
         if (preg_match('/^[a-fA-F0-9]{4,12}$/D',$mac)) {
-            $s=$this->pdo->prepare("SELECT o.id,o.onu_index,o.pon_index,n.name FROM net_onus o JOIN net_devices d ON d.id=o.device_id JOIN map_nodes n ON n.id=d.map_node_id WHERE o.provider_id=? AND d.provider_id=? AND n.provider_id=? AND o.removed_at IS NULL AND o.onu_identifier LIKE ? ORDER BY o.id LIMIT 5");
+            $bind=$this->bindingsAvailable();
+            $s=$this->pdo->prepare("SELECT o.id,o.onu_index,o.pon_index,n.name".($bind?",b.mkauth_login,b.cliente_nome,b.cto_node_id,c.name AS cto":",NULL AS mkauth_login,NULL AS cliente_nome,NULL AS cto_node_id,NULL AS cto")."
+                FROM net_onus o JOIN net_devices d ON d.id=o.device_id JOIN map_nodes n ON n.id=d.map_node_id"
+                .($bind?" LEFT JOIN client_network_bindings b ON b.onu_id=o.id AND b.provider_id=o.provider_id AND b.ativo=1 LEFT JOIN map_nodes c ON c.id=b.cto_node_id AND c.provider_id=b.provider_id":"")."
+                WHERE o.provider_id=? AND d.provider_id=? AND n.provider_id=? AND o.removed_at IS NULL AND o.onu_identifier LIKE ? ORDER BY o.id LIMIT 5");
             $s->execute([$providerId,$providerId,$providerId,'%'.strtoupper($mac).'%']);
-            foreach($s->fetchAll(PDO::FETCH_ASSOC) as $r) { $add('onu','ONU '.$r['onu_index'].' · PON '.$r['pon_index'].' · OLT '.$r['name'],'/rede-fibra?onu='.$r['id']); }
+            foreach($s->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $detail=$r['mkauth_login']!==null?'cliente '.($r['cliente_nome']?:$r['mkauth_login']).($r['cto']!==null?' · CTO '.$r['cto']:''):null;
+                $title='ONU '.$r['onu_index'].' · PON '.$r['pon_index'].' · OLT '.$r['name'];
+                if (!$readOnly) { $add('onu',$title,'/rede-fibra?onu='.$r['id'],$detail); continue; }
+                if ($r['cto_node_id']!==null) { $add('onu',$title,'/rede-ctos/ficha?id='.$r['cto_node_id'],$detail); }
+                elseif ($r['mkauth_login']!==null) { $add('onu',$title,'/clientes/detalhe?login='.rawurlencode((string)$r['mkauth_login']),$detail); }
+            }
         }
 
         $like='%'.strtr($query,['!'=>'!!','%'=>'!%','_'=>'!_']).'%';
@@ -36,7 +49,7 @@ final class NetSearchReader
         $pon=null;
         if (preg_match('/^\s*pon\s*(\d{1,3})(?:\s+(.+))?$/iu',$query,$m)) { $pon=[(int)$m[1],trim((string)($m[2]??''))]; }
         elseif (preg_match('/^\s*(.+?)\s+pon\s*(\d{1,3})\s*$/iu',$query,$m)) { $pon=[(int)$m[2],trim($m[1])]; }
-        if ($pon!==null) {
+        if ($pon!==null && !$readOnly) {
             $oltLike='%'.strtr($pon[1],['!'=>'!!','%'=>'!%','_'=>'!_']).'%';
             $s=$this->pdo->prepare("SELECT d.id AS device_id,n.name,p.port_num,p.label,(SELECT COUNT(*) FROM net_onus o WHERE o.device_id=d.id AND o.pon_index=p.port_num AND o.removed_at IS NULL) AS onus
                 FROM map_ports p JOIN map_nodes n ON n.id=p.node_id JOIN net_devices d ON d.map_node_id=n.id AND d.provider_id=n.provider_id
@@ -45,12 +58,14 @@ final class NetSearchReader
             foreach($s->fetchAll(PDO::FETCH_ASSOC) as $r) { $add('pon',(string)($r['label']?:'PON '.$r['port_num']).' · OLT '.$r['name'],'/rede-fibra?dispositivo='.$r['device_id'].'&pon='.$r['port_num'],(int)$r['onus'].' ONU(s) lida(s)'); }
         }
 
-        // Equipamento (OLT, switch...) por nome ou IP de gerencia
+        // Equipamento (OLT, switch...) por nome ou IP de gerencia (so gestor: leva a telas de edicao/telemetria)
+        if (!$readOnly) {
         $s=$this->pdo->prepare("SELECT n.id,n.name,d.id device_id,d.mgmt_host FROM map_nodes n LEFT JOIN net_devices d ON d.map_node_id=n.id AND d.provider_id=n.provider_id WHERE n.provider_id=? AND n.node_type IN ('olt','switch','router','radio','server','other') AND (n.name LIKE ? ESCAPE '!' OR d.mgmt_host LIKE ? ESCAPE '!') ORDER BY n.id LIMIT 4");
         $s->execute([$providerId,$like,$like]);
         foreach($s->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $add('equipamento',(string)$r['name'],'/rede-equipamentos?no='.$r['id'],$r['mgmt_host']!==null?(string)$r['mgmt_host']:null);
             if ($r['device_id']!==null) { $add('telemetria',(string)$r['name'].' · telemetria','/rede-fibra?dispositivo='.$r['device_id']); }
+        }
         }
 
         // CTO por nome

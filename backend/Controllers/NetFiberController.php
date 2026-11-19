@@ -15,7 +15,8 @@ use App\Infrastructure\Local\LocalRepository;
 use App\Infrastructure\Net\NetFiberReader;
 
 /**
- * Tela "Rede de fibra" (somente leitura): página + dois endpoints JSON. Só gestor/admin. Lê apenas o banco de
+ * Tela "Rede de fibra" (somente leitura): página + endpoints JSON. Só gestor/admin (a busca do topo também atende o
+ * técnico com clients.view, em modo só leitura). Lê apenas o banco de
  * telemetria; não acessa a OLT nem o MkAuth e não grava nada (sem CSRF/auditoria porque não há escrita).
  */
 final class NetFiberController
@@ -68,11 +69,15 @@ final class NetFiberController
 
     public function search(Request $request): Response
     {
-        $providerId=$this->guard($denied);
-        if ($providerId===null) { return $denied; }
+        // Técnico (clients.view) também busca, só leitura: o leitor devolve apenas destinos que ele pode abrir sem editar.
+        $user=$this->viewUser();
+        $isGestor=AccessControl::isGestor($user['access']);
+        if (!$isGestor && !AccessControl::can($user['access'],'clients.view')) { return Response::json(['ok'=>false,'message'=>'Acesso negado.'],403,self::NO_STORE); }
+        $providerId=$this->localRepository->currentProviderId();
+        if ($providerId===null) { return Response::json(['ok'=>false,'message'=>'Provedor não configurado.'],500,self::NO_STORE); }
         $q=$request->query('q','');
         if (!is_string($q)) { return Response::json(['ok'=>false,'message'=>'Busca inválida.'],422,self::NO_STORE); }
-        $results=(new \App\Infrastructure\Net\NetSearchReader($this->database->pdo()))->search($providerId,$q);
+        $results=(new \App\Infrastructure\Net\NetSearchReader($this->database->pdo()))->search($providerId,$q,!$isGestor);
         foreach($results as &$result) { $result['url']=\App\Core\Url::to($result['url']); }
         return Response::json(['ok'=>true,'data'=>$results],200,self::NO_STORE);
     }

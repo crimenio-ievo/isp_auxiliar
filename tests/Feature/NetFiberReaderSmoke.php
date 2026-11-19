@@ -220,10 +220,17 @@ try {
     $ctl = new NetFiberController(new View($root . '/backend/Views'), $cfg, $local, $db);
     $call = static function (string $method, array $q = []) use ($ctl): Response { return $ctl->$method(new Request('GET', '/x', '', $q)); };
     $_SESSION = ['user' => ['login' => 'tec', 'role' => 'technician', 'name' => 'Tec']];
-    foreach (['tree', 'onu', 'search'] as $m) {
+    foreach (['tree', 'onu'] as $m) {
         $r = $call($m, ['id' => '1']);
         $check($status->getValue($r) === 403 && str_contains((string) $body->getValue($r), 'Acesso negado') && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', "tecnico: {$m} 403 sem cache");
     }
+    // Decisao do usuario (2026-11-19): a busca de rede do topo vale para o tecnico, so leitura.
+    $r = $call('search', ['q' => 'OLT-TESTE']);
+    $check($status->getValue($r) === 200 && ($headers->getValue($r)['Cache-Control'] ?? '') === 'private, no-store', 'tecnico: busca de rede liberada (200, sem cache)');
+    $_SESSION = ['user' => ['login' => 'visit', 'role' => 'visitante', 'name' => 'Visitante']];
+    $r = $call('search', ['q' => 'OLT-TESTE']);
+    $check($status->getValue($r) === 403 && str_contains((string) $body->getValue($r), 'Acesso negado'), 'perfil sem busca de clientes: busca de rede 403');
+    $_SESSION = ['user' => ['login' => 'tec', 'role' => 'technician', 'name' => 'Tec']];
     $r = $call('page');
     $check($status->getValue($r) === 302 && ($headers->getValue($r)['Location'] ?? '') === '/dashboard', 'tecnico: pagina redireciona');
     $_SESSION = ['user' => ['login' => 'adm', 'role' => 'admin', 'is_admin' => true, 'name' => 'Adm']];
@@ -255,6 +262,17 @@ try {
     $cl = $by($network->search($providerId, 'joa'), 'cliente');
     $check(array_column($cl, 'detalhe') === ['CTO CTO-TESTE · ONU 1 · PON 1', 'sem CTO · ONU 3 · PON 1'] || count($cl) === 2, 'cliente sem CTO: "sem CTO"');
     $check($by($network->search($providerId, 'jo'), 'cliente') === [] && $by($network->search($providerId, 'joel'), 'cliente') === [] && $by($network->search($providerId, 'Outro'), 'cliente') === [], 'cliente: menos de 3 letras, vinculo inativo e outro provedor ficam de fora');
+    $o1 = $by($network->search($providerId, '00:2e:c7:00:00:01'), 'onu');
+    $check(count($o1) === 1 && $o1[0]['url'] === '/rede-fibra?onu=1' && $o1[0]['detalhe'] === 'cliente Joao da Silva · CTO CTO-TESTE', 'gestor: ONU vinculada mostra cliente e CTO e abre a ficha da ONU');
+    // Tecnico (so leitura): nada que leve a tela de gestor ou de edicao.
+    $ro = static fn (string $q): array => $network->search($providerId, $q, true);
+    $allRo = array_merge($ro('OLT-TESTE'), $ro('PON 2'), $ro('cto-teste'), $ro('joa'), $ro('002e'), $ro('fake'));
+    $check($allRo !== [] && array_filter($allRo, static fn ($x) => preg_match('#^/(rede-fibra|rede-equipamentos|rede-vinculos|mapa|api/)#', $x['url']) === 1) === [], 'tecnico: nenhum resultado aponta para /rede-fibra, /rede-equipamentos, /rede-vinculos, /mapa ou API');
+    $check($by($ro('OLT-TESTE'), 'equipamento') === [] && $by($ro('OLT-TESTE'), 'telemetria') === [] && $by($ro('PON 2'), 'pon') === [] && $ro('fake') === [], 'tecnico: sem equipamento, telemetria, PON nem IP de gerencia');
+    $check(array_column($by($ro('cto-teste'), 'cto'), 'url') === ['/rede-ctos/ficha?id=45'], 'tecnico: CTO abre a ficha (somente leitura para ele)');
+    $check(count($by($ro('joa'), 'cliente')) === 2 && in_array('/clientes/detalhe?login=joao_s', array_column($by($ro('joa'), 'cliente'), 'url'), true), 'tecnico: cliente vinculado abre o perfil do cliente');
+    $oro = $by($ro('002e'), 'onu');
+    $check(array_column($oro, 'url') === ['/rede-ctos/ficha?id=45', '/clientes/detalhe?login=joana_x'], 'tecnico: ONU so quando vinculada, abrindo a CTO (ou o cliente sem CTO); ONU sem vinculo fica de fora');
     $pdo->exec('DELETE FROM client_network_bindings');
     $check(count($network->search($providerId, 'a')) === 0 && count($network->search($providerId, str_repeat('a', 101))) === 0, 'consulta curta ou longa demais nao busca');
     $check($status->getValue($call('search',['q'=>'002e']))===200, 'busca autorizada na rota');

@@ -28,7 +28,7 @@ $globalSearchQuery = trim((string) ($_GET['q'] ?? ''));
     <?php endif; ?>
 
     <?php if ($canSearchClients): ?>
-        <form class="global-search<?= $homeHero ? ' global-search--hero' : ''; ?>" method="get" action="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>" role="search" data-global-search<?php if (AccessControl::isGestor($access) && Features::enabled('net')): ?> data-network-search="<?= htmlspecialchars(Url::to('/api/rede-fibra/buscar'), ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
+        <form class="global-search<?= $homeHero ? ' global-search--hero' : ''; ?>" method="get" action="<?= htmlspecialchars(Url::to('/clientes'), ENT_QUOTES, 'UTF-8'); ?>" role="search" data-global-search<?php if ((AccessControl::isGestor($access) || AccessControl::can($access, 'clients.view')) && Features::enabled('net')): ?> data-network-search="<?= htmlspecialchars(Url::to('/api/rede-fibra/buscar'), ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
             <label class="visually-hidden" for="global-search-input<?= $homeHero ? '-hero' : ''; ?>">Buscar</label>
             <input
                 id="global-search-input<?= $homeHero ? '-hero' : ''; ?>"

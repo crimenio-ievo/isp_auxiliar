@@ -4409,7 +4409,7 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-// Sugestões locais de rede na busca global. Endpoint restrito a gestor/admin.
+// Sugestões locais de rede na busca global. Gestor/admin veem tudo; técnico recebe só destinos de leitura (filtrado no servidor).
 document.querySelectorAll('[data-network-search]').forEach((form) => {
     const input = form.querySelector('input[name="q"]');
     if (!input) return;

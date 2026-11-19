@@ -90,4 +90,8 @@ $check(!str_contains($off, 'mapa') && !str_contains($off, 'rede-') && str_contai
 $top = $render(['map' => true, 'net' => true], $mgr, 'top');
 $topOff = $render(['map' => true, 'net' => false], $mgr, 'top');
 $check(str_contains($top, 'data-network-search="/x/api/rede-fibra/buscar"') && !str_contains($topOff, 'data-network-search') && str_contains($topOff, 'data-global-search'), 'busca global: sugestoes de rede so com a rede ligada; a busca de clientes continua');
+$topTech = $render(['map' => true, 'net' => true], $tech, 'top');
+$topTechOff = $render(['map' => true, 'net' => false], $tech, 'top');
+$topNone = $render(['map' => true, 'net' => true], ['is_manager' => false], 'top');
+$check(str_contains($topTech, 'data-network-search="/x/api/rede-fibra/buscar"') && !str_contains($topTechOff, 'data-network-search') && !str_contains($topNone, 'data-network-search'), 'busca global: tecnico (busca de clientes) recebe a busca de rede so leitura; sem permissao, nao');
 echo "FeatureFlagsSmoke: {$n} verificacoes, zero falhas\n";

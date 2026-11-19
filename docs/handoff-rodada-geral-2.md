@@ -17,3 +17,22 @@ telemetria.
 - Testes (`tests/net/rede_fibra.js`, 181 verificações): preferência antiga ganha Cliente/CTO e a marca; depois
   de ocultar Cliente, ela não volta; combinação com a migração antiga (rx/band → Sinal) sem duplicar; usuário
   sem preferência anterior que oculta CTO não a vê reaparecer.
+
+## 3b. Busca de rede do topo liberada para o técnico (só leitura)
+
+- `GET /api/rede-fibra/buscar` agora aceita, além do gestor/admin, quem tem `clients.view` (o técnico). Sem
+  essa permissão continua 403. O atributo `data-network-search` do topo segue a mesma regra e só aparece com
+  `feature.net` ligada.
+- O filtro é feito **no servidor** (`NetSearchReader::search(..., readOnly: true)`). O técnico só recebe
+  destinos que já pode abrir sem editar:
+  - **CTO** → `/rede-ctos/ficha?id=` (a ficha já era só leitura para ele);
+  - **cliente vinculado** → `/clientes/detalhe`;
+  - **ONU** → só quando vinculada, abrindo a CTO, ou o cliente quando não há CTO.
+- PON, equipamento, telemetria e IP de gerência ficam de fora para o técnico, porque levam a `/rede-fibra` e
+  `/rede-equipamentos`, que são só de gestor. **Decisão minha**: a alternativa seria abrir `/rede-fibra` para
+  o técnico, o que vai além do pedido.
+- Extra: o resultado de ONU vinculada passou a mostrar "cliente X · CTO Y" também para o gestor.
+- Testes: `NetFiberReaderSmoke` (128; o teste que exigia 403 do técnico agora exige 200; perfil sem
+  permissão continua 403; nenhum resultado do técnico aponta para `/rede-fibra`, `/rede-equipamentos`,
+  `/rede-vinculos`, `/mapa` ou API) e `FeatureFlagsSmoke` (99; o topo do técnico tem a busca de rede só com a
+  rede ligada).
