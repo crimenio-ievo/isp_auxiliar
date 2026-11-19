@@ -9,7 +9,7 @@ const fx={
   ctos:[
     {id:1,nome:'<img src=x onerror=window.__xss=1>CTO-1',lat:-20.8455534,lng:-42.80236,capacidade:16,portas:{total:16,ocupadas:3,livres:13,em_ligacao:3,com_cliente:0},clientes:null,origem:'OLT-001 · PON 1',observacao:'poste',situacao:'ativo'},
     {id:2,nome:'CTO-2',lat:null,lng:null,capacidade:8,portas:{total:8,ocupadas:0,livres:8,em_ligacao:0,com_cliente:0},clientes:null,origem:null,observacao:'',situacao:'ativo'},
-    {id:3,nome:'CTO-3',lat:-20.9,lng:-42.9,capacidade:8,portas:{total:8,ocupadas:2,livres:6,em_ligacao:1,com_cliente:1},clientes:1,origem:'POP-A',observacao:'',situacao:'ativo'}
+    {id:3,nome:'CTO-3',lat:-20.9,lng:-42.9,capacidade:8,portas:{total:8,ocupadas:2,livres:6,em_ligacao:1,com_cliente:1},clientes:4,onus:1,origem:'POP-A',observacao:'',situacao:'ativo'}
   ],
   pode_editar:true,origens:{sites:[{id:8,nome:'POP-A',tipo:'pop'}],pons:[{id:84,rotulo:'OLT-001 · PON 1',livre:false},{id:85,rotulo:'OLT-001 · PON 2',livre:true}]},vinculos_disponiveis:false,limites:{capacidade:[1,144],proximidade_m:15,csv_linhas:500}
 };
@@ -46,6 +46,7 @@ const posts=c=>c.filter(x=>x.o&&x.o.method==='POST');
  const btn=(row,text)=>[...row.querySelectorAll('button,a')].find(b=>b.textContent===text);
  check(rows().length===3&&w.__xss===undefined&&!D.querySelector('#ct-table img')&&rows()[0].textContent.includes('<img src=x'),'lista com nome malicioso como texto');
  const r0=rows()[0].textContent;
+ check(rows().some(r=>r.textContent.includes('CTO-3')&&r.textContent.includes('4 · 1 ONU(s)')),'lista: 4 clientes em 1 ONU aparecem separados (clientes x ONUs)');
  check(r0.includes('OLT-001 · PON 1')&&r0.includes('-20.845553, -42.802360')&&r0.includes('16')&&r0.includes('3 ocupadas · 13 livres')&&r0.includes('ainda não lido'),'linha: origem, coordenadas, capacidade, portas e clientes "ainda nao lido"');
  const r1=rows()[1].textContent;check(r1.includes('a identificar')&&r1.includes('sem coordenadas')&&r1.includes('0 ocupadas · 8 livres'),'campos ausentes: "a identificar"/"sem coordenadas"');
  check(rows()[2].textContent.includes('1')&&!rows()[2].textContent.includes('ainda não lido'),'cliente vinculado mostrado quando existe');

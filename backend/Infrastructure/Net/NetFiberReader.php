@@ -67,7 +67,7 @@ final class NetFiberReader
             $links = $bindings->forOnus($providerId, array_map(static fn (array $r): int => (int) $r['id'], $deviceRows));
             foreach ($deviceRows as $r) {
                 $onu = $this->onuItem($r, $limits, $now);
-                $this->applyBinding($onu, $links[$onu['id']] ?? null);
+                $this->applyBinding($onu, $links[$onu['id']] ?? []);
                 $onu['quedas_24h'] = $down[$onu['id']]['n'] ?? 0;
                 $onu['ultima_queda_em'] = $down[$onu['id']]['last'] ?? null;
                 $pi = (int) $r['pon_index'];
@@ -191,7 +191,7 @@ final class NetFiberReader
         $limits = $this->limits($providerId, $store);
         $onu = $this->onuItem($row, $limits, $now);
         $bindings = new NetBindingRepository($this->pdo);
-        $this->applyBinding($onu, $bindings->forOnus($providerId, [$onuId])[$onuId] ?? null);
+        $this->applyBinding($onu, $bindings->forOnus($providerId, [$onuId])[$onuId] ?? []);
         $deviceId = (int) $row['device_id'];
 
         // Mediana dos vizinhos da PON (outras ONUs online com leitura), sem a própria ONU.
@@ -240,22 +240,38 @@ final class NetFiberReader
             'limiares' => $limits,
             'fontes' => ['quedas_poll' => true, 'quedas_log' => $logAvailable],
             'cliente' => $onu['cliente'],
-            'cliente_texto' => $onu['cliente'] === null ? 'sem vínculo' : ($onu['cliente']['nome'] ?? $onu['cliente']['login']),
+            'clientes' => $onu['clientes'],
+            'n_clientes' => $onu['n_clientes'],
+            'cliente_texto' => $onu['cliente'] === null ? 'sem vínculo' : ($onu['cliente']['nome'] ?? $onu['cliente']['login']) . ($onu['n_clientes'] > 1 ? ' +' . ($onu['n_clientes'] - 1) : ''),
             'cto' => $onu['cto'],
             'cto_texto' => $onu['cto'] === null ? ($bindings->available() ? 'sem CTO' : 'ainda não lido') : $onu['cto']['nome'] . ($onu['cto']['porta'] !== null ? ' · ' . $onu['cto']['porta'] : ''),
         ];
     }
 
     /**
-     * Preenche cliente/CTO da ONU a partir do vinculo ativo (client_network_bindings). Sem vinculo: null.
+     * Preenche clientes/CTO da ONU a partir dos vinculos ativos (client_network_bindings). Varios clientes por ONU:
+     * `clientes` e a lista (ordem de criacao), `cliente` e o primeiro (compatibilidade) e `n_clientes` a contagem.
+     * A CTO/porta e da ONU: vem do primeiro vinculo que a tem. Sem vinculo: cliente null, lista vazia.
      *
      * @param array<string,mixed> $onu
-     * @param array<string,mixed>|null $b
+     * @param list<array<string,mixed>> $rows
      */
-    private function applyBinding(array &$onu, ?array $b): void
+    private function applyBinding(array &$onu, array $rows): void
     {
-        $onu['cliente'] = $b === null ? null : ['login' => (string) $b['mkauth_login'], 'nome' => $b['cliente_nome'] === null ? null : (string) $b['cliente_nome']];
-        $onu['cto'] = $b === null || $b['cto_node_id'] === null ? null : ['id' => (int) $b['cto_node_id'], 'nome' => (string) $b['cto_nome'], 'porta' => $b['porta_rotulo'] === null ? null : (string) $b['porta_rotulo']];
+        $onu['clientes'] = array_map(static fn (array $b): array => [
+            'login' => (string) $b['mkauth_login'],
+            'nome' => $b['cliente_nome'] === null ? null : (string) $b['cliente_nome'],
+            'modo_pppoe' => $b['modo_pppoe'] ?? null,
+        ], $rows);
+        $onu['n_clientes'] = count($rows);
+        $onu['cliente'] = $onu['clientes'] === [] ? null : ['login' => $onu['clientes'][0]['login'], 'nome' => $onu['clientes'][0]['nome']];   // forma antiga, so o primeiro
+        $onu['cto'] = null;
+        foreach ($rows as $b) {
+            if ($b['cto_node_id'] !== null) {
+                $onu['cto'] = ['id' => (int) $b['cto_node_id'], 'nome' => (string) $b['cto_nome'], 'porta' => $b['porta_rotulo'] === null ? null : (string) $b['porta_rotulo']];
+                break;
+            }
+        }
     }
 
     /** @return array<string,mixed> */

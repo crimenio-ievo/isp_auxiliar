@@ -13,7 +13,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const onu = (id, idx, pon, status, rx, band, extra) => Object.assign({id, pon_index: pon, onu_index: idx, mac: '00:2E:C7:00:00:0' + id, status, status_desde: '2026-11-13 08:00:00', desatualizado: false,
   rx_dbm: rx, rx_band: band, rx_medido_em: '2026-11-13 12:00:00', tx_dbm: rx === null ? null : 2.4, temp_c: rx === null ? null : 30.5, distancia_m: status === 'online' ? 22638 : null,
-  distancia_origem: status === 'online' ? 'estimada pelo RTT' : null, cliente: null, cto: null, quedas_24h: 0, ultima_queda_em: null}, extra || {});
+  distancia_origem: status === 'online' ? 'estimada pelo RTT' : null, cliente: null, clientes: [], n_clientes: 0, cto: null, quedas_24h: 0, ultima_queda_em: null}, extra || {});
 const tree = {
   gerado_em: '2026-11-13 12:00:00',
   dispositivos: [{id: 1, nome: 'OLT-<b>X</b>', ativo: true, intervalo_status_s: 600, ultima_tentativa: '2026-11-13 12:00:00', ultima_leitura_ok: '2026-11-13 12:00:00', ultimo_resultado: 'ok', tecnologia: 'epon', modelo: {}, ip: '198.51.100.1', tipo_no: 'olt', site: {id: 8, nome: 'Site-A', tipo: 'pop'}, saude: {estado: 'ok', minutos: 0, limite_s: 1200}, pons: [
@@ -34,13 +34,13 @@ const sheet = (over) => Object.assign({
   periodo: {kind: '24h', from: '2026-11-12 12:00:00', to: '2026-11-13 12:00:00'}, quedas: [outage], quedas_total: {quedas: 1, em_aberto: 0, downtime_no_periodo_s: 600, por_motivo: {energia: 1}, do_log: 1, do_poll: 0, log_sem_onu_cadastrada: 0},
   quedas_serie: [outage, Object.assign({}, outage, {started_at: '2026-11-11 08:00:00', ended_at: null, open: true, duration_s: null, reason: 'Sem aviso de energia', cause: 'sem_aviso_energia'})],
   ultimas_quedas: [outage], estavel: false, estavel_texto: null, limiares: tree.limiares, fontes: {quedas_poll: true, quedas_log: true},
-  cliente: null, cliente_texto: 'sem vínculo', cto: null, cto_texto: 'ainda não lido'}, over || {});
+  cliente: null, clientes: [], n_clientes: 0, cliente_texto: 'sem vínculo', cto: null, cto_texto: 'ainda não lido'}, over || {});
 
 // Mesmas listas de chaves de tests/Feature/NetFiberReaderSmoke.php: se a API mudar, os dois testes devem mudar juntos.
 const K = {
   tree: 'gerado_em,dispositivos,resumo,limiares,fontes', device: 'id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,modelo,ip,site,saude',
-  pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em',
-  sheet: 'onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto',
+  pon: 'pon_index,label,onus,total,online', onu: 'id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,clientes,n_clientes,cto,quedas_24h,ultima_queda_em',
+  sheet: 'onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,clientes,n_clientes,cliente_texto,cto,cto_texto',
   sheetOnu: 'baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto',
   outage: 'onu_id,onu_identifier_mascarado,source,precisao,category,maintenance_reason,started_at,ended_at,open,duration_s,downtime_in_period_s,cause,reason'
 };
@@ -387,6 +387,20 @@ async function boot(opts) {
   ok(vo.querySelector('a[href="/rede-ctos/ficha?id=5"]').textContent === 'CTO-5 · Porta 3', 'coluna CTO: nome e porta com link para a ficha');
   ok(vt.qa('.rf-row--onu')[1].querySelector('a[href="/clientes/detalhe?login=maria"]').textContent === 'maria', 'sem nome: mostra o login');
   ok(vt.qa('.rf-row--onu')[2].textContent.indexOf('sem vínculo') !== -1 && vt.qa('.rf-row--onu')[2].textContent.indexOf('sem CTO') !== -1, 'ONU sem vinculo: "sem vinculo" e "sem CTO"');
+  // varios clientes na mesma ONU (migration 048): primeiro + "+N" na coluna, ficha lista todos
+  const vn = await boot({storage: {'rf.cols': JSON.stringify(['status', 'cliente', 'cto'])}, tree: (tr) => {
+    tr.fontes.cto = true; tr.fontes.vinculo_cliente = true;
+    const on = tr.dispositivos[0].pons[0].onus;
+    on[0].cliente = {login: 'joao', nome: 'João <b>T</b>'}; on[0].n_clientes = 3; on[0].cto = {id: 5, nome: 'CTO-5', porta: 'Porta 3'};
+    on[0].clientes = [{login: 'joao', nome: 'João <b>T</b>', modo_pppoe: 'pppoe_na_onu'}, {login: 'maria', nome: null, modo_pppoe: null}, {login: 'pedro', nome: 'Pedro', modo_pppoe: 'atras_da_onu'}];
+    return tr; }, sheet: () => sheet({cliente: {login: 'joao', nome: 'João <b>T</b>'}, n_clientes: 3, cliente_texto: 'João <b>T</b> +2', cto: {id: 5, nome: 'CTO-5', porta: 'Porta 3'}, cto_texto: 'CTO-5 · Porta 3',
+      clientes: [{login: 'joao', nome: 'João <b>T</b>', modo_pppoe: 'pppoe_na_onu'}, {login: 'maria', nome: null, modo_pppoe: null}, {login: 'pedro', nome: 'Pedro', modo_pppoe: 'atras_da_onu'}]})});
+  const vn0 = vn.qa('.rf-row--onu')[0], more = vn0.querySelector('.rf-muted');
+  ok(vn0.querySelectorAll('a[href^="/clientes/detalhe"]').length === 1 && more && more.textContent.trim() === '+2' && more.title === 'João <b>T</b>, maria, Pedro' && !vn0.querySelector('b'), 'coluna Cliente: so o primeiro + "+2" (nomes completos no title, como texto)');
+  ok(vn.qa('.rf-row--onu')[1].querySelectorAll('.rf-muted').length >= 0 && vn.qa('.rf-row--onu')[1].textContent.indexOf('+') === -1, 'ONU com 1 cliente ou sem vinculo nao mostra "+N"');
+  vn.qa('.rf-row--onu')[0].click(); await wait(80);
+  const vnb = vn.q('#rf-p-body').textContent;
+  ok(vnb.indexOf('Clientes (3)') !== -1 && vn.q('#rf-p-body').querySelectorAll('a[href^="/clientes/detalhe"]').length === 3 && vnb.indexOf('PPPoE na ONU') !== -1 && vnb.indexOf('atrás da ONU') !== -1 && vnb.indexOf('modo não verificado') !== -1 && !vn.q('#rf-p-body b'), 'ficha da ONU: lista os 3 clientes, cada um com o modo (nao verificado quando NULL)');
   vcto[0].querySelector('.rf-toggle').click();
   ok(vt.qa('.rf-row--onu').length === 2 && vt.qa('.rf-row--cto')[0].querySelector('.rf-toggle').getAttribute('aria-expanded') === 'false', 'recolher a CTO esconde as suas ONUs');
   ok(vt.q('#rf-note').textContent.indexOf('ainda não são lidos') === -1, 'aviso de "vinculo ainda nao lido" some quando ha vinculos');

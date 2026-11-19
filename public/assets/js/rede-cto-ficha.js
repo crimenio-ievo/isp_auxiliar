@@ -43,8 +43,10 @@
     $('cf-title').textContent = 'CTO ' + c.nome;
     $('cf-sub').textContent = [c.origem ? 'Origem: ' + c.origem : 'Origem a identificar', c.lat === null ? 'sem coordenadas' : c.lat.toFixed(6) + ', ' + c.lng.toFixed(6), 'capacidade ' + c.capacidade].join(' · ');
     if (D.mapUrl) { $('cf-map').href = D.mapUrl + '?no=' + c.id; } else { $('cf-map').hidden = true; }
+    var cnt = d.contagem || { clientes: 0, onus: 0 };
+    // ONUs ocupam portas; clientes sao assinantes (uma ONU pode ter varios)
     var clients = d.portas.filter(function (p) { return p.cliente; }).length;
-    $('cf-summary').textContent = c.portas.total + ' porta(s) · ' + c.portas.em_ligacao + ' em ligação · ' + clients + ' com cliente · ' + c.portas.livres + ' livre(s)' + (c.portas.indisponiveis ? ' · ' + c.portas.indisponiveis + ' indisponível(is)' : '') + (d.vinculos_disponiveis ? '' : ' · vínculos ainda não disponíveis neste ambiente');
+    $('cf-summary').textContent = c.portas.total + ' porta(s) · ' + c.portas.em_ligacao + ' em ligação · ' + clients + ' ocupada(s) · ' + cnt.clientes + ' cliente(s) em ' + cnt.onus + ' ONU(s) · ' + c.portas.livres + ' livre(s)' + (c.portas.indisponiveis ? ' · ' + c.portas.indisponiveis + ' indisponível(is)' : '') + (d.vinculos_disponiveis ? '' : ' · vínculos ainda não disponíveis neste ambiente');
     tb.replaceChildren(); $('cf-empty').hidden = d.portas.length > 0;
     var freePorts = d.portas.filter(function (p) { return !p.cliente && !p.ligacao && p.status !== 'defeito'; });
     d.portas.forEach(function (p) {
@@ -56,7 +58,12 @@
       var kind = p.cliente ? ['Cliente', 'online'] : p.ligacao ? ['Em ligação', 'ok'] : p.status === 'defeito' ? ['Defeito', 'critico'] : p.status === 'reservada' ? ['Reservada', 'atencao'] : ['Livre', 'unknown'];
       st.appendChild(el('span', 'rf-pill rf-pill--' + kind[1], kind[0])); if (p.ligacao) { st.appendChild(el('div', 'rf-muted', p.ligacao)); }
       var cl = add(el('td'));
-      if (p.cliente) { cl.appendChild(clientLink(p.cliente)); cl.appendChild(el('div', 'rf-muted', p.cliente.login)); } else { cl.className = 'rf-muted'; cl.textContent = p.ligacao ? '—' : 'sem cliente'; }
+      if (p.cliente) {
+        (p.clientes && p.clientes.length ? p.clientes : [p.cliente]).forEach(function (c) {
+          var line = el('div'); line.appendChild(clientLink(c)); line.appendChild(el('span', 'rf-muted', ' · ' + c.login + (c.modo_pppoe ? ' · ' + (c.modo_pppoe === 'pppoe_na_onu' ? 'PPPoE na ONU' : 'atrás da ONU') : '')));
+          cl.appendChild(line);
+        });
+      } else { cl.className = 'rf-muted'; cl.textContent = p.ligacao ? '—' : 'sem cliente'; }
       var on = add(el('td'));
       if (p.cliente && p.cliente.onu) { var a = el('a', null, 'PON ' + p.cliente.onu.pon + ' · ONU ' + p.cliente.onu.onu_index); a.href = D.onuUrl + '?onu=' + p.cliente.onu.id; on.appendChild(a); }
       else { on.className = 'rf-muted'; on.textContent = p.cliente ? 'a identificar' : '—'; }
@@ -110,7 +117,8 @@
   // ----- trocar de porta -----
   function openMove(p, free) {
     if (!free.length) { say('Não há porta livre nesta CTO para onde mover.', 'warn'); return; }
-    state.port = p; $('cf-picker-title').textContent = 'Mover ' + (p.cliente.nome || p.cliente.login) + ' de ' + p.rotulo + ' para:';
+    var nn = (p.clientes || []).length;
+    state.port = p; $('cf-picker-title').textContent = 'Mover ' + (nn > 1 ? 'a ONU com ' + nn + ' clientes' : (p.cliente.nome || p.cliente.login)) + ' de ' + p.rotulo + ' para:';
     var box = $('cf-results'); box.replaceChildren(); $('cf-q').value = ''; $('cf-picker').hidden = false;
     free.forEach(function (f) {
       var li = el('li'), b = el('button', 'rc-result', f.rotulo); b.type = 'button';
@@ -119,7 +127,8 @@
     });
   }
   function askRemove(p) {
-    ask('Desvincular cliente?', 'Desvincular ' + (p.cliente.nome || p.cliente.login) + ' de ' + p.rotulo + '? ' + (p.cliente.onu ? 'O vínculo com a ONU é mantido.' : ''), 'Sim, desvincular', function () {
+    var nn = (p.clientes || []).length;
+    ask('Desvincular da porta?', (nn > 1 ? 'A porta é da ONU: a ' + p.rotulo + ' será retirada dos ' + nn + ' clientes dessa ONU. ' : 'Desvincular ' + (p.cliente.nome || p.cliente.login) + ' de ' + p.rotulo + '? ') + (p.cliente.onu ? 'O vínculo com a ONU é mantido.' : ''), 'Sim, desvincular', function () {
       post(D.apiRemove, { id: p.cliente.id, parte: 'cto' }).then(function (j) { say(j.message || (j.ok ? 'Feito.' : 'Não foi possível desvincular.'), j.ok ? null : 'error'); if (j.ok) { return load(); } });
     });
   }

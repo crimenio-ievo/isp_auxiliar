@@ -159,11 +159,11 @@ try {
     $check($keys($t) === $sortKeys('gerado_em,dispositivos,resumo,limiares,fontes'), 'chaves da arvore');
     $check($keys($t['dispositivos'][0]) === $sortKeys('id,nome,ativo,intervalo_status_s,ultima_tentativa,ultima_leitura_ok,ultimo_resultado,pons,tecnologia,tipo_no,modelo,ip,site,saude'), 'chaves do equipamento (as atuais + tecnologia, tipo_no, site e saude)');
     $check($keys($pons[0]) === $sortKeys('pon_index,label,onus,total,online'), 'chaves da PON');
-    $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
+    $check($keys($o1) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,clientes,n_clientes,cto,quedas_24h,ultima_queda_em'), 'chaves da ONU na arvore');
     $check($keys($t['resumo']) === $sortKeys('onus,online,offline,desconhecido,atencao,critico,saturado,sem_sinal,quedas_24h,sem_vinculo,sem_resposta'), 'chaves do resumo');
     $fk = $reader->sheet($providerId, 1);
-    $check($keys($fk) === $sortKeys('onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,cliente_texto,cto,cto_texto'), 'chaves da ficha');
-    $check($keys($fk['onu']) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,cto,baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto'), 'chaves da ONU na ficha');
+    $check($keys($fk) === $sortKeys('onu,vizinhos,serie,periodo,quedas,quedas_total,quedas_serie,ultimas_quedas,estavel,estavel_texto,limiares,fontes,cliente,clientes,n_clientes,cliente_texto,cto,cto_texto'), 'chaves da ficha');
+    $check($keys($fk['onu']) === $sortKeys('id,pon_index,onu_index,mac,status,status_desde,desatualizado,rx_dbm,rx_band,rx_medido_em,tx_dbm,temp_c,distancia_m,distancia_origem,cliente,clientes,n_clientes,cto,baseline_dbm,baseline_desde,baseline_amostras,olt_rx_dbm,olt_rx_texto'), 'chaves da ONU na ficha');
     $check($keys($fk['quedas'][0]) === $sortKeys('onu_id,onu_identifier_mascarado,source,precisao,category,maintenance_reason,started_at,ended_at,open,duration_s,downtime_in_period_s,cause,reason'), 'chaves da queda');
 
     // Ficha.

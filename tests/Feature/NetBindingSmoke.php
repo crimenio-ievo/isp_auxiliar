@@ -184,9 +184,9 @@ try {
     // Dois clientes, duas portas; unicidade no banco
     $check($post('bindCto', ['login' => 'maria', 'port_id' => (string) $port($ctoB, 3), 'cto_id' => (string) $ctoB])->status() === 409, 'porta ocupada (apos mover): 409');
     $check($post('bindCto', ['login' => 'maria', 'port_id' => (string) $port($ctoB, 1), 'cto_id' => (string) $ctoB])->status() === 200, 'segundo cliente em outra porta');
-    $threw = false;
-    try { $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,cto_node_id,cto_port_id,ativo,created_at,updated_at) VALUES ($providerId,'pedro',$ctoB," . $port($ctoB, 1) . ",1,NOW(),NOW())"); } catch (PDOException) { $threw = true; }
-    $check($threw, 'banco: uma porta de CTO so aceita um cliente ativo');
+    // Migration 048: porta e ONU deixam de ser unicas no banco (a regra "porta so de uma ONU" e da aplicacao, testada em NetBindingNClientesSmoke).
+    $idx = static fn (string $name): ?int => ($v = $pdo->query("SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'client_network_bindings' AND INDEX_NAME = '$name' LIMIT 1")->fetchColumn()) === false ? null : (int) $v;
+    $check($idx('cnb_porta_ativa') === 1 && $idx('cnb_onu_ativa') === 1 && $idx('cnb_par_ativo') === 0 && $idx('cnb_login_ativo') === 0, 'banco (048): porta e ONU nao sao unicas; par ativo e login ativo sao unicos');
     $threw = false;
     try { $pdo->exec("INSERT INTO client_network_bindings (provider_id,mkauth_login,ativo,created_at,updated_at) VALUES ($providerId,'maria',1,NOW(),NOW())"); } catch (PDOException) { $threw = true; }
     $check($threw, 'banco: um cliente so tem um vinculo ativo');

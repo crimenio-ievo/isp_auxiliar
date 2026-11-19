@@ -104,9 +104,15 @@ final class NetBindingController
         $bindings = new NetBindingRepository($this->database->pdo());
         $byPort = [];
         $noPort = [];
+        $onusNaCto = [];
+        $nClientes = 0;
         foreach ($bindings->available() ? $bindings->forCto($providerId, (int) $cto['id']) : [] as $b) {
             $row = $this->bindingView($b);
-            $b['cto_port_id'] === null ? $noPort[] = $row : $byPort[(int) $b['cto_port_id']] = $row;
+            $nClientes++;
+            if ($b['onu_id'] !== null) {
+                $onusNaCto[(int) $b['onu_id']] = true;
+            }
+            $b['cto_port_id'] === null ? $noPort[] = $row : $byPort[(int) $b['cto_port_id']][] = $row;
         }
         $portas = [];
         foreach ($this->mapRepository->portsOfFamily($providerId, (int) $cto['id'], 'fo') as $p) {
@@ -114,12 +120,15 @@ final class NetBindingController
             $portas[] = [
                 'id' => (int) $p['id'], 'num' => (int) $p['port_num'], 'rotulo' => (string) $p['label'], 'status' => (string) $p['status'],
                 'ligacao' => $link === null ? null : ($link['label'] !== null && $link['label'] !== '' ? (string) $link['label'] : 'ligação #' . $link['id']),
-                'cliente' => $byPort[(int) $p['id']] ?? null,
+                'cliente' => $byPort[(int) $p['id']][0] ?? null,                 // primeiro (compatibilidade)
+                'clientes' => $byPort[(int) $p['id']] ?? [],                      // varios clientes quando a porta e de uma ONU compartilhada
+                'onu' => ($byPort[(int) $p['id']][0]['onu'] ?? null),
             ];
         }
 
         return Response::json(['ok' => true, 'data' => [
             'cto' => $cto, 'portas' => $portas, 'sem_porta' => $noPort, 'pode_editar' => $canEdit,
+            'contagem' => ['clientes' => $nClientes, 'onus' => count($onusNaCto), 'portas_com_cliente' => count($byPort)],
             'vinculos_disponiveis' => $bindings->available(),
         ]], 200, self::NO_STORE);
     }
@@ -235,18 +244,28 @@ final class NetBindingController
         $login = (string) $client['login'];
         $nome = mb_substr((string) $client['nome'], 0, 160);
 
-        $occupant = $bindings->activeByPort($providerId, (int) $port['id']);
-        if ($occupant !== null && strcasecmp((string) $occupant['mkauth_login'], $login) !== 0) {
-            return $this->fail($port['label'] . ' já tem o cliente ' . ($occupant['cliente_nome'] ?: $occupant['mkauth_login']) . ' vinculado.', 409);
+        // Porta ocupada: so vale se for da MESMA ONU do cliente (a regra completa, travada em transacao, esta no repositorio).
+        $occupant = null;
+        foreach ($bindings->activeListByPort($providerId, (int) $port['id']) as $o) {
+            if (strcasecmp((string) $o['mkauth_login'], $login) !== 0) {
+                $occupant = $o;
+                break;
+            }
         }
         $current = $bindings->active($providerId, $login);
         if ($current !== null && $current['cto_port_id'] !== null && (int) $current['cto_port_id'] === (int) $port['id']) {
             return Response::json(['ok' => true, 'message' => 'O cliente já está nesta porta.', 'data' => ['id' => (int) $current['id']]], 200, self::NO_STORE);
         }
+        if ($occupant !== null && ($current === null || $current['onu_id'] === null || $occupant['onu_id'] === null || (int) $occupant['onu_id'] !== (int) $current['onu_id'])) {
+            return $this->fail($port['label'] . ' já tem o cliente ' . ($occupant['cliente_nome'] ?: $occupant['mkauth_login']) . ' vinculado' . ($occupant['onu_id'] !== null ? ' (ONU de outro cliente)' : '') . '.', 409);
+        }
         if ($current !== null && $current['cto_port_id'] !== null && (string) $request->input('mover', '') !== '1') {
+            $outros = $current['onu_id'] === null ? 0 : count($bindings->activeListByOnu($providerId, (int) $current['onu_id'])) - 1;
+
             return Response::json([
                 'ok' => false, 'codigo' => 'mover',
-                'message' => $nome . ' já está em ' . $current['cto_nome'] . ', ' . $current['porta_rotulo'] . '. Confirme para mover para ' . $cto['name'] . ', ' . $port['label'] . '.',
+                'message' => $nome . ' já está em ' . $current['cto_nome'] . ', ' . $current['porta_rotulo'] . '. Confirme para mover para ' . $cto['name'] . ', ' . $port['label'] . '.'
+                    . ($outros > 0 ? ' A porta é da ONU: os outros ' . $outros . ' cliente(s) dessa ONU vão junto.' : ''),
             ], 409, self::NO_STORE);
         }
         try {
@@ -260,6 +279,7 @@ final class NetBindingController
         $this->audit($userId, $actor, $moved ? 'net.binding.move' : 'net.binding.create', $res['id'], [
             'login' => $login, 'cto' => $cto['name'], 'cto_id' => (int) $cto['id'], 'porta' => $port['label'], 'porta_id' => (int) $port['id'],
             'antes' => $moved ? ['cto_id' => (int) $res['antes']['cto_node_id'], 'porta_id' => (int) $res['antes']['cto_port_id']] : null,
+            'linhas_movidas' => $res['movidos'],
         ]);
 
         return Response::json(['ok' => true, 'message' => $moved ? 'Cliente movido para ' . $port['label'] . '.' : 'Cliente vinculado a ' . $port['label'] . '.', 'data' => ['id' => $res['id']]], 200, self::NO_STORE);
@@ -306,9 +326,14 @@ final class NetBindingController
         $action = (string) $request->input('acao', '');
         $onuId = $this->idOrNull((string) $request->input('onu_id', ''));
         $login = trim((string) $request->input('login', ''));
-        if (!in_array($action, ['confirmar', 'recusar'], true) || $login === '' || mb_strlen($login) > 120) {
+        if (!in_array($action, ['confirmar', 'recusar', 'adicionar'], true) || $login === '' || mb_strlen($login) > 120) {
             return $this->fail('Pedido inválido.', 422);
         }
+        $modoRaw = trim((string) $request->input('modo', ''));
+        if ($modoRaw !== '' && !in_array($modoRaw, NetBindingRepository::MODOS, true)) {
+            return $this->fail('Modo inválido (pppoe_na_onu ou atras_da_onu; vazio = não verificado).', 422);
+        }
+        $modo = $modoRaw === '' ? null : $modoRaw;
         $st = $this->database->pdo()->prepare('SELECT id, removed_at FROM net_onus WHERE id = ? AND provider_id = ?');
         $st->execute([$onuId ?? 0, $providerId]);
         $onu = $st->fetch(\PDO::FETCH_ASSOC);
@@ -332,9 +357,11 @@ final class NetBindingController
             return $this->fail('Cliente não encontrado no MkAuth.', 404);
         }
         $login = (string) $client['login'];
-        $occupant = $bindings->activeByOnu($providerId, (int) $onu['id']);
-        if ($occupant !== null) {
-            return $this->fail('Essa ONU já está vinculada a ' . ($occupant['cliente_nome'] ?: $occupant['mkauth_login']) . '.', 409);
+        // Varios clientes por ONU: ONU ja vinculada recebe mais um (acao "adicionar"); a sugestao pelo MAC ("confirmar") segue
+        // valendo so para ONU sem vinculo, para nao empilhar clientes por engano.
+        $already = $bindings->activeListByOnu($providerId, (int) $onu['id']);
+        if ($already !== [] && $action === 'confirmar') {
+            return $this->fail('Essa ONU já está vinculada a ' . ($already[0]['cliente_nome'] ?: $already[0]['mkauth_login']) . '. Use "adicionar cliente" para incluir mais um.', 409);
         }
         $current = $bindings->active($providerId, $login);
         if ($current !== null && $current['onu_id'] !== null) {
@@ -343,15 +370,71 @@ final class NetBindingController
         $conf = (string) $request->input('confianca', '');
         $conf = in_array($conf, self::CONFIDENCE, true) ? $conf : null;
         try {
-            $res = $bindings->bindOnu($providerId, $login, mb_substr((string) $client['nome'], 0, 160), (int) $onu['id'], 'sugestao_mac', $conf, $actor);
+            $res = $bindings->bindOnu($providerId, $login, mb_substr((string) $client['nome'], 0, 160), (int) $onu['id'], $action === 'adicionar' ? 'manual' : 'sugestao_mac', $action === 'adicionar' ? null : $conf, $actor, $modo);
         } catch (BindingConflict $e) {
             return $this->fail($e->getMessage(), 409);
         } catch (\Throwable) {
             return $this->fail('Não foi possível salvar o vínculo.', 500);
         }
-        $this->audit($userId, $actor, 'net.binding.onu.confirm', $res['id'], ['login' => $login, 'onu_id' => (int) $onu['id'], 'confianca' => $conf, 'origem' => 'sugestao_mac']);
+        $this->audit($userId, $actor, $action === 'adicionar' ? 'net.binding.onu.add' : 'net.binding.onu.confirm', $res['id'], [
+            'login' => $login, 'onu_id' => (int) $onu['id'], 'confianca' => $conf, 'origem' => $action === 'adicionar' ? 'manual' : 'sugestao_mac', 'modo_pppoe' => $modo, 'clientes_na_onu' => count($already) + 1,
+        ]);
 
-        return Response::json(['ok' => true, 'message' => 'ONU vinculada a ' . $client['nome'] . '.', 'data' => ['id' => $res['id']]], 200, self::NO_STORE);
+        return Response::json(['ok' => true, 'message' => ($action === 'adicionar' ? 'Cliente ' : 'ONU vinculada a ') . $client['nome'] . ($action === 'adicionar' ? ' adicionado à ONU.' : '.'), 'data' => ['id' => $res['id']]], 200, self::NO_STORE);
+    }
+
+    /** Define ou limpa o modo PPPoE de um vinculo ativo (modo vazio = nao verificado). */
+    public function mode(Request $request): Response
+    {
+        $guard = $this->guardWrite($request);
+        if ($guard instanceof Response) {
+            return $guard;
+        }
+        [$providerId, $userId, $actor] = $guard;
+        $bindings = new NetBindingRepository($this->database->pdo());
+        $id = $this->idOrNull((string) $request->input('id', ''));
+        $raw = trim((string) $request->input('modo', ''));
+        if (!$bindings->available() || $id === null || ($raw !== '' && !in_array($raw, NetBindingRepository::MODOS, true))) {
+            return $this->fail('Pedido inválido.', 422);
+        }
+        $modo = $raw === '' ? null : $raw;
+        $before = $bindings->setMode($providerId, $id, $modo);
+        if ($before === null) {
+            return $this->fail('Vínculo não encontrado.', 404);
+        }
+        $this->audit($userId, $actor, 'net.binding.mode', (int) $before['id'], ['login' => $before['mkauth_login'], 'antes' => $before['modo_pppoe'], 'depois' => $modo]);
+
+        return Response::json(['ok' => true, 'message' => 'Modo atualizado.', 'data' => ['id' => (int) $before['id'], 'modo_pppoe' => $modo]], 200, self::NO_STORE);
+    }
+
+    /** ONUs que ja tem cliente, com a lista de clientes e o modo de cada um (para adicionar mais um / ajustar o modo). */
+    public function boundOnus(Request $request): Response
+    {
+        $ctx = $this->guard(true, $denied);
+        if ($ctx === null) {
+            return $denied;
+        }
+        [$providerId] = $ctx;
+        $bindings = new NetBindingRepository($this->database->pdo());
+        if (!$bindings->available()) {
+            return $this->fail('A tabela de vínculos ainda não foi criada neste ambiente (migration 045).', 409);
+        }
+        $st = $this->database->pdo()->prepare(
+            "SELECT DISTINCT o.id FROM net_onus o JOIN client_network_bindings b ON b.onu_id = o.id AND b.provider_id = o.provider_id AND b.ativo = 1
+              WHERE o.provider_id = ? AND o.removed_at IS NULL ORDER BY o.pon_index, o.onu_index, o.id"
+        );
+        $st->execute([$providerId]);
+        $ids = array_map('intval', $st->fetchAll(\PDO::FETCH_COLUMN));
+        $out = [];
+        foreach ($bindings->forOnus($providerId, $ids) as $onuId => $rows) {
+            $out[] = [
+                'onu' => ['id' => $onuId, 'pon' => (int) $rows[0]['pon_index'], 'onu_index' => (int) $rows[0]['onu_index']],
+                'cto' => $rows[0]['cto_node_id'] === null ? null : ['id' => (int) $rows[0]['cto_node_id'], 'nome' => (string) $rows[0]['cto_nome'], 'porta' => $rows[0]['porta_rotulo']],
+                'clientes' => array_map(fn (array $b): array => $this->bindingView($b), $rows),
+            ];
+        }
+
+        return Response::json(['ok' => true, 'data' => ['onus' => $out, 'modos' => NetBindingRepository::MODOS]], 200, self::NO_STORE);
     }
 
     // ---------------------------------------------------------------- apoio
@@ -361,7 +444,7 @@ final class NetBindingController
     {
         return [
             'id' => (int) $b['id'], 'login' => (string) $b['mkauth_login'], 'nome' => $b['cliente_nome'] === null ? null : (string) $b['cliente_nome'],
-            'origem' => (string) $b['origem'], 'confianca' => $b['confianca'], 'confirmado_por' => $b['confirmado_por'], 'confirmado_em' => $b['confirmado_em'],
+            'origem' => (string) $b['origem'], 'confianca' => $b['confianca'], 'modo_pppoe' => $b['modo_pppoe'] ?? null, 'confirmado_por' => $b['confirmado_por'], 'confirmado_em' => $b['confirmado_em'],
             'cto' => $b['cto_node_id'] === null ? null : ['id' => (int) $b['cto_node_id'], 'nome' => (string) $b['cto_nome'], 'porta' => $b['porta_rotulo']],
             'onu' => $b['onu_id'] === null ? null : ['id' => (int) $b['onu_id'], 'pon' => (int) $b['pon_index'], 'onu_index' => (int) $b['onu_index']],
         ];

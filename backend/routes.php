@@ -141,6 +141,8 @@ return static function (Router $router): void {
     $router->get('/api/rede-vinculos/sugestoes', [NetBindingController::class, 'suggestions'], 'api.net.bindings.suggestions');
     $router->post('/api/rede-vinculos/cto', [NetBindingController::class, 'bindCto'], 'api.net.bindings.cto');
     $router->post('/api/rede-vinculos/remover', [NetBindingController::class, 'remove'], 'api.net.bindings.remove');
+    $router->get('/api/rede-vinculos/onus', [NetBindingController::class, 'boundOnus'], 'api.net.bindings.onus');
+    $router->post('/api/rede-vinculos/modo', [NetBindingController::class, 'mode'], 'api.net.bindings.mode');
     $router->post('/api/rede-vinculos/onu', [NetBindingController::class, 'onu'], 'api.net.bindings.onu');
     $router->get('/logs', [SystemController::class, 'logs'], 'logs.index');
     $router->get('/configuracoes', [SettingsController::class, 'index'], 'settings.index');

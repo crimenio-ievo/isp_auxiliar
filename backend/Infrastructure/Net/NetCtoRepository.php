@@ -76,6 +76,7 @@ final class NetCtoRepository
                 'capacidade' => $capacity,
                 'portas' => ['total' => $total, 'ocupadas' => $used, 'livres' => max(0, $total - $used - $unavailable), 'indisponiveis' => $unavailable, 'em_ligacao' => $linked, 'com_cliente' => $clientPorts],
                 'clientes' => $clients['disponivel'] ? ($clients['clientes'][$id] ?? 0) : null,
+                'onus' => $clients['disponivel'] ? ($clients['onus'][$id] ?? 0) : null,
                 'origem' => $origins[$id] ?? null,
                 'observacao' => $n['notes'] === null ? '' : (string) $n['notes'],
                 'situacao' => (string) $n['lifecycle'],
@@ -162,13 +163,16 @@ final class NetCtoRepository
     /**
      * Vinculos cliente<->CTO (tabela client_network_bindings, quando existir).
      *
-     * @return array{disponivel:bool,clientes:array<int,int>,portas:array<int,int>}
+     * Por CTO: `clientes` = vinculos ativos (assinantes), `portas` = portas distintas ocupadas, `onus` = ONUs distintas ocupando portas.
+     * Com varios clientes na mesma ONU, clientes pode ser maior que portas e onus.
+     *
+     * @return array{disponivel:bool,clientes:array<int,int>,portas:array<int,int>,onus:array<int,int>}
      */
     public function clientPorts(int $providerId): array
     {
-        $out = ['disponivel' => false, 'clientes' => [], 'portas' => []];
+        $out = ['disponivel' => false, 'clientes' => [], 'portas' => [], 'onus' => []];
         try {
-            $st = $this->pdo->prepare('SELECT cto_node_id, COUNT(*) AS clientes, COUNT(cto_port_id) AS portas FROM client_network_bindings WHERE provider_id = ? AND ativo = 1 GROUP BY cto_node_id');
+            $st = $this->pdo->prepare('SELECT cto_node_id, COUNT(*) AS clientes, COUNT(DISTINCT cto_port_id) AS portas, COUNT(DISTINCT onu_id) AS onus FROM client_network_bindings WHERE provider_id = ? AND ativo = 1 GROUP BY cto_node_id');
             $st->execute([$providerId]);
         } catch (\Throwable) {
             return $out;
@@ -176,6 +180,7 @@ final class NetCtoRepository
         $out['disponivel'] = true;
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $out['clientes'][(int) $r['cto_node_id']] = (int) $r['clientes'];
+            $out['onus'][(int) $r['cto_node_id']] = (int) $r['onus'];
             $out['portas'][(int) $r['cto_node_id']] = (int) $r['portas'];
         }
 

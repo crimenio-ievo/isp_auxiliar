@@ -7,6 +7,8 @@
   var API = { tree: app.dataset.apiTree, onu: app.dataset.apiOnu, events: app.dataset.apiEvents };
   var URLS = { client: app.dataset.clientUrl || '', cto: app.dataset.ctoUrl || '' };
   function clientLink(c) { var a = el('a', '', c.nome || c.login); a.href = URLS.client + '?login=' + encodeURIComponent(c.login); a.title = 'Abrir o perfil do cliente'; a.addEventListener('click', function (e) { e.stopPropagation(); }); return a; }
+var MODO = { pppoe_na_onu: 'PPPoE na ONU', atras_da_onu: 'atrás da ONU' };
+  function modoText(m) { return m ? (MODO[m] || m) : 'modo não verificado'; }
   function ctoLink(c, text) { var a = el('a', '', text || c.nome); a.href = URLS.cto + '?id=' + encodeURIComponent(c.id); a.title = 'Abrir a ficha da CTO'; a.addEventListener('click', function (e) { e.stopPropagation(); }); return a; }
   var $ = function (id) { return document.getElementById(id); };
   var NS = 'http://www.w3.org/2000/svg';
@@ -200,7 +202,13 @@
     else if (k === 'tx') { td.textContent = o.tx_dbm === null ? 'sem leitura' : o.tx_dbm.toFixed(2); }
     else if (k === 'temp') { td.textContent = o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1); }
     else if (k === 'dist') { td.textContent = o.distancia_m === null ? '—' : '≈ ' + (o.distancia_m / 1000).toFixed(2) + ' km'; if (o.distancia_origem) { td.title = o.distancia_origem; } }
-    else if (k === 'cliente') { if (o.cliente === null) { td.textContent = 'sem vínculo'; td.className = 'rf-muted'; } else { td.appendChild(clientLink(o.cliente)); } }
+    else if (k === 'cliente') {
+      if (o.cliente === null) { td.textContent = 'sem vínculo'; td.className = 'rf-muted'; }
+      else {   // primeiro cliente + "+N" quando a ONU tem mais de um (a ficha da ONU lista todos)
+        td.appendChild(clientLink(o.cliente));
+        if (o.n_clientes > 1) { var more = el('span', 'rf-muted', ' +' + (o.n_clientes - 1)); more.title = o.clientes.map(function (c) { return c.nome || c.login; }).join(', '); td.appendChild(more); }
+      }
+    }
     else if (k === 'cto') {
       if (o.cto === null) { td.textContent = state.tree.fontes.cto ? 'sem CTO' : 'ainda não lido'; td.className = 'rf-muted'; }
       else { td.appendChild(ctoLink(o.cto, o.cto.nome + (o.cto.porta ? ' · ' + o.cto.porta : ''))); }
@@ -440,7 +448,11 @@
     row('Tx da ONU', dbm(o.tx_dbm)); row('Temperatura', o.temp_c === null ? 'sem leitura' : num(o.temp_c, 1) + ' °C');
     row('Distância', o.distancia_m === null ? '—' : '≈ ' + num(o.distancia_m / 1000, 2) + ' km (estimada pelo RTT)');
     row('Sinal recebido na OLT', d.onu.olt_rx_texto);
-    g.appendChild(el('dt', '', 'Cliente')); var ddc = el('dd'); if (d.cliente) { ddc.appendChild(clientLink(d.cliente)); } else { ddc.textContent = d.cliente_texto; } g.appendChild(ddc);
+    g.appendChild(el('dt', '', d.n_clientes > 1 ? 'Clientes (' + d.n_clientes + ')' : 'Cliente')); var ddc = el('dd');
+    if (d.clientes && d.clientes.length) {
+      d.clientes.forEach(function (c) { var line = el('div'); line.appendChild(clientLink(c)); line.appendChild(el('span', 'rf-muted', ' · ' + modoText(c.modo_pppoe))); ddc.appendChild(line); });
+    } else { ddc.textContent = d.cliente_texto; }
+    g.appendChild(ddc);
     g.appendChild(el('dt', '', 'CTO')); var ddt = el('dd'); if (d.cto) { ddt.appendChild(ctoLink(d.cto, d.cto_texto)); } else { ddt.textContent = d.cto_texto; } g.appendChild(ddt);
     row('Última leitura', fmtDT(o.rx_medido_em));
     body.appendChild(g);

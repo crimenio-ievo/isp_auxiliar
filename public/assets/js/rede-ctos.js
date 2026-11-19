@@ -76,7 +76,7 @@
       if (c.portas.total > 0) {
         var bar = el('span', 'rf-stacked rc-bar'); var fill = el('span', 'rf-fill--ok'); fill.style.width = Math.round(100 * c.portas.ocupadas / c.portas.total) + '%'; bar.appendChild(fill); pt.appendChild(bar);
       }
-      add(el('td', c.clientes === null ? 'rf-muted' : null, c.clientes === null ? 'ainda não lido' : c.clientes));
+      add(el('td', c.clientes === null ? 'rf-muted' : null, c.clientes === null ? 'ainda não lido' : (typeof c.onus === 'number' && c.onus !== c.clientes ? c.clientes + ' · ' + c.onus + ' ONU(s)' : c.clientes)));   // clientes (assinantes) x ONUs ocupando portas
       var act = add(el('td')), box = el('div', 'rc-rowactions');
       var fi = el('a', 'rc-btn', 'Ficha'); fi.href = app.dataset.fichaUrl + '?id=' + c.id; box.appendChild(fi);
       if (app.dataset.mapUrl) { var map = el('a', 'rc-btn', 'Ver no mapa'); map.href = app.dataset.mapUrl + '?no=' + c.id; box.appendChild(map); }

@@ -29,13 +29,17 @@ final class NetSearchReader
         $mac=preg_replace('/[\s:.\-]/','',$query);
         if (preg_match('/^[a-fA-F0-9]{4,12}$/D',$mac)) {
             $bind=$this->bindingsAvailable();
-            $s=$this->pdo->prepare("SELECT o.id,o.onu_index,o.pon_index,n.name".($bind?",b.mkauth_login,b.cliente_nome,b.cto_node_id,c.name AS cto":",NULL AS mkauth_login,NULL AS cliente_nome,NULL AS cto_node_id,NULL AS cto")."
-                FROM net_onus o JOIN net_devices d ON d.id=o.device_id JOIN map_nodes n ON n.id=d.map_node_id"
-                .($bind?" LEFT JOIN client_network_bindings b ON b.onu_id=o.id AND b.provider_id=o.provider_id AND b.ativo=1 LEFT JOIN map_nodes c ON c.id=b.cto_node_id AND c.provider_id=b.provider_id":"")."
+            // Varios clientes por ONU: uma linha por ONU, com o primeiro cliente e a contagem (subconsultas; nada de JOIN que duplique a ONU).
+            $first=static fn(string $col):string=>"(SELECT b.$col FROM client_network_bindings b WHERE b.onu_id=o.id AND b.provider_id=o.provider_id AND b.ativo=1 ORDER BY b.id LIMIT 1)";
+            $s=$this->pdo->prepare("SELECT o.id,o.onu_index,o.pon_index,n.name".($bind?",".$first('mkauth_login')." AS mkauth_login,".$first('cliente_nome')." AS cliente_nome,(SELECT b.cto_node_id FROM client_network_bindings b WHERE b.onu_id=o.id AND b.provider_id=o.provider_id AND b.ativo=1 AND b.cto_node_id IS NOT NULL ORDER BY b.id LIMIT 1) AS cto_node_id,(SELECT COUNT(*) FROM client_network_bindings b WHERE b.onu_id=o.id AND b.provider_id=o.provider_id AND b.ativo=1) AS n_clientes":",NULL AS mkauth_login,NULL AS cliente_nome,NULL AS cto_node_id,0 AS n_clientes")."
+                FROM net_onus o JOIN net_devices d ON d.id=o.device_id JOIN map_nodes n ON n.id=d.map_node_id
                 WHERE o.provider_id=? AND d.provider_id=? AND n.provider_id=? AND o.removed_at IS NULL AND o.onu_identifier LIKE ? ORDER BY o.id LIMIT 5");
             $s->execute([$providerId,$providerId,$providerId,'%'.strtoupper($mac).'%']);
             foreach($s->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $detail=$r['mkauth_login']!==null?'cliente '.($r['cliente_nome']?:$r['mkauth_login']).($r['cto']!==null?' · CTO '.$r['cto']:''):null;
+                $cto=null;
+                if ($r['cto_node_id']!==null) { $c=$this->pdo->prepare('SELECT name FROM map_nodes WHERE id=? AND provider_id=?'); $c->execute([$r['cto_node_id'],$providerId]); $cto=$c->fetchColumn()?:null; }
+                $more=(int)$r['n_clientes']>1?' +'.((int)$r['n_clientes']-1):'';
+                $detail=$r['mkauth_login']!==null?'cliente '.($r['cliente_nome']?:$r['mkauth_login']).$more.($cto!==null?' · CTO '.$cto:''):null;
                 $title='ONU '.$r['onu_index'].' · PON '.$r['pon_index'].' · OLT '.$r['name'];
                 if (!$readOnly) { $add('onu',$title,'/rede-fibra?onu='.$r['id'],$detail); continue; }
                 if ($r['cto_node_id']!==null) { $add('onu',$title,'/rede-ctos/ficha?id='.$r['cto_node_id'],$detail); }

@@ -25,6 +25,10 @@ ob_start();
 <div class="rf rc" id="vc-app"
      data-api="<?= $e(Url::to('/api/rede-vinculos/sugestoes')); ?>"
      data-api-onu="<?= $e(Url::to('/api/rede-vinculos/onu')); ?>"
+     data-api-onus="<?= $e(Url::to('/api/rede-vinculos/onus')); ?>"
+     data-api-modo="<?= $e(Url::to('/api/rede-vinculos/modo')); ?>"
+     data-api-remove="<?= $e(Url::to('/api/rede-vinculos/remover')); ?>"
+     data-api-search="<?= $e(Url::to('/api/rede-vinculos/clientes')); ?>"
      data-client-url="<?= $e(Url::to('/clientes/detalhe')); ?>"
      data-onu-url="<?= $e(Url::to('/rede-fibra')); ?>"
      data-csrf="<?= $e((string) ($csrf ?? '')); ?>">
@@ -43,6 +47,18 @@ ob_start();
             </table>
         </div>
         <p class="rf-empty" id="vc-empty" hidden>Nenhuma ONU sem vínculo com sugestão.</p>
+    </section>
+
+    <section class="card rc-list" aria-label="ONUs já vinculadas" id="vb-section">
+        <h2>ONUs já vinculadas</h2>
+        <p class="rc-planned">Uma ONU/ONT com várias portas LAN pode atender mais de um cliente (cada um disca PPPoE no próprio roteador). Adicione outro cliente a uma ONU e registre o modo; sem escolher, o modo fica “não verificado”.</p>
+        <div class="rf-tablewrap rc-tablewrap">
+            <table class="rf-table rc-table" id="vb-table">
+                <thead><tr><th>ONU</th><th>CTO · porta</th><th>Clientes (modo PPPoE)</th><th>Adicionar cliente</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <p class="rf-empty" id="vb-empty" hidden>Nenhuma ONU vinculada ainda.</p>
     </section>
 </div>
 <script src="<?= $e(Url::asset('js/rede-vinculos.js?v=' . $v('js/rede-vinculos.js'))); ?>" defer></script>
